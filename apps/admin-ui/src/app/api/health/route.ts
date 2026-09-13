@@ -1,40 +1,68 @@
-const services = [
-  { name: "API gateway", url: process.env.API_URL ?? "http://127.0.0.1:3000", path: "/ready" },
-  {
-    name: "Chain indexer",
-    // Optional separate origin for private health checks (empty disables the probe).
-    url: process.env.INDEXER_HEALTH_ORIGIN ?? process.env.INDEXER_URL ?? "http://127.0.0.1:42069",
-    path: "/health",
-  },
-  {
-    name: "Polymarket ingestor",
-    url: process.env.POLYMARKET_INGESTOR_URL ?? "http://127.0.0.1:42073",
-    path: "/health",
-  },
-  {
-    name: "Reconciler",
-    url: process.env.RECONCILIATION_URL ?? process.env.INDEXER_URL ?? "http://127.0.0.1:42069",
-    path: "/reconciliation",
-  },
-];
+import { SOLANA_API_ORIGIN } from "@conditional-stocks/shared/endpoints";
+import { serviceOrigin } from "@/lib/upstream";
+
 export async function GET() {
+  // Read overrides per request, like the gateway/indexer proxies. The public
+  // deployment multiplexes health routes; /health alone identifies the API.
+  const apiOrigin = process.env.API_URL ?? SOLANA_API_ORIGIN;
+  const indexerOrigin =
+    process.env.INDEXER_HEALTH_ORIGIN ??
+    process.env.INDEXER_URL ??
+    SOLANA_API_ORIGIN;
+  const isPublicOrigin = (origin: string) =>
+    origin.replace(/\/$/, "") === SOLANA_API_ORIGIN;
+  const polymarketOrigin =
+    process.env.POLYMARKET_INGESTOR_URL ??
+    (isPublicOrigin(apiOrigin) ? SOLANA_API_ORIGIN : "");
+  const services = [
+    { name: "API gateway", url: apiOrigin, path: "/ready" },
+    {
+      name: "Chain indexer",
+      // Optional separate origin for private health checks (empty disables the probe).
+      url: indexerOrigin,
+      path: isPublicOrigin(indexerOrigin) ? "/indexer-health" : "/health",
+    },
+    {
+      name: "Polymarket ingestor",
+      url: polymarketOrigin,
+      path: isPublicOrigin(polymarketOrigin) ? "/polymarket-health" : "/health",
+    },
+    {
+      name: "Reconciler",
+      // Reconciliation is deliberately private. /ready includes its readiness gate.
+      url: process.env.RECONCILIATION_URL ?? "",
+      path: "/reconciliation",
+    },
+  ];
   const results = await Promise.all(
     services.map(async (service) => {
       if (!service.url)
-        return { detail: "Health URL not configured", name: service.name, status: "unknown" };
+        return {
+          detail: "Health URL not configured",
+          name: service.name,
+          status: "unknown",
+        };
       const started = Date.now();
       try {
-        const response = await fetch(new URL(service.path, service.url), {
-          cache: "no-store",
-          redirect: "error",
-          signal: AbortSignal.timeout(2_500),
-        });
+        const response = await fetch(
+          new URL(service.path, serviceOrigin(service.url, service.name)),
+          {
+            cache: "no-store",
+            redirect: "error",
+            signal: AbortSignal.timeout(2_500),
+          },
+        );
         const body = await response.json().catch(() => null);
         return {
           detail: body,
           latencyMs: Date.now() - started,
           name: service.name,
-          status: response.ok && body && body.healthy !== false ? "healthy" : "degraded",
+          status:
+            response.ok &&
+            body &&
+            (body.healthy === true || body.status === "ok")
+              ? "healthy"
+              : "degraded",
         };
       } catch {
         return {

@@ -64,7 +64,7 @@ export function PositionActions({
       collateral === "Stock"
         ? market.baseTokenDecimals
         : market.quoteTokenDecimals,
-    symbol = collateral === "Stock" ? market.ticker : "USDG";
+    symbol = collateral === "Stock" ? market.ticker : "USDC";
   const yes = BigInt(
       collateral === "Stock" ? position.stockYes : position.quoteYes,
     ),

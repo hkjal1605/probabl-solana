@@ -77,7 +77,7 @@ function Navigation({ mobile = false }: { mobile?: boolean }) {
 }
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const admin = useAdmin();
-  const allowed = admin.role !== "blocked";
+  const allowed = admin.role === "operator";
   return (
     <div className="min-h-svh lg:grid lg:grid-cols-[250px_1fr]">
       <aside className="sticky top-0 hidden h-svh border-r bg-sidebar p-5 lg:flex lg:flex-col">
@@ -91,8 +91,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <div className="mt-auto rounded-xl border bg-card p-3 text-xs">
           <p className="font-semibold">Authority boundary</p>
           <p className="mt-1 leading-5 text-muted-foreground">
-            This UI prepares and verifies actions. Roles and Solana signatures remain enforced outside
-            it.
+            This UI prepares and verifies actions. Roles and Solana signatures remain enforced
+            outside it.
           </p>
         </div>
       </aside>
@@ -150,6 +150,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               variant="brand"
               className="size-10 px-0 sm:w-auto sm:px-4"
               aria-label="Connect operator"
+              disabled={admin.restoring}
               onClick={() =>
                 admin
                   .connect()
@@ -163,7 +164,19 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </Button>
           )}
         </header>
-        {!admin.account || !admin.token || !allowed || admin.chainId !== adminConfig.chainId ? (
+        {admin.persistenceError && (
+          <p role="status" className="border-b px-5 py-3 text-sm text-warning">
+            {admin.persistenceError}
+          </p>
+        )}
+        {admin.restoring ? (
+          <main
+            className="flex min-h-[75svh] items-center justify-center px-5 text-sm text-muted-foreground"
+            role="status"
+          >
+            Restoring wallet connection and checking operator roles…
+          </main>
+        ) : !admin.account || !admin.token || !allowed || admin.chainId !== adminConfig.chainId ? (
           <main className="mx-auto flex min-h-[75svh] max-w-xl flex-col items-center justify-center px-5 text-center">
             <ClipboardCheck className="size-9 text-brand-strong" />
             <h1 className="mt-5 text-3xl font-semibold tracking-[-0.04em]">
@@ -171,27 +184,37 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </h1>
             <p className="mt-3 leading-7 text-muted-foreground">
               Connect an authorized operator wallet and sign a session challenge. Frontend role
-              checks are only a convenience; the API and contracts enforce authority.
+              checks are only a convenience; the API and contracts enforce authority. Your wallet
+              reconnects on refresh, and sign-in is remembered for four hours unless you disconnect.
             </p>
+            {admin.networkError ? (
+              <p className="mt-6 text-sm text-destructive" role="alert">
+                {admin.networkError}
+              </p>
+            ) : null}
             {admin.role === "blocked" ? (
               <Badge className="mt-6" variant="destructive">
-                {adminConfig.marketAdmin
-                  ? "Connect an authorized operator wallet"
-                  : "MARKET_ADMIN address is not configured for this UI"}
+                This wallet has no operator role in the configured Solana deployment
               </Badge>
-            ) : admin.account && admin.chainId !== adminConfig.chainId ? (
+            ) : admin.account &&
+              (admin.role === "unverified" || admin.chainId !== adminConfig.chainId) ? (
               <Button
                 className="mt-6"
                 variant="brand"
+                disabled={admin.checkingNetwork}
                 onClick={() =>
                   admin
                     .ensureNetwork()
                     .catch((error) =>
-                      toast.error(error instanceof Error ? error.message : "Network switch failed"),
+                      toast.error(
+                        error instanceof Error ? error.message : "Network verification failed",
+                      ),
                     )
                 }
               >
-                Switch to {adminConfig.chainName}
+                {admin.checkingNetwork
+                  ? "Checking on-chain operator roles…"
+                  : `Verify ${adminConfig.chainName} connection`}
               </Button>
             ) : admin.account ? (
               <Button

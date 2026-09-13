@@ -618,7 +618,11 @@ export class SolanaClient {
         : null,
     };
   }
-  async prepareTransaction(owner: PublicKey, value: Envelope) {
+  async prepareTransaction(
+    owner: PublicKey,
+    value: Envelope,
+    options: { pinWalletFees?: boolean } = {},
+  ) {
     await this.assertNetwork();
     const latest = await this.connection.getLatestBlockhash("confirmed");
     const instructions = unwrap(value, this.program);
@@ -637,7 +641,10 @@ export class SolanaClient {
     // guards can exceed the default 200k CU budget for multi-maker settlement.
     // Deterministic local limit only: never accept an API-provided CU price or
     // add a priority fee. The reviewed program instructions remain unchanged.
-    if (placementLegs > 0)
+    // Strict-review admin transactions must declare their budget before signing:
+    // injected wallets otherwise may insert priority-fee instructions themselves.
+    // Pinning retains our zero-priority-fee policy; it does not waive base fees/rent.
+    if (placementLegs > 0 || options.pinWalletFees)
       instructions.unshift(
         ComputeBudgetProgram.setComputeUnitLimit({
           units: Math.min(
@@ -645,6 +652,12 @@ export class SolanaClient {
             200_000 * instructions.length + 100_000 * placementLegs,
           ),
         }),
+      );
+    if (options.pinWalletFees)
+      instructions.splice(
+        1,
+        0,
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 0n }),
       );
     const message = new TransactionMessage({
       payerKey: owner,

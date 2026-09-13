@@ -27,6 +27,8 @@ import {
 import { logger } from "./logger.ts";
 import { requestLogging } from "@conditional-stocks/shared/http";
 import { mountSolanaAdmin } from "./solana-admin.ts";
+import { JupiterSpotPrices, jupiterEnvironment } from "./jupiter.ts";
+import { mountSpotPrices } from "./spot-prices.ts";
 
 const required = (name: string) => {
   const v = process.env[name];
@@ -57,6 +59,10 @@ const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 const random = () => randomBytes(32).toString("hex");
 const app = new Hono();
 app.use("*", requestLogging(logger));
+mountSpotPrices(
+  app,
+  new JupiterSpotPrices(client.deployment.genesisHash, jupiterEnvironment(process.env)),
+);
 app.use("*", async (c, next) =>
   bodyLimit({
     maxSize: /^\/v1\/admin\/evidence\/(creation|resolution)\/prepare$/.test(

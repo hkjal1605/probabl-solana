@@ -514,11 +514,16 @@ export async function exportEnvironment(
     lines({
       API_URL: api,
       INDEXER_URL: indexer,
+      NEXT_PUBLIC_API_URL: api,
       NEXT_PUBLIC_SOLANA_RPC_URL: browserRpc,
       NEXT_PUBLIC_SOLANA_PROGRAM_ID: plan.programId,
       NEXT_PUBLIC_SOLANA_CONFIG: plan.config,
       NEXT_PUBLIC_SOLANA_GENESIS_HASH: plan.genesisHash,
       NEXT_PUBLIC_SOLANA_CLUSTER_NAME: "Solana Devnet (mock assets)",
+      // The pipeline verifies every staging role matches this deployer before export.
+      // These are display hints only; the admin UI verifies live on-chain roles.
+      NEXT_PUBLIC_SOLANA_MARKET_ADMIN: plan.deployer,
+      NEXT_PUBLIC_SOLANA_RESOLUTION_ADMIN: plan.deployer,
       NEXT_PUBLIC_APP_URL: "http://localhost:3001",
     }),
   );

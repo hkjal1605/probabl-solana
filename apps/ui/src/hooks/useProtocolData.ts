@@ -4,15 +4,21 @@ import { useWallet } from "@/components/providers/WalletProvider";
 import { protocolConfig } from "@/config/protocol";
 import { api } from "@/lib/api/client";
 import type { MarketView } from "@/lib/api/types";
+import { withMarketSpotPrices } from "@/lib/api/spot-prices";
+import { useSpotPrices } from "./useSpotPrices";
 
 export function useMarkets(initial: MarketView[] = []) {
   const query = useQuery({
-    queryKey: ["markets", protocolConfig.chainId],
+    queryKey: ["markets", protocolConfig.genesisHash, protocolConfig.config],
     queryFn: ({ signal }) => api.markets(signal),
     ...(initial.length ? { initialData: { markets: initial } } : {}),
     refetchInterval: 10_000,
   });
-  return { ...query, markets: query.data?.markets ?? initial };
+  const spot = useSpotPrices(query.data?.markets ?? initial);
+  return {
+    ...query,
+    markets: withMarketSpotPrices(query.data?.markets ?? initial, spot.data, spot.now, spot.isError),
+  };
 }
 export function useOrders() {
   const { account } = useWallet();

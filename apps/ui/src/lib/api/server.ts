@@ -5,6 +5,7 @@ import {
   formatTokenAmount,
   type MarketUnits,
 } from "@conditional-stocks/domain";
+import { marketTokenDisplay } from "../tokens/devnet";
 
 import { expireProbability, parseProbabilityMessage } from "./probability";
 import type {
@@ -168,7 +169,12 @@ async function liveMarkets(): Promise<MarketView[]> {
         question: text(metadata.question, `Conditional market ${id.slice(0, 8)}`),
         quoteToken: text(market.quoteToken),
         residual: null,
-        ticker: text(record(metadata.asset).symbol, "STOCK"),
+        ...marketTokenDisplay(
+          text(market.baseToken),
+          text(market.quoteToken),
+          process.env.NEXT_PUBLIC_SOLANA_GENESIS_HASH ?? "",
+          text(record(metadata.asset).symbol, "STOCK"),
+        ),
         tradingOpen: isoSeconds(market.tradingOpen),
         yes,
       };

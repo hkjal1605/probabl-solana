@@ -77,6 +77,20 @@ test("local placement preparation budgets CPI guards without accepting remote pr
           .units,
       ).toBe(200_000 + 100_000 * legs);
     }
+    const pinned = await f.client.prepareTransaction(f.owner, envelope([ix]), {
+      pinWalletFees: true,
+    });
+    const pinnedInstructions = TransactionMessage.decompile(
+      pinned.transaction.message,
+    ).instructions;
+    expect(pinnedInstructions).toHaveLength(3);
+    expect(
+      ComputeBudgetInstruction.decodeSetComputeUnitLimit(pinnedInstructions[0]!).units,
+    ).toBe(200_000 + 100_000 * legs);
+    expect(
+      ComputeBudgetInstruction.decodeSetComputeUnitPrice(pinnedInstructions[1]!).microLamports,
+    ).toBe(0n);
+    expect(pinnedInstructions[2]!.data.equals(original)).toBe(true);
   }
   const capped = await f.client.prepareTransaction(
     f.owner,

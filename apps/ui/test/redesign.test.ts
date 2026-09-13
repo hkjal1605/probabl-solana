@@ -253,6 +253,7 @@ describe("honest market, portfolio and evidence presentation", () => {
       limitPriceRawX18: "123456789",
     };
     const csv = orderHistoryCsv([order], [market]);
+    expect(csv.split("\r\n")[0]).toContain('"Limit (USDC)"');
     expect(csv).toContain("1.000000000000000001");
     expect(csv).toContain(formatPriceRawX18(123456789n, market));
     expect(csv).toContain("Updated block");

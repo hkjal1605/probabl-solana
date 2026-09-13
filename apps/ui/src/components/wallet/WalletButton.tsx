@@ -18,6 +18,7 @@ import { shortAddress } from "@/lib/format/display";
 
 export function WalletButton({ compact = false }: { compact?: boolean }) {
   const wallet = useWallet();
+  const connecting = wallet.restoring || wallet.status === "connecting";
   if (wallet.account) {
     const wrongNetwork = wallet.chainId !== protocolConfig.chainId;
     return (
@@ -65,6 +66,16 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
               </Badge>
             </div>
           </div>
+          {wallet.persistenceError && (
+            <p role="status" className="text-sm text-warning">
+              {wallet.persistenceError}
+            </p>
+          )}
+          {wallet.error && (
+            <p role="alert" className="text-sm text-danger">
+              {wallet.error}
+            </p>
+          )}
           {wrongNetwork && (
             <Button
               variant="brand"
@@ -78,7 +89,7 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
           )}
           {!wallet.sessionToken && (
             <Button
-              disabled={wallet.status === "signing" || wrongNetwork}
+              disabled={wallet.status === "signing" || connecting || wrongNetwork}
               onClick={() =>
                 wallet
                   .authenticate()
@@ -91,7 +102,7 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
               {wallet.status === "signing" ? "Signing in…" : "Sign in to trade"}
             </Button>
           )}
-          <Button variant="ghost" onClick={wallet.disconnect}>
+          <Button variant="ghost" onClick={() => wallet.disconnect()}>
             <LogOut />
             Disconnect locally
           </Button>
@@ -104,11 +115,20 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
       variant="brand"
       size={compact ? "icon" : "default"}
       className={compact ? undefined : "px-2 sm:px-4"}
-      onClick={() => wallet.connect().catch(() => undefined)}
-      aria-label="Connect wallet"
+      disabled={connecting}
+      onClick={() =>
+        wallet
+          .connect()
+          .catch((cause) =>
+            toast.error(cause instanceof Error ? cause.message : "Wallet connection failed"),
+          )
+      }
+      aria-label={connecting ? "Restoring wallet connection" : "Connect wallet"}
     >
       <WalletCards />
-      {!compact && <span className="hidden sm:inline">Connect wallet</span>}
+      {!compact && (
+        <span className="hidden sm:inline">{connecting ? "Connecting…" : "Connect wallet"}</span>
+      )}
     </Button>
   );
 }

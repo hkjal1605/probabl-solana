@@ -26,7 +26,7 @@ describe("order form math", () => {
       expect(() => createOrder({ ...form, maxFeeBps: value })).toThrow("Maximum fee");
     }
   });
-  test("uses exact raw-unit ratio math for 18-decimal stocks and 6-decimal USDG", () => {
+  test("uses exact raw-unit ratio math for 18-decimal stocks and 6-decimal USDC", () => {
     expect(previewOrder("2.5", "123.456", form)).toEqual({
       cost: 308.64,
       costRaw: "308640000",

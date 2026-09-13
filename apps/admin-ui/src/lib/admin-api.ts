@@ -3,9 +3,13 @@ import type {
   EvidenceEnvelope,
   ResolutionEvidencePacket,
 } from "@conditional-stocks/solana-client/evidence";
+
 export type { AdminPreview } from "@conditional-stocks/solana-client/admin";
+
 import type { AdminPreview } from "@conditional-stocks/solana-client/admin";
+import { assertRequestSession } from "./admin-session";
 import { logger } from "./logger";
+import { parseMarketSlug } from "./polymarket-slug";
 
 export const SESSION_EXPIRED_EVENT = "probabl:admin-session-expired";
 export class AdminApiError extends Error {
@@ -60,6 +64,14 @@ export async function adminRequest<T>(
   init: RequestInit = {},
 ): Promise<T> {
   if (!token) throw new AdminApiError("Sign in with an operator wallet first", 401);
+  if (typeof window !== "undefined") {
+    try {
+      assertRequestSession(token);
+    } catch {
+      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: token }));
+      throw new AdminApiError("Your four-hour operator session expired. Sign in again.", 401);
+    }
+  }
   const headers = new Headers(init.headers);
   headers.set("authorization", `Bearer ${token}`);
   if (init.body) headers.set("content-type", "application/json");
@@ -70,6 +82,13 @@ export async function adminRequest<T>(
       window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: token }));
     throw error;
   }
+}
+
+export function fetchMarketMetadata<T>(token: string, input: string): Promise<T> {
+  return adminRequest<T>(token, "admin/polymarket/metadata/fetch-by-slug", {
+    method: "POST",
+    body: JSON.stringify({ marketSlug: parseMarketSlug(input) }),
+  });
 }
 
 export interface EvidenceView {

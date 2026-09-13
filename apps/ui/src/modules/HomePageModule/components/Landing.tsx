@@ -55,7 +55,7 @@ export function Landing({ initialMarkets }: { initialMarkets: MarketView[] }) {
               label="open markets"
               value={String(markets.filter((m) => m.lifecycle === "open").length)}
             />
-            <Metric label="collateral" value="USDG" />
+            <Metric label="collateral" value="USDC" />
           </div>
           {query.isError && (
             <DataError

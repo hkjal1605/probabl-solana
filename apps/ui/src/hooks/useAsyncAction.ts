@@ -1,13 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useWallet } from "@/components/providers/WalletProvider";
 import { ApiError } from "@/lib/api/client";
 import { createActionScope } from "@/lib/trading/action-scope";
 
 /** Serializes wallet prompts and invalidates asynchronous work after identity/form changes or unmount. */
 export function useAsyncAction(context: string) {
-  const wallet = useWallet();
   const [scope] = useState(() => createActionScope(context));
   const mounted = useRef(true);
   scope.update(context);
@@ -27,7 +25,8 @@ export function useAsyncAction(context: string) {
     try {
       await action(operation.assertCurrent);
     } catch (error) {
-      if (error instanceof ApiError && error.status === 401) wallet.invalidateSession();
+      // The API client invalidates only the token that received a 401. A late
+      // response from an older session must not log out a newer sign-in.
       if (mounted.current)
         toast.error(
           error instanceof ApiError && error.status === 401

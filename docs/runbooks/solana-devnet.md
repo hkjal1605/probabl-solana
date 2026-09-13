@@ -6,6 +6,10 @@ initializes the protocol configuration. It does **not** create markets, deposit
 wallet balances into protocol custody, deploy EC2 services, or approve production
 use. Existing migration/security limitations still apply.
 
+The deployed backend HTTPS origin is `https://api-solana.probabl.trade` for both
+`DEVNET_API_URL` and `DEVNET_INDEXER_URL`. EC2, Cloudflare DNS, Certbot renewal and
+local UI configuration are documented in the [backend runbook](../../ops/ec2/solana/README.md).
+
 ## Wallet and prerequisites
 
 Use a dedicated Devnet wallet, never a wallet that holds real assets. Put its
@@ -205,12 +209,62 @@ Set `DEVNET_API_URL` and `DEVNET_INDEXER_URL` to your EC2 HTTPS origins or local
 tunnel origins, then rerun `devnet:verify` to regenerate exports. Configure
 `DEVNET_UI_ORIGINS` for the actual local public/admin browser origins.
 
+For this deployed instance, `apps/admin-ui/.env.example` contains the public
+Devnet program/config/genesis and HTTPS backend settings. Copy it to
+`apps/admin-ui/.env.local` if that file does not exist, then run
+`bun run dev:admin-ui` from the repository root. Restart the UI after changing
+public settings: Next embeds `NEXT_PUBLIC_*` values in the browser bundle.
+Never load the private root `.env.devnet` into a UI process. An explicit shell
+or `--env-file` setting takes precedence over `.env.local`; do not mix the local
+validator's `.local/solana.env` with this Devnet configuration.
+
+Operator access is checked against the live Solana configuration account after
+verifying the genesis hash and account owner. The public market/resolution admin
+addresses are hints only; they do not grant access. A missing config/genesis or
+failed RPC lookup must be corrected/retried, not treated as a blocked wallet.
+
+The admin creation and resolution forms accept a **Polymarket market slug**
+(for example `clarity-act-signed-into-law-in-2026`), not a Gamma ID or full URL.
+For multi-market events, use the individual market's slug; the UI does not guess
+which child market an event refers to. The admin UI's server-side gateway uses
+Gamma's `/markets/slug/{slug}` endpoint, then submits the returned canonical ID
+to the existing authenticated API/ingestor metadata flow. It verifies that the
+saved snapshot's slug, Gamma ID, condition, and outcome mapping match the lookup.
+Operator credentials are sent only to our API, never to Gamma. The EC2 API and
+ingestor still store canonical IDs and need no change for this UI adapter.
+
 `DEVNET_BROWSER_RPC_URL` defaults to the public Devnet RPC even if the backend
 uses a private RPC provider. Anything assigned to it is exposed in the browser;
 use a browser-restricted public credential if your provider requires one.
 
 These generated files are **base configuration**, not a complete EC2 deployment.
-Use a separate server-owned env file for `DATABASE_URL`, evidence persistence/
+For this Devnet setup, `.env.devnet` contains the private `DATABASE_URL` with a
+password placeholder for the Tokyo Aurora PostgreSQL cluster. Replace
+`REPLACE_WITH_URL_ENCODED_DB_PASSWORD` with the URL-encoded database password.
+Port 5432 is assumed because the supplied connection snippet specified port 0;
+confirm the actual port in the cluster's connectivity settings if it is custom.
+The URL enables `sslmode=verify-full` using the checked-in public Tokyo RDS CA
+bundle under `certs/`. Its absolute `sslrootcert` path must match the host running
+the service. No AWS SDK/region setting is needed for this password-based `pg`
+connection.
+
+Once the password is filled and network access to RDS is available, a read-only
+TLS/authentication check can be run from the repository root:
+
+```sh
+bun --env-file=.env.devnet packages/db/scripts/verify-connection.ts
+```
+
+Do not use `solana:dev` for RDS; that runner is localhost-only. Supply the database
+setting to the API/indexer alongside the generated non-wallet `backend.env`
+settings using a separate server-owned env file. Do not copy the entire
+`.env.devnet` into backend processes: it also contains the deployer wallet key.
+Starting these services initializes/writes database tables; the connection check
+above does not. Run services only against the intended Devnet database, not a
+production database or a test runner's disposable database.
+
+On EC2, use a separate server-owned env file for `DATABASE_URL` (with the server's
+certificate path), evidence persistence/
 `EVIDENCE_PUBLIC_BASE_URL`, and any optional reference-data service secrets. The
 generated files are overwritten on verification, so do not append server secrets
 to them. Run native `start:api` and `start:indexer`, not the copied legacy EVM

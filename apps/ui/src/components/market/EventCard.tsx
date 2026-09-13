@@ -4,6 +4,7 @@ import type { MarketView } from "@/lib/api/types";
 import { formatNumber, formatTime } from "@/lib/format/display";
 import { compact, impactPercent, marketCategory, midpoint } from "@/lib/markets/presentation";
 import { ImpactBar } from "./ImpactBar";
+import { TokenIdentity } from "./TokenIdentity";
 
 export function EventCard({ markets }: { markets: MarketView[] }) {
   const market = markets[0];
@@ -41,7 +42,7 @@ export function EventCard({ markets }: { markets: MarketView[] }) {
           </p>
         </div>
       </div>
-      <div className="grid grid-cols-[40px_68px_minmax(70px,1fr)_68px] items-center gap-2 border-t px-4 py-2 text-[11px] font-semibold tracking-wide text-muted-foreground sm:grid-cols-[52px_90px_minmax(80px,1fr)_90px] sm:gap-3 sm:px-5">
+      <div className="grid grid-cols-[minmax(72px,1.4fr)_60px_minmax(48px,1fr)_60px] items-center gap-2 border-t px-4 py-2 text-[11px] font-semibold tracking-wide text-muted-foreground sm:grid-cols-[minmax(96px,1.4fr)_76px_minmax(64px,1fr)_76px] sm:gap-3 sm:px-5">
         <span>ASSET</span>
         <span>IF YES</span>
         <span>IMPACT</span>
@@ -51,9 +52,9 @@ export function EventCard({ markets }: { markets: MarketView[] }) {
         <Link
           href={`/markets/${asset.id}`}
           key={asset.id}
-          className="grid grid-cols-[40px_68px_minmax(70px,1fr)_68px] items-center gap-2 px-4 py-3 text-sm hover:bg-muted/50 sm:grid-cols-[52px_90px_minmax(80px,1fr)_90px] sm:gap-3 sm:px-5"
+          className="grid grid-cols-[minmax(72px,1.4fr)_60px_minmax(48px,1fr)_60px] items-center gap-2 px-4 py-3 text-sm hover:bg-muted/50 sm:grid-cols-[minmax(96px,1.4fr)_76px_minmax(64px,1fr)_76px] sm:gap-3 sm:px-5"
         >
-          <strong>{asset.ticker}</strong>
+          <TokenIdentity symbol={asset.ticker} metadata={asset.baseTokenMetadata} />
           <span className="font-mono text-positive">{formatNumber(midpoint(asset.yes))}</span>
           <ImpactBar value={impactPercent(asset)} />
           <span className="font-mono text-muted-foreground">

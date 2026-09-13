@@ -147,13 +147,13 @@ export function OrdersClient({
                   </TableCell>
                   <TableCell className="font-mono text-xs">
                     {market
-                      ? `${formatNumber(tokenAmount(order.reserved, order.side === 0 ? market.quoteTokenDecimals : market.baseTokenDecimals), 4)} ${order.side === 0 ? "USDG" : market.ticker}`
+                      ? `${formatNumber(tokenAmount(order.reserved, order.side === 0 ? market.quoteTokenDecimals : market.baseTokenDecimals), 4)} ${order.side === 0 ? "USDC" : market.ticker}`
                       : "—"}
                     {order.fundingKind === 1 && `-${order.branch === 0 ? "YES" : "NO"}`}
                     <p className="mt-1 text-muted-foreground">
                       Fees:{" "}
                       {market && order.feesPaid !== undefined
-                        ? `${formatNumber(tokenAmount(order.feesPaid, order.side === 0 ? market.baseTokenDecimals : market.quoteTokenDecimals), 4)} ${order.side === 0 ? market.ticker : "USDG"} claims`
+                        ? `${formatNumber(tokenAmount(order.feesPaid, order.side === 0 ? market.baseTokenDecimals : market.quoteTokenDecimals), 4)} ${order.side === 0 ? market.ticker : "USDC"} claims`
                         : "—"}
                     </p>
                   </TableCell>

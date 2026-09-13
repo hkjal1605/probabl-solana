@@ -1,10 +1,18 @@
 // Server routes only: never expose private service origins or database credentials to the browser.
-export const privateResponseHeaders = { "cache-control": "private, no-store" } as const;
+import { SOLANA_API_ORIGIN } from "@conditional-stocks/shared/endpoints";
+
+export const privateResponseHeaders = {
+  "cache-control": "private, no-store",
+} as const;
 export function upstreamUrl(service: "api" | "indexer") {
   const key = service === "api" ? "API_URL" : "INDEXER_URL";
+  return serviceOrigin(process.env[key] ?? SOLANA_API_ORIGIN, key);
+}
+
+export function serviceOrigin(value: string, key: string) {
   let url: URL;
   try {
-    url = new URL(process.env[key] ?? `http://127.0.0.1:${service === "api" ? 3000 : 42069}`);
+    url = new URL(value);
   } catch {
     throw new Error(`${key} must be a valid service origin`);
   }

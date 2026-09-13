@@ -96,7 +96,7 @@ export function PendingPayouts({ markets }: { markets: MarketView[] }) {
             );
             const symbol =
               credit.kind === "quote"
-                ? "USDG"
+                ? "USDC"
                 : (market?.ticker ?? shortAddress(credit.collateralToken));
             return (
               <div

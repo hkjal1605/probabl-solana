@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { LifecycleBadge } from "@/components/data/StatusBadge";
 import { PriceChart } from "@/components/market/PriceChart";
+import { SpotReference } from "@/components/market/SpotReference";
+import { TokenIdentity } from "@/components/market/TokenIdentity";
 import { ClaimTable } from "@/components/portfolio/ClaimTable";
 import { PositionTable } from "@/components/portfolio/PositionTable";
 import {
@@ -123,7 +125,11 @@ export function MarketWorkspace({
                   href={`/markets/${m.id}`}
                   aria-current={m.id === market.id ? "page" : undefined}
                 >
-                  {m.ticker}
+                  <TokenIdentity
+                    symbol={m.ticker}
+                    metadata={m.baseTokenMetadata}
+                    showName={false}
+                  />
                 </Link>
               </Button>
             ))}
@@ -145,7 +151,7 @@ export function MarketWorkspace({
           value={percent(impactPercent(market))}
           className={(impactPercent(market) ?? 0) >= 0 ? "text-positive" : "text-danger"}
         />
-        <Stat label="Spot reference" value={formatNumber(market.ordinaryReference)} />
+        <SpotReference price={market.spotReference} />
         <div className="flex-1" />
         <Stat
           label="Book depth"

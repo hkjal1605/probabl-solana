@@ -18,6 +18,7 @@ import {
 } from "@conditional-stocks/ui-kit/table";
 import Link from "next/link";
 import { EventCard } from "@/components/market/EventCard";
+import { TokenIdentity } from "@/components/market/TokenIdentity";
 import { useUiStore } from "@/components/providers/UiStateProvider";
 import { DataError, EmptyState, Page, PageHeading, Stat } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/segmented";
@@ -52,7 +53,9 @@ export function MarketsExplorer({
     .filter((assets) =>
       assets.some(
         (m) =>
-          `${m.question} ${m.ticker}`.toLowerCase().includes(filters.query.toLowerCase()) &&
+          `${m.question} ${m.ticker} ${m.baseTokenMetadata?.name ?? ""}`
+            .toLowerCase()
+            .includes(filters.query.toLowerCase()) &&
           (filters.category === "All" || marketCategory(m) === filters.category) &&
           (filters.lifecycle === "all" ||
             (filters.lifecycle === "active" ? m.lifecycle === "open" : m.lifecycle !== "open")),
@@ -66,7 +69,10 @@ export function MarketsExplorer({
             Math.max(...a.map((m) => Math.abs(impactPercent(m) ?? 0)))
           : Date.parse(a[0]?.cutoff ?? "") - Date.parse(b[0]?.cutoff ?? ""),
     );
-  const tickers = [...new Set(markets.map((m) => m.ticker))].sort();
+  // Mint identity, not a potentially shared display symbol, determines matrix columns.
+  const tokens = [...new Map(markets.map((m) => [m.baseToken, m])).values()].sort((a, b) =>
+    a.ticker.localeCompare(b.ticker),
+  );
   return (
     <Page>
       <PageHeading
@@ -102,7 +108,7 @@ export function MarketsExplorer({
         <Input
           className="w-full sm:w-56"
           aria-label="Search markets"
-          placeholder="Search event or ticker"
+          placeholder="Search event, token or ticker"
           value={filters.query}
           onChange={(e) => setFilters({ query: e.target.value })}
         />
@@ -169,8 +175,10 @@ export function MarketsExplorer({
             <TableHeader>
               <TableRow>
                 <TableHead>Event</TableHead>
-                {tickers.map((ticker) => (
-                  <TableHead key={ticker}>{ticker}</TableHead>
+                {tokens.map((token) => (
+                  <TableHead key={token.baseToken}>
+                    <TokenIdentity symbol={token.ticker} metadata={token.baseTokenMetadata} />
+                  </TableHead>
                 ))}
                 <TableHead>P(YES) · Polymarket</TableHead>
               </TableRow>
@@ -189,10 +197,10 @@ export function MarketsExplorer({
                         {marketCategory(market)} · {market.lifecycle}
                       </p>
                     </TableCell>
-                    {tickers.map((ticker) => {
-                      const asset = assets.find((m) => m.ticker === ticker);
+                    {tokens.map((token) => {
+                      const asset = assets.find((m) => m.baseToken === token.baseToken);
                       return (
-                        <TableCell key={ticker}>
+                        <TableCell key={token.baseToken}>
                           {asset ? (
                             <Link
                               href={`/markets/${asset.id}`}

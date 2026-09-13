@@ -11,8 +11,8 @@ export default function CreateMarketPage() {
         Prepare the evidence, then approve it.
       </h1>
       <p className="mt-4 max-w-2xl leading-7 text-muted-foreground">
-        No form submission creates a market directly. It creates a hash-bound packet for
-        MARKET_ADMIN to review, approve and execute.
+        Select one Polymarket condition and up to 20 base tokens. Prepare a separate hash-bound
+        packet for every pair, then review, approve and sign each market creation below.
       </p>
       <div className="mt-8">
         <CreateMarketForm />

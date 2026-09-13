@@ -1,3 +1,4 @@
+import { assertRequestSession, SESSION_EXPIRED_EVENT } from "../wallet/session";
 import { mergeOrderPages, type OrdersPage } from "./orders";
 import type {
   MarketView,
@@ -24,6 +25,18 @@ export async function requestJson<T>(
   options: { signal?: AbortSignal; token?: string; body?: unknown } = {},
 ): Promise<T> {
   if (!path.startsWith("/api/") || path.includes("\\")) throw new Error("Invalid API path");
+  if (options.token && typeof window !== "undefined") {
+    try {
+      assertRequestSession(options.token);
+    } catch {
+      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: options.token }));
+      throw new ApiError(
+        "Your trading session expired or wallet changed. Sign in again.",
+        401,
+        null,
+      );
+    }
+  }
   const timeout = AbortSignal.timeout(10_000);
   const response = await fetch(path, {
     method: options.body === undefined ? "GET" : "POST",
@@ -37,6 +50,8 @@ export async function requestJson<T>(
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
   });
   if (!response.ok) {
+    if (response.status === 401 && options.token && typeof window !== "undefined")
+      window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: options.token }));
     const body: unknown = await response.json().catch(() => null);
     const error = body && typeof body === "object" && "error" in body ? body.error : null;
     const message =

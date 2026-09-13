@@ -133,7 +133,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
               </span>
               {total === null && known && (
                 <span className="max-w-52 text-xs text-muted-foreground">
-                  A stock reference price is unavailable.
+                  A fresh price or verified token-unit valuation is unavailable.
                 </span>
               )}
             </div>
@@ -148,14 +148,14 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                             (BigInt(a.balance.canonicalBalance) + a.reserved).toString(),
                             a.decimals,
                           ),
-                          a.symbol === "USDG" ? 2 : 4,
+                          a.symbol === "USDC" ? 2 : 4,
                         )
                       : "—"}
                   </div>
                   <p className="text-xs font-medium text-muted-foreground">
                     {formatNumber(
                       tokenAmount(a.balance.canonicalBalance, a.decimals),
-                      a.symbol === "USDG" ? 2 : 4,
+                      a.symbol === "USDC" ? 2 : 4,
                     )}{" "}
                     available
                     {a.reserved > 0n && (
@@ -194,7 +194,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
               )}
               <p className="text-xs font-medium leading-6 text-muted-foreground">
                 Entry and mark-to-entry require a complete cost basis and are unavailable where it
-                is not indexed. Branch marks are estimates in USDG, not guaranteed redemption
+                is not indexed. Branch marks are estimates in USDC, not guaranteed redemption
                 values.
               </p>
               {<PendingPayouts markets={markets} />}

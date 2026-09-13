@@ -230,6 +230,7 @@ export async function preflightAdmin(
   const built = await client.prepareTransaction(
     key(transaction.from),
     transaction,
+    { pinWalletFees: true },
   );
   const response = await client.connection.simulateTransaction(
     built.transaction,

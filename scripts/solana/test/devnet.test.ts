@@ -458,6 +458,9 @@ describe("private durable deployment state", () => {
       rpc = "https://rpc.example/?api-key=private";
     await exportEnvironment(directory, plan(), rpc, {
       DEVNET_DEPLOYER_PRIVATE_KEY: secret,
+      DEVNET_API_URL: "https://api.example",
+      JUPITER_API_KEY: "private-jupiter-test-key",
+      JUPITER_PRICE_RPC_URL: "https://mainnet.example/?key=private-pricing-rpc",
     });
     const ui = await readFile(join(directory, "ui.env"), "utf8"),
       backend = await readFile(join(directory, "backend.env"), "utf8");
@@ -466,6 +469,17 @@ describe("private durable deployment state", () => {
     expect(backend).not.toContain(secret);
     expect(backend).toContain(rpc);
     expect(ui).toContain(DEVNET_RPC);
+    expect(ui).toContain('NEXT_PUBLIC_API_URL="https://api.example"\n');
+    // The indexer shares backend.env; provider credentials are staged API-only separately.
+    for (const exported of [ui, backend]) {
+      expect(exported).not.toContain("JUPITER");
+      expect(exported).not.toContain("private-jupiter-test-key");
+      expect(exported).not.toContain("private-pricing-rpc");
+    }
+    for (const key of ["NEXT_PUBLIC_SOLANA_MARKET_ADMIN", "NEXT_PUBLIC_SOLANA_RESOLUTION_ADMIN"])
+      expect(ui).toContain(`${key}=${JSON.stringify(owner.publicKey.toBase58())}\n`);
+    expect(ui).toContain(`NEXT_PUBLIC_SOLANA_CONFIG=${JSON.stringify(plan().config)}\n`);
+    expect(ui).toContain(`NEXT_PUBLIC_SOLANA_GENESIS_HASH=${JSON.stringify(DEVNET_GENESIS)}\n`);
     for (const name of ["ui.env", "backend.env"]) {
       expect((await lstat(join(directory, name))).mode & 0o777).toBe(0o600);
       await unlink(join(directory, name));

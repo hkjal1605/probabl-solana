@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./http": "./src/http.ts"
+    "./http": "./src/http.ts",
+    "./endpoints": "./src/endpoints.ts",
+    "./spot-prices": "./src/spot-prices.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

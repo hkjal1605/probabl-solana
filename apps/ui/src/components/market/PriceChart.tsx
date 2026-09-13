@@ -106,7 +106,7 @@ export function PriceChart({
                 <br />
                 {mode === "Impact %" ? "Execution impact" : selected.branch === 0 ? "YES" : "NO"}{" "}
                 {formatNumber(selected.price)}
-                {mode === "Impact %" ? "%" : " USDG"}
+                {mode === "Impact %" ? "%" : " USDC"}
               </div>
             )}
             <svg

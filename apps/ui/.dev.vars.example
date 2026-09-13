@@ -1,8 +1,9 @@
 # Copy to .dev.vars for local Workers preview only (never deployed).
 NEXTJS_ENV=development
 # Runtime bindings are explicit: local .env files are NOT shipped in the Worker.
-API_URL=http://127.0.0.1:3000
-INDEXER_URL=http://127.0.0.1:42069
-# Permit the local API/indexer in workerd. The deployed Worker must keep the
-# wrangler.jsonc value PROBABL_HOSTING=cloudflare and use HTTPS upstreams.
-PROBABL_HOSTING=local
+API_URL=https://api-solana.probabl.trade
+INDEXER_URL=https://api-solana.probabl.trade
+# Keep the same HTTPS-only validation as the deployed Worker.
+# For an isolated local-validator rehearsal, explicitly set local service origins
+# and PROBABL_HOSTING=local in your ignored .dev.vars instead.
+PROBABL_HOSTING=cloudflare

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { logger } from "@/lib/logger";
+import { fetchMetadataBySlug } from "@/lib/polymarket-metadata";
 import { privateResponseHeaders, upstreamUrl } from "@/lib/upstream";
 
 async function forward(request: NextRequest, { params }: { params: Promise<{ path: string[] }> }) {
@@ -9,6 +10,8 @@ async function forward(request: NextRequest, { params }: { params: Promise<{ pat
       { error: "invalid-route" },
       { status: 400, headers: privateResponseHeaders },
     );
+  if (request.method === "POST" && path.join("/") === "admin/polymarket/metadata/fetch-by-slug")
+    return fetchMetadataBySlug(request);
   const headers = new Headers();
   for (const name of ["authorization", "content-type", "idempotency-key"]) {
     const value = request.headers.get(name);

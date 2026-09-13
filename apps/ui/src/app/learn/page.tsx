@@ -13,7 +13,7 @@ export default function LearnPage() {
         Trade the outcome.
       </h1>
       <p className="mt-6 text-base leading-8 text-muted-foreground">
-        Explore conditional stock markets funded with USDG and tokenized stocks.
+        Explore conditional stock markets funded with USDC and tokenized stocks.
         Each branch represents a different outcome.
       </p>
       <div className="my-12 space-y-10 text-sm font-medium leading-7 text-muted-foreground">
@@ -34,7 +34,7 @@ export default function LearnPage() {
             02 / Whole tokens or active claims.
           </h2>
           <p>
-            Buy YES stock with whole USDG and a fill gives you YES stock claims
+            Buy YES stock with whole USDC and a fill gives you YES stock claims
             plus complementary NO cash claims. Sell with whole stock and you
             receive cash claims plus complementary stock claims. Funding with an
             existing active claim does not mint an extra complementary claim.

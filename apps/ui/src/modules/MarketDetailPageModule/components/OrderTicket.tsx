@@ -209,7 +209,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                         ? market.quoteTokenDecimals
                         : market.baseTokenDecimals,
                     )}{" "}
-                {t.side === "buy" ? "USDG" : market.ticker}
+                {t.side === "buy" ? "USDC" : market.ticker}
                 {t.funding === "claim" ? `-${t.branch}` : ""}
               </span>
               <Button
@@ -262,7 +262,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                 />
                 <span className="text-xs font-medium text-muted-foreground">
                   {entry === "Spend" && t.side === "buy"
-                    ? "USDG"
+                    ? "USDC"
                     : market.ticker}
                 </span>
               </div>
@@ -308,7 +308,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                   })
                 }
               />
-              <span className="text-xs text-muted-foreground">USDG</span>
+              <span className="text-xs text-muted-foreground">USDC</span>
             </div>
             <details className="rounded-lg border p-3 text-sm">
               <summary className="cursor-pointer font-medium">
@@ -474,7 +474,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                   />
                   <Row
                     label="Execution before fees"
-                    value={`${formatTokenAmount(BigInt(prepared.plan.executionQuote), market.quoteTokenDecimals)} USDG`}
+                    value={`${formatTokenAmount(BigInt(prepared.plan.executionQuote), market.quoteTokenDecimals)} USDC`}
                   />
                   <Row
                     label="Maker / taker fee"

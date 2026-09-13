@@ -1,5 +1,6 @@
 "use client";
 
+import type { AdminDeployment } from "@conditional-stocks/solana-client/admin";
 import { Badge } from "@conditional-stocks/ui-kit/badge";
 import { Button } from "@conditional-stocks/ui-kit/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@conditional-stocks/ui-kit/card";
@@ -71,7 +72,15 @@ export function ReviewQueue() {
     </div>
   );
 }
-function PacketCard({ packet, onDone }: { packet: EvidenceView; onDone: () => void }) {
+export function PacketCard({
+  packet,
+  onDone,
+  deployment = adminConfig,
+}: {
+  packet: EvidenceView;
+  onDone: () => void;
+  deployment?: AdminDeployment;
+}) {
   const admin = useAdmin();
   const [checks, setChecks] = useState<Record<string, boolean>>({});
   const [notes, setNotes] = useState("");
@@ -104,7 +113,7 @@ function PacketCard({ packet, onDone }: { packet: EvidenceView; onDone: () => vo
         `admin/evidence/${hash}/transaction`,
         { body: "{}", method: "POST" },
       );
-      verifyAdminPreview(packet, value);
+      verifyAdminPreview(packet, value, deployment);
       setPreview(value);
       toast.success("Reviewed transaction passed the live chain preflight");
     } catch (cause) {
@@ -144,6 +153,13 @@ function PacketCard({ packet, onDone }: { packet: EvidenceView; onDone: () => vo
             Prepared by {short(packet.envelope.packet.preparer)} ·{" "}
             {time(packet.envelope.packet.preparedAt)}
           </p>
+          {packet.envelope.packet.kind === "market-creation" && (
+            <p className="mt-2 break-all font-mono text-xs">
+              Base: {packet.envelope.packet.config.baseToken}
+              <br />
+              Quote: {packet.envelope.packet.config.quoteToken}
+            </p>
+          )}
         </div>
         <code className="text-xs text-muted-foreground">{short(hash, 6)}</code>
       </CardHeader>
@@ -273,6 +289,7 @@ function PacketCard({ packet, onDone }: { packet: EvidenceView; onDone: () => vo
               key={`${hash}:${preview.action}`}
               packet={packet}
               preview={preview}
+              deployment={deployment}
               onDone={onDone}
             />
             <Reconcile packetHash={hash} action={preview.action} onDone={onDone} />
@@ -323,7 +340,10 @@ function Reconcile({
           onChange={(event) => setTransactionHash(event.target.value)}
           placeholder="Solana transaction signature"
         />
-        <Button onClick={run} disabled={busy || !/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(transactionHash)}>
+        <Button
+          onClick={run}
+          disabled={busy || !/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(transactionHash)}
+        >
           {busy ? <LoaderCircle className="animate-spin" /> : <CheckCircle2 />}Reconcile
         </Button>
       </div>

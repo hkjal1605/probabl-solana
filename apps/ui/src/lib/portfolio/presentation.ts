@@ -45,7 +45,7 @@ export function orderHistoryCsv(orders: IndexedOrder[], markets: MarketView[]) {
       "Status",
       "Quantity",
       "Filled",
-      "Limit (USDG)",
+      "Limit (USDC)",
       "Updated block",
     ],
     ...rows,

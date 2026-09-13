@@ -1,4 +1,6 @@
 import type { MarketUnits } from "@conditional-stocks/domain";
+import type { TokenDisplayMetadata } from "../tokens/devnet";
+import type { SpotPrice } from "@conditional-stocks/shared/spot-prices";
 
 export type MarketLifecycle =
   | "scheduled"
@@ -43,6 +45,8 @@ export interface MarketView extends MarketUnits {
   priceTickRawX18?: string;
   bookQuality?: "available" | "unavailable" | "truncated";
   baseToken: string;
+  baseTokenMetadata?: TokenDisplayMetadata;
+  quoteTokenMetadata?: TokenDisplayMetadata;
   cutoff: string;
   description: string;
   eventImpact: number | null;
@@ -51,6 +55,8 @@ export interface MarketView extends MarketUnits {
   mapping: { conditionId: string; noIndex: string; polymarketUrl: string; yesIndex: string };
   no: BranchBook;
   ordinaryReference: number | null;
+  spotReference?: SpotPrice;
+  quoteSpotReference?: SpotPrice;
   probability: ProbabilityView;
   question: string;
   quoteToken: string;

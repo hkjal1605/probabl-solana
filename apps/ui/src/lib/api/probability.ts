@@ -1,4 +1,31 @@
 import type { ProbabilityView } from "./types";
+import { SOLANA_STREAM_ORIGIN } from "@conditional-stocks/shared/endpoints";
+
+export function probabilityStreamUrl(
+  conditionId: string,
+  base = SOLANA_STREAM_ORIGIN,
+): string {
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    throw new Error("Probability stream must be a WebSocket origin");
+  }
+  if (
+    !conditionId ||
+    !["ws:", "wss:"].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash
+  )
+    throw new Error(
+      "Probability stream must be a WebSocket origin without credentials",
+    );
+  url.pathname = `/v1/polymarket/conditions/${encodeURIComponent(conditionId)}/stream`;
+  return url.toString();
+}
 
 const qualities = new Set([
   "crossed",
@@ -20,7 +47,10 @@ const scaled = (value: unknown): number | null => {
   return Number(value) / 1_000_000;
 };
 
-export function parseProbabilityMessage(input: unknown, conditionId: string): ProbabilityView {
+export function parseProbabilityMessage(
+  input: unknown,
+  conditionId: string,
+): ProbabilityView {
   const envelope = input as { topic?: string; value?: Record<string, unknown> };
   const tick = envelope?.value;
   if (
@@ -31,7 +61,10 @@ export function parseProbabilityMessage(input: unknown, conditionId: string): Pr
     !qualities.has(tick.quality)
   )
     throw new Error("invalid probability stream identity or quality");
-  if (typeof tick.observedAtMs !== "string" || !/^[0-9]{1,16}$/.test(tick.observedAtMs))
+  if (
+    typeof tick.observedAtMs !== "string" ||
+    !/^[0-9]{1,16}$/.test(tick.observedAtMs)
+  )
     throw new Error("invalid probability timestamp");
   const at = Number(tick.observedAtMs);
   if (!Number.isSafeInteger(at) || at > 8_640_000_000_000_000)
@@ -41,7 +74,12 @@ export function parseProbabilityMessage(input: unknown, conditionId: string): Pr
   const ask = scaled(tick.bestAskX6);
   if (
     tick.quality === "valid" &&
-    (value === null || bid === null || ask === null || bid >= ask || value < bid || value > ask)
+    (value === null ||
+      bid === null ||
+      ask === null ||
+      bid >= ask ||
+      value < bid ||
+      value > ask)
   )
     throw new Error("invalid usable probability");
   return {

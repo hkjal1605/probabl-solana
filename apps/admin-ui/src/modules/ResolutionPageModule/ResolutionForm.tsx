@@ -16,7 +16,7 @@ import { isAddress, zeroAddress } from "viem";
 import { QueryStatus } from "@/components/data/QueryStatus";
 import { useAdmin } from "@/components/providers/AdminProvider";
 import { adminConfig } from "@/config/protocol";
-import { adminRequest, type EvidenceView, requestJson } from "@/lib/admin-api";
+import { adminRequest, type EvidenceView, fetchMarketMetadata, requestJson } from "@/lib/admin-api";
 import { short } from "@/lib/format";
 
 interface Market {
@@ -45,7 +45,7 @@ export function ResolutionForm() {
     (market) => market.state === 3 || market.state === 4,
   );
   const [marketId, setMarketId] = useState("");
-  const [gammaMarketId, setGammaMarketId] = useState("");
+  const [marketSlug, setMarketSlug] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [outcome, setOutcome] = useState<"yes" | "no" | "invalid">("yes");
   const [officialUrl, setOfficialUrl] = useState("");
@@ -60,11 +60,7 @@ export function ResolutionForm() {
     setSnapshot(null);
     setBusy(true);
     try {
-      const value = await adminRequest<Snapshot>(
-        admin.token ?? "",
-        "admin/polymarket/metadata/fetch",
-        { body: JSON.stringify({ gammaMarketId }), method: "POST" },
-      );
+      const value = await fetchMarketMetadata<Snapshot>(admin.token ?? "", marketSlug);
       if (
         value.normalized.conditionId.toLowerCase() !==
         markets.find((m) => m.id === marketId)?.polymarketConditionId.toLowerCase()
@@ -202,20 +198,29 @@ export function ResolutionForm() {
         <CardContent>
           <div className="flex gap-3">
             <Input
-              value={gammaMarketId}
+              aria-label="Polymarket market slug"
+              aria-describedby="resolution-slug-help"
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={512}
+              value={marketSlug}
               onChange={(event) => {
-                setGammaMarketId(event.target.value);
+                setMarketSlug(event.target.value);
                 setSnapshot(null);
               }}
-              placeholder="Gamma market ID"
+              placeholder="clarity-act-signed-into-law-in-2026"
             />
             <Button
               onClick={fetchMetadata}
-              disabled={busy || !gammaMarketId || !marketId || marketsQuery.isError}
+              disabled={busy || !marketSlug.trim() || !marketId || marketsQuery.isError}
             >
               {busy ? <LoaderCircle className="animate-spin" /> : <FileSearch />}Fetch snapshot
             </Button>
           </div>
+          <p id="resolution-slug-help" className="mt-2 text-xs text-muted-foreground">
+            Use the individual Polymarket market slug. The fetched condition must still match the
+            selected market before resolution evidence can be prepared.
+          </p>
           {snapshot && (
             <div className="mt-4 rounded-xl bg-muted/45 p-4">
               <p className="font-semibold">{snapshot.normalized.question}</p>
