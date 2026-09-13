@@ -1,0 +1,19 @@
+[toolchain]
+anchor_version = "1.1.2"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+conditional_stocks = "CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3"
+
+[programs.devnet]
+conditional_stocks = "CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3"
+
+[provider]
+cluster = "Localnet"
+wallet = ".local/admin.json"
+
+[scripts]
+test = "bun run test:solana"

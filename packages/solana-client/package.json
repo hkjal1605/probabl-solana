@@ -1,0 +1,21 @@
+{
+  "name": "@conditional-stocks/solana-client",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./evidence": "./src/evidence.ts", "./admin": "./src/admin.ts" },
+  "scripts": { "typecheck": "tsc --noEmit", "test": "bun test test" },
+  "devDependencies": { "@types/bn.js": "5.2.0", "@types/pg":"8.23.1" },
+  "dependencies": {
+    "pg": "8.23.0",
+    "@conditional-stocks/market-data": "workspace:*",
+    "viem": "2.56.3",
+    "buffer": "6.0.3",
+    "@coral-xyz/anchor": "0.32.1",
+    "@solana/web3.js": "1.98.4",
+    "@solana/spl-token": "0.4.14",
+    "@noble/hashes": "1.8.0",
+    "bs58": "6.0.0",
+    "tweetnacl": "1.0.3"
+  }
+}

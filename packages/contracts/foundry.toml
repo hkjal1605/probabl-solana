@@ -1,0 +1,39 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+cache_path = "cache"
+libs = ["node_modules"]
+solc_version = "0.8.30"
+evm_version = "paris"
+optimizer = true
+optimizer_runs = 7_500
+via_ir = true
+bytecode_hash = "none"
+cbor_metadata = false
+fs_permissions = [
+    { access = "read", path = "./node_modules/@gnosis.pm/conditional-tokens-contracts/build/contracts" },
+    { access = "read", path = "../domain/fixtures" },
+    { access = "read-write", path = "./deployments" },
+]
+fuzz = { runs = 1024 }
+invariant = { runs = 256, depth = 64, fail_on_revert = true }
+
+[profile.ci]
+fuzz = { runs = 10000 }
+invariant = { runs = 1000, depth = 128, fail_on_revert = true }
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = true
+int_types = "long"
+multiline_func_header = "params_first"
+quote_style = "double"
+sort_imports = true
+
+[lint]
+# Timestamps are the specified open/cutoff/expiry gates; small validator skew cannot move assets
+# outside signed limits and does not justify replacing them with manipulable block-number estimates.
+exclude_lints = ["block-timestamp"]

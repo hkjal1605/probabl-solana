@@ -1,0 +1,1330 @@
+{
+  "id": "dcfb29ef-6c61-4149-b5ec-e1dc49ee825c",
+  "prevId": "f85bf93b-8ed7-4a36-b2c3-7ff19dbeb244",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "gateway.auth_challenges": {
+      "name": "auth_challenges",
+      "schema": "gateway",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message": {
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at_ms": {
+          "name": "expires_at_ms",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consumed_at_ms": {
+          "name": "consumed_at_ms",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "challenges_expiry_idx": {
+          "name": "challenges_expiry_idx",
+          "columns": [
+            {
+              "expression": "expires_at_ms",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "gateway.auth_sessions": {
+      "name": "auth_sessions",
+      "schema": "gateway",
+      "columns": {
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at_ms": {
+          "name": "expires_at_ms",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revoked_at_ms": {
+          "name": "revoked_at_ms",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "sessions_expiry_idx": {
+          "name": "sessions_expiry_idx",
+          "columns": [
+            {
+              "expression": "expires_at_ms",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "probabl.deployment_identity": {
+      "name": "deployment_identity",
+      "schema": "probabl",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "chain_id": {
+          "name": "chain_id",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "exchange": {
+          "name": "exchange",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_version": {
+          "name": "order_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.evidence_actions": {
+      "name": "evidence_actions",
+      "schema": "operations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor": {
+          "name": "actor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "packet_hash": {
+          "name": "packet_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "evidence_actions_sequence_unique": {
+          "name": "evidence_actions_sequence_unique",
+          "nullsNotDistinct": false,
+          "columns": ["sequence"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.evidence_attachment_links": {
+      "name": "evidence_attachment_links",
+      "schema": "operations",
+      "columns": {
+        "packet_hash": {
+          "name": "packet_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "evidence_attachment_content_idx": {
+          "name": "evidence_attachment_content_idx",
+          "columns": [
+            {
+              "expression": "content_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "packet_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "evidence_attachment_links_packet_hash_evidence_packets_packet_hash_fk": {
+          "name": "evidence_attachment_links_packet_hash_evidence_packets_packet_hash_fk",
+          "tableFrom": "evidence_attachment_links",
+          "tableTo": "evidence_packets",
+          "schemaTo": "operations",
+          "columnsFrom": ["packet_hash"],
+          "columnsTo": ["packet_hash"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "evidence_attachment_links_content_hash_evidence_attachments_content_hash_fk": {
+          "name": "evidence_attachment_links_content_hash_evidence_attachments_content_hash_fk",
+          "tableFrom": "evidence_attachment_links",
+          "tableTo": "evidence_attachments",
+          "schemaTo": "operations",
+          "columnsFrom": ["content_hash"],
+          "columnsTo": ["content_hash"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "evidence_attachment_links_packet_hash_content_hash_pk": {
+          "name": "evidence_attachment_links_packet_hash_content_hash_pk",
+          "columns": ["packet_hash", "content_hash"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.evidence_attachments": {
+      "name": "evidence_attachments",
+      "schema": "operations",
+      "columns": {
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "content": {
+          "name": "content",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "attachment_size": {
+          "name": "attachment_size",
+          "value": "octet_length(\"operations\".\"evidence_attachments\".\"content\") BETWEEN 1 AND 10485760"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "operations.evidence_observations": {
+      "name": "evidence_observations",
+      "schema": "operations",
+      "columns": {
+        "observation_id": {
+          "name": "observation_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "packet_hash": {
+          "name": "packet_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "transaction_hash": {
+          "name": "transaction_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "evidence_observation_tx_idx": {
+          "name": "evidence_observation_tx_idx",
+          "columns": [
+            {
+              "expression": "packet_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "transaction_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "evidence_observation_packet_idx": {
+          "name": "evidence_observation_packet_idx",
+          "columns": [
+            {
+              "expression": "packet_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sequence",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "evidence_observations_packet_hash_evidence_packets_packet_hash_fk": {
+          "name": "evidence_observations_packet_hash_evidence_packets_packet_hash_fk",
+          "tableFrom": "evidence_observations",
+          "tableTo": "evidence_packets",
+          "schemaTo": "operations",
+          "columnsFrom": ["packet_hash"],
+          "columnsTo": ["packet_hash"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "evidence_observations_sequence_unique": {
+          "name": "evidence_observations_sequence_unique",
+          "nullsNotDistinct": false,
+          "columns": ["sequence"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.evidence_packets": {
+      "name": "evidence_packets",
+      "schema": "operations",
+      "columns": {
+        "packet_hash": {
+          "name": "packet_hash",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "packet_id": {
+          "name": "packet_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "market_id": {
+          "name": "market_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "preparer": {
+          "name": "preparer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prepared_at": {
+          "name": "prepared_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "evidence_market_idx": {
+          "name": "evidence_market_idx",
+          "columns": [
+            {
+              "expression": "market_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sequence",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "evidence_packets_sequence_unique": {
+          "name": "evidence_packets_sequence_unique",
+          "nullsNotDistinct": false,
+          "columns": ["sequence"]
+        },
+        "evidence_packets_packet_id_unique": {
+          "name": "evidence_packets_packet_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["packet_id"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.evidence_previews": {
+      "name": "evidence_previews",
+      "schema": "operations",
+      "columns": {
+        "preview_id": {
+          "name": "preview_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "packet_hash": {
+          "name": "packet_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "evidence_preview_packet_idx": {
+          "name": "evidence_preview_packet_idx",
+          "columns": [
+            {
+              "expression": "packet_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sequence",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "evidence_previews_packet_hash_evidence_packets_packet_hash_fk": {
+          "name": "evidence_previews_packet_hash_evidence_packets_packet_hash_fk",
+          "tableFrom": "evidence_previews",
+          "tableTo": "evidence_packets",
+          "schemaTo": "operations",
+          "columnsFrom": ["packet_hash"],
+          "columnsTo": ["packet_hash"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "evidence_previews_sequence_unique": {
+          "name": "evidence_previews_sequence_unique",
+          "nullsNotDistinct": false,
+          "columns": ["sequence"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.evidence_reviews": {
+      "name": "evidence_reviews",
+      "schema": "operations",
+      "columns": {
+        "review_id": {
+          "name": "review_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "packet_hash": {
+          "name": "packet_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reviewer": {
+          "name": "reviewer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decision": {
+          "name": "decision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reviewed_at": {
+          "name": "reviewed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "evidence_reviews_packet_hash_evidence_packets_packet_hash_fk": {
+          "name": "evidence_reviews_packet_hash_evidence_packets_packet_hash_fk",
+          "tableFrom": "evidence_reviews",
+          "tableTo": "evidence_packets",
+          "schemaTo": "operations",
+          "columnsFrom": ["packet_hash"],
+          "columnsTo": ["packet_hash"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "evidence_reviews_sequence_unique": {
+          "name": "evidence_reviews_sequence_unique",
+          "nullsNotDistinct": false,
+          "columns": ["sequence"]
+        },
+        "evidence_reviews_packet_hash_unique": {
+          "name": "evidence_reviews_packet_hash_unique",
+          "nullsNotDistinct": false,
+          "columns": ["packet_hash"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.freeze_signals": {
+      "name": "freeze_signals",
+      "schema": "operations",
+      "columns": {
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "details": {
+          "name": "details",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "detected_at": {
+          "name": "detected_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "freeze_active_idx": {
+          "name": "freeze_active_idx",
+          "columns": [
+            {
+              "expression": "scope",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"operations\".\"freeze_signals\".\"active\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "freeze_signals_run_id_reconciliation_runs_id_fk": {
+          "name": "freeze_signals_run_id_reconciliation_runs_id_fk",
+          "tableFrom": "freeze_signals",
+          "tableTo": "reconciliation_runs",
+          "schemaTo": "operations",
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "gateway.transaction_attempts": {
+      "name": "transaction_attempts",
+      "schema": "gateway",
+      "columns": {
+        "operation_id": {
+          "name": "operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempt": {
+          "name": "attempt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "transaction_hash": {
+          "name": "transaction_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "transaction_attempts_operation_id_operations_operation_id_fk": {
+          "name": "transaction_attempts_operation_id_operations_operation_id_fk",
+          "tableFrom": "transaction_attempts",
+          "tableTo": "operations",
+          "schemaTo": "gateway",
+          "columnsFrom": ["operation_id"],
+          "columnsTo": ["operation_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "transaction_attempts_operation_id_attempt_pk": {
+          "name": "transaction_attempts_operation_id_attempt_pk",
+          "columns": ["operation_id", "attempt"]
+        }
+      },
+      "uniqueConstraints": {
+        "transaction_attempts_transaction_hash_unique": {
+          "name": "transaction_attempts_transaction_hash_unique",
+          "nullsNotDistinct": false,
+          "columns": ["transaction_hash"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "gateway.operations": {
+      "name": "operations",
+      "schema": "gateway",
+      "columns": {
+        "operation_id": {
+          "name": "operation_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_digest": {
+          "name": "request_digest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lease_token": {
+          "name": "lease_token",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "lease_expires_at_ms": {
+          "name": "lease_expires_at_ms",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "order_hash": {
+          "name": "order_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "operation_idempotency_idx": {
+          "name": "operation_idempotency_idx",
+          "columns": [
+            {
+              "expression": "address",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operation_order_hash_idx": {
+          "name": "operation_order_hash_idx",
+          "columns": [
+            {
+              "expression": "address",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "order_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sequence",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operation_pending_idx": {
+          "name": "operation_pending_idx",
+          "columns": [
+            {
+              "expression": "sequence",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"gateway\".\"operations\".\"state\" NOT IN ('canonical','failed')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "operations_sequence_unique": {
+          "name": "operations_sequence_unique",
+          "nullsNotDistinct": false,
+          "columns": ["sequence"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.polymarket_alerts": {
+      "name": "polymarket_alerts",
+      "schema": "operations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "condition_id": {
+          "name": "condition_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "code": {
+          "name": "code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at_ms": {
+          "name": "created_at_ms",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "polymarket_alerts_sequence_unique": {
+          "name": "polymarket_alerts_sequence_unique",
+          "nullsNotDistinct": false,
+          "columns": ["sequence"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.polymarket_heads": {
+      "name": "polymarket_heads",
+      "schema": "operations",
+      "columns": {
+        "gamma_market_id": {
+          "name": "gamma_market_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "condition_id": {
+          "name": "condition_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "snapshot_id": {
+          "name": "snapshot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "observed_at_ms": {
+          "name": "observed_at_ms",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "polymarket_head_condition_idx": {
+          "name": "polymarket_head_condition_idx",
+          "columns": [
+            {
+              "expression": "condition_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "observed_at_ms",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "gamma_market_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "polymarket_heads_snapshot_id_polymarket_snapshots_snapshot_id_fk": {
+          "name": "polymarket_heads_snapshot_id_polymarket_snapshots_snapshot_id_fk",
+          "tableFrom": "polymarket_heads",
+          "tableTo": "polymarket_snapshots",
+          "schemaTo": "operations",
+          "columnsFrom": ["snapshot_id"],
+          "columnsTo": ["snapshot_id"],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.polymarket_snapshots": {
+      "name": "polymarket_snapshots",
+      "schema": "operations",
+      "columns": {
+        "snapshot_id": {
+          "name": "snapshot_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "gamma_market_id": {
+          "name": "gamma_market_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "condition_id": {
+          "name": "condition_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "observed_at_ms": {
+          "name": "observed_at_ms",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.polymarket_subscriptions": {
+      "name": "polymarket_subscriptions",
+      "schema": "operations",
+      "columns": {
+        "condition_id": {
+          "name": "condition_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "polymarket_subscriptions_sequence_unique": {
+          "name": "polymarket_subscriptions_sequence_unique",
+          "nullsNotDistinct": false,
+          "columns": ["sequence"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.polymarket_ticks": {
+      "name": "polymarket_ticks",
+      "schema": "operations",
+      "columns": {
+        "condition_id": {
+          "name": "condition_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "observed_at_ms": {
+          "name": "observed_at_ms",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "operations.reconciliation_runs": {
+      "name": "reconciliation_runs",
+      "schema": "operations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deep": {
+          "name": "deep",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "indexed_block": {
+          "name": "indexed_block",
+          "type": "numeric(78,0)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "indexed_block_hash": {
+          "name": "indexed_block_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "report_hash": {
+          "name": "report_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "reconciliation_deep_idx": {
+          "name": "reconciliation_deep_idx",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"operations\".\"reconciliation_runs\".\"deep\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "reconciliation_runs_report_hash_unique": {
+          "name": "reconciliation_runs_report_hash_unique",
+          "nullsNotDistinct": false,
+          "columns": ["report_hash"]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {
+    "gateway": "gateway",
+    "operations": "operations",
+    "probabl": "probabl"
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

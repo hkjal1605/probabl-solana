@@ -1,0 +1,245 @@
+# Solana Devnet deployment
+
+This pipeline deploys the Rust program, creates six mock token mints, wraps Devnet
+SOL, allocates all seven assets to the deployer's associated token accounts, and
+initializes the protocol configuration. It does **not** create markets, deposit
+wallet balances into protocol custody, deploy EC2 services, or approve production
+use. Existing migration/security limitations still apply.
+
+## Wallet and prerequisites
+
+Use a dedicated Devnet wallet, never a wallet that holds real assets. Put its
+private key in the ignored repository-root `.env.devnet`, not in chat, shell
+arguments, source control, CI logs, browser configuration, or backend services.
+
+```sh
+# Do not overwrite an existing env file.
+cp -n .env.devnet.example .env.devnet
+chmod 600 .env.devnet
+```
+
+Fill `DEVNET_DEPLOYER_PRIVATE_KEY` in your editor. Supported formats are a
+base58-encoded **64-byte** Solana secret key or a JSON array of exactly 64 integer
+bytes. A seed phrase, 32-byte seed, public key or EVM private key is not accepted.
+The public half is checked against the private half. There is no default-wallet
+fallback and no need to change `solana config` or `Anchor.toml`'s local provider.
+
+Required on PATH: Bun 1.3.14, Rust 1.97.1, Anchor CLI 1.1.2, Solana/Agave CLI
+3.1.10, and the SBF build toolchain. For a newly provisioned machine, fetch the
+locked Rust dependencies before the offline contract build:
+
+```sh
+bun install --frozen-lockfile
+cargo fetch --locked
+bun run devnet:build
+bun run typecheck
+bun run test
+bun run devnet:rehearse
+```
+
+Keep `target/deploy/conditional_stocks-keypair.json` securely backed up and private
+(`chmod 600`); its public key must match the compiled program ID:
+
+`CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3`
+
+This is a **different key** from the wallet you put in `.env.devnet`. The program
+signer establishes the program address; your wallet pays fees and becomes its
+upgrade authority. If the program signer is missing, restore it from backup.
+Generating a replacement or running `anchor keys sync` changes the address and
+requires a separately reviewed migration of Rust, SDK, IDL and deployment state.
+The pipeline refuses a mismatching key rather than silently changing addresses.
+
+## Prepare, fund, execute, verify
+
+Run from the repository root:
+
+```sh
+bun run devnet:prepare
+bun run devnet:plan
+# Optional single 2-Devnet-SOL faucet request; funding is not guaranteed:
+bun run devnet:airdrop --execute
+bun run devnet:plan
+# Only once the plan reports sufficient Devnet SOL:
+bun run devnet:deploy --execute
+bun run devnet:verify
+```
+
+`prepare` checks the network, build/IDL/program identity and signer, then writes
+stable mint addresses, a resumable buffer key and a hashed deployment plan. It
+does not send transactions. `plan` reports public addresses and a conservative
+funding budget in **lamports** (1 SOL = 1,000,000,000 lamports). The budget includes
+the larger of upload-buffer/program-data rent, separate program-account rent,
+token/config rent, 0.1 wrapped SOL, and a 0.1 SOL fee reserve. Loader-v3 returns the
+buffer's lamports to the payer before creating ProgramData, so rent is not counted
+twice. On retry, only an exactly sized, loader-owned buffer controlled by this
+deployer receives credit. Program-account rent and fee reserves remain separate.
+Fixture funding is conservatively estimated; a
+single faucet request is generally insufficient for a program of this size.
+Use the [official Solana faucet](https://faucet.solana.com/) or transfer existing
+**Devnet** SOL to the printed deployer address. Do not buy/send mainnet assets.
+The script does not loop around faucet limits or rotate wallets.
+
+`deploy` refuses insufficient funding before any chain allocation. It uploads
+the prepared executable with an explicit program signer, fee payer, buffer,
+upgrade authority and RPC; waits for finalized, byte-exact read-back; creates
+fixtures; initializes config; and verifies the result. It does not automatically
+upgrade an existing program with different bytes or another authority.
+
+Public-network uploads default to the CLI's TPU/QUIC transport, avoiding bulk
+write transactions through the public RPC request limits. Set
+`DEVNET_UPLOAD_TRANSPORT=rpc` only for an RPC provider that permits upload traffic
+or when validator-direct networking is unavailable. Both modes use the same
+genesis guard, buffer, signer, preflight and finalized verification; no program
+verification or fee checks are skipped. Local rehearsals default to RPC mode.
+
+If both bulk RPC and validator-direct uploads fail, use the paced fallback:
+
+```sh
+DEVNET_UPLOAD_TRANSPORT=rpc-paced bun run devnet:deploy --execute
+```
+
+This sends at most one 900-byte loader write every 700 ms, in batches of 16,
+with preflight enabled and no automatic RPC rebroadcast flood. It compares the
+existing buffer bytes to the prepared artifact, so it only writes missing or
+different chunks, then waits for a byte-exact finalized buffer before handing
+off to the CLI for normal ELF verification and deployment. It does not change
+the program or buffer authority. Rate-limit/confirmation failures stop with the
+same recoverable buffer and receipts; respect the provider's cooldown before
+retrying. It takes several minutes for this artifact on the public RPC.
+
+The RPC must use HTTPS and return the pinned Devnet genesis:
+`EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG`.
+There is no environment override for this pin. Mainnet, Testnet and localhost are
+rejected by the public deployment CLI. Every network mutation requires
+`--execute`; `verify` only reads the chain and refreshes local records/env exports.
+
+## Assets in the deployer's wallet
+
+| Label | Standard                                  | Decimals | Initial wallet balance |
+| ----- | ----------------------------------------- | -------: | ---------------------: |
+| USDC  | Classic SPL mock                          |        6 |              1,000,000 |
+| BTC   | Classic SPL mock                          |        8 |                  1,000 |
+| ETH   | Classic SPL mock                          |        9 |                 10,000 |
+| SOL   | Canonical wrapped Devnet SOL, classic SPL |        9 |                    0.1 |
+| TSLA  | Token-2022 mock                           |        6 |                 10,000 |
+| NVDA  | Token-2022 mock with transfer fee         |        6 |                 10,000 |
+| SPY   | Token-2022 mock                           |        6 |                 10,000 |
+
+SOL cannot be minted like a mock token. The pipeline transfers 0.1 Devnet SOL
+into its canonical wrapped-native associated account and calls `SyncNative`.
+Native fee SOL remains in the same wallet separately. The mint address is
+`So11111111111111111111111111111111111111112`; the mint's zero supply field is
+normal for native SOL and is not a record of wrapped-account balances.
+
+Stock mocks have self-hosted `MetadataPointer` and `TokenMetadata` extensions,
+names such as `Devnet Mock TSLA`, symbols `dTSLA`/`dNVDA`/`dSPY`, and no hosted
+image/URI. NVDA additionally has a **25 bps (0.25%) transfer fee**, capped at one
+token per transfer, to exercise supported fee-bearing collateral. The deployer
+controls its fee configuration and withheld-fee authority. Initial minting has
+no transfer fee. All mock mints have the deployer as mint authority and no freeze
+authority. These are development choices, not issuer or production policies.
+
+Classic USDC/BTC/ETH labels are recorded in the manifest; they do not have
+Metaplex metadata. Some wallets will show only their mint addresses. Import the
+mint addresses from the deployment record if needed. These are **not** real USDC,
+BTC, ETH, issuer stock tokens, backed RWAs or tokens carrying stock rights. Testing
+these fixtures does not establish support for every Token-2022 extension/issuer;
+see [the compatibility matrix](../TOKEN_COMPATIBILITY.md).
+
+The mock USDC mint is the configuration's quote token. The deployer is the admin,
+market admin, guardian and resolution admin; protocol maker/taker fees start at
+zero. There are no automatically listed markets or manufactured resolution
+conditions. Create reviewed Devnet markets through the native admin workflow
+after the API/indexer are configured.
+
+## Records, retries and recovery
+
+The default `.local/devnet/` is ignored and private (0700); files are 0600:
+
+| File              | Purpose / sensitivity                                                       |
+| ----------------- | --------------------------------------------------------------------------- |
+| `plan.json`       | Stable mint/ATA identities, exact allocations, source/IDL/artifact hashes   |
+| `mints/*.json`    | **Private mint signers**; securely back up, never publish                   |
+| `buffer.json`     | **Private upload-buffer signer**; retained for interrupted uploads          |
+| `journal.json`    | Transaction receipts, signed payloads, finalization/recovery state; private |
+| `deployment.json` | Public addresses, current balances, authority and executable verification   |
+| `backend.env`     | Server deployment settings; may contain a private RPC credential            |
+| `ui.env`          | Browser-safe deployment settings; never contains the wallet key             |
+| `pipeline.lock`   | Exclusive writer PID/time; normally removed on exit                         |
+
+Never publish the directory as a whole. Back it up securely together with the
+program signer; do not delete it to “retry.” Resubmit the same `deploy --execute`
+command with the same wallet, artifact and directory after a temporary failure.
+The buffer and mint addresses stay stable. Token creation, metadata, ATA creation
+and initial mint are atomic per asset; reruns verify instead of minting again.
+The six mock allocations are one-time fixtures, not balance targets. Tokens that
+you transferred/burned are not replaced, and closing an already-recorded wrapped
+SOL account does not wrap more SOL on a later run.
+
+Pending transactions block resubmission until finalized or expired. An ambiguous
+expired SOL-wrap receipt requires manual review; the script refuses to guess
+whether native SOL was already wrapped and spent. Partially initialized or
+otherwise unexpected mint/account state also fails closed. If a process is
+force-killed, inspect the recorded PID and any Solana child process before
+manually removing **only that stale lock**. Do not run concurrent deployments
+against the same program from separate directories/machines.
+
+The CLI's payer signer is materialized only in a private temporary directory for
+the Solana subprocess, removed in `finally`, and omitted from the child
+environment. Normal exceptions clean it up; a machine crash/SIGKILL can leave a
+0600 file under the OS temporary directory named `probabl-devnet-signer-*`.
+Check/remove only the identified orphaned directory after confirming the process
+has stopped. Never enable shell tracing or print `.env.devnet` to debug a failure.
+
+If prepared contract source, dependency locks, IDL or executable change, the
+pipeline stops. Preserve the old records; do not overwrite them to bypass a
+failed check. A changed executable at an already deployed address requires a
+separate explicitly authorized upgrade procedure; this initial-deployment
+pipeline intentionally does not provide one.
+
+## Backend and local UI handoff
+
+After verification, `backend.env` supplies matching RPC/program/config/genesis
+and API/indexer addresses. `ui.env` supplies matching public deployment values.
+Set `DEVNET_API_URL` and `DEVNET_INDEXER_URL` to your EC2 HTTPS origins or local SSH
+tunnel origins, then rerun `devnet:verify` to regenerate exports. Configure
+`DEVNET_UI_ORIGINS` for the actual local public/admin browser origins.
+
+`DEVNET_BROWSER_RPC_URL` defaults to the public Devnet RPC even if the backend
+uses a private RPC provider. Anything assigned to it is exposed in the browser;
+use a browser-restricted public credential if your provider requires one.
+
+These generated files are **base configuration**, not a complete EC2 deployment.
+Use a separate server-owned env file for `DATABASE_URL`, evidence persistence/
+`EVIDENCE_PUBLIC_BASE_URL`, and any optional reference-data service secrets. The
+generated files are overwritten on verification, so do not append server secrets
+to them. Run native `start:api` and `start:indexer`, not the copied legacy EVM
+deployment scripts. Keep the deployer private key off EC2 and out of the UI.
+
+The UI must be built/run with `ui.env`'s `NEXT_PUBLIC_*` values and use a browser
+wallet set to Devnet. This step provisions balances; it does not by itself test
+the complete API/indexer/UI trading product.
+
+## Rehearsal and CI boundary
+
+`bun run test:devnet-pipeline` runs fast, chain-free policy/storage/recovery tests.
+They are included in `test:ts` and the existing CI host-verification job.
+
+`bun run devnet:rehearse` starts a fresh localhost validator, creates a local-only
+wallet, performs an actual upgradeable-loader deployment, initializes all seven
+balances and protocol config, verifies fee transfers, and checks repeated runs
+after spending/unwrapping. It stops only its own validator and retains diagnostic
+ledgers/fixtures under `.local/`. It never uses `.env.devnet`'s wallet. Default RPC
+port is 18997; set `DEVNET_REHEARSAL_PORT` to an unused port if needed. It needs a
+matching built artifact/program signer. The validator integration test is skipped
+in ordinary host CI unless explicitly enabled against a fresh localhost RPC.
+
+Public Devnet deployment is deliberately a manual promotion using the commands
+above, not an automatic push/PR job. Do not put deployment secrets into untrusted
+CI builds. Contract coverage is not 100%, and this deployment rehearsal is not a
+security audit or a guarantee of an exploit-free program.
+
+Protocol references: [Solana deployment and authorities](https://solana.com/docs/programs/deploying),
+[Agave 3.1.10 buffer rent reuse](https://github.com/anza-xyz/agave/blob/v3.1.10/programs/bpf_loader/src/lib.rs),
+[wrapped SOL / SyncNative](https://solana.com/docs/tokens/basics/sync-native),
+and [Devnet versus Testnet](https://solana.com/docs/references/clusters).

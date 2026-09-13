@@ -1,0 +1,31 @@
+{
+  "name": "@conditional-stocks/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "bun build ./src/solana.ts --outdir ./dist --target bun --packages external",
+    "dev": "bun --watch ./src/solana.ts",
+    "start": "bun ./src/solana.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@types/pg": "8.23.1",
+    "@conditional-stocks/solana-client": "workspace:*",
+    "@conditional-stocks/solana-indexer": "workspace:*",
+    "@solana/web3.js": "1.98.4",
+    "pg": "8.23.0",
+    "bs58": "6.0.0",
+    "tweetnacl": "1.0.3",
+    "@conditional-stocks/config": "workspace:*",
+    "@conditional-stocks/contract-bindings": "workspace:*",
+    "@conditional-stocks/domain": "workspace:*",
+    "@conditional-stocks/gateway": "workspace:*",
+    "@conditional-stocks/market-data": "workspace:*",
+    "@conditional-stocks/orderbook": "workspace:*",
+    "hono": "4.13.5",
+    "viem": "2.56.3",
+    "@conditional-stocks/db": "workspace:*",
+    "@conditional-stocks/shared": "workspace:*"
+  }
+}

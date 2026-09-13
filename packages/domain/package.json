@@ -1,0 +1,16 @@
+{
+  "name": "@conditional-stocks/domain",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate:vectors": "bun scripts/generate-golden-vectors.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "viem": "2.56.3"
+  }
+}

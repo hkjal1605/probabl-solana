@@ -1,0 +1,9 @@
+[package]
+name = "protocol-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dev-dependencies]
+num-bigint = "=0.4.8"
+proptest = "=1.11.0"

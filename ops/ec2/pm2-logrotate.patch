@@ -1,0 +1,11 @@
+diff --git a/app.js b/app.js
+--- a/app.js
++++ b/app.js
+@@ -36,6 +36,7 @@ else if (process.env.HOME || process.env.HOMEPATH)
+   PM2_ROOT_PATH = path.resolve(process.env.HOMEDRIVE, process.env.HOME || process.env.HOMEPATH, '.pm2');
+ 
+ const parseBool = (str, defaultVal = false) => {
++  if (typeof str === 'boolean') return str;
+   if (str === 'true') return true;
+   if (str === 'false') return false;
+   return defaultVal;

@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FOUNDRY_PROFILE: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan committed content for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check Solidity formatting
+        run: forge fmt --root packages/contracts --check
+
+      - name: Lint Solidity
+        run: forge lint --root packages/contracts
+
+      - name: Check contract deployability and bytecode sizes
+        run: |
+          # Forge lint can leave AST/ABI-only artifacts; regenerate executable tests as well.
+          forge build --root packages/contracts --no-cache
+          forge build --root packages/contracts --sizes --skip test
+
+      - name: Generate contract bindings
+        run: bun run generate:bindings
+
+      - name: Ensure generated bindings are committed
+        run: git diff --exit-code -- packages/contract-bindings/src/generated.ts
+
+      - name: Check TypeScript formatting, lint, and types
+        run: bunx biome ci . && bun run typecheck
+
+      - name: Run TypeScript tests
+        run: bun run test:ts
+
+      - name: Run Solidity unit, fuzz, and stateful invariant tests
+        run: bun run test:contracts
+
+      - name: Prove scoped accounting lemmas
+        run: |
+          python3 -m venv "$RUNNER_TEMP/contract-audit-python"
+          "$RUNNER_TEMP/contract-audit-python/bin/pip" install --disable-pip-version-check z3-solver==5.1.0.0
+          "$RUNNER_TEMP/contract-audit-python/bin/python" audit/2026-09-06/remediation/verification/prove-accounting.py
+          "$RUNNER_TEMP/contract-audit-python/bin/python" audit/2026-09-08/atomic-placement/prove-atomic-bounds.py
+          "$RUNNER_TEMP/contract-audit-python/bin/python" audit/2026-09-08/atomic-placement/prove-payout-accounting.py
+
+      - name: Audit JavaScript dependencies
+        run: bun run audit:deps

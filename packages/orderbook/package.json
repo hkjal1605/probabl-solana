@@ -1,0 +1,16 @@
+{
+  "name": "@conditional-stocks/orderbook",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@conditional-stocks/domain": "workspace:*",
+    "viem": "2.56.3"
+  }
+}

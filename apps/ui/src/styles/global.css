@@ -1,0 +1,78 @@
+@import "@conditional-stocks/ui-kit/styles.css";
+
+@source "../";
+
+/* Production trading visual language, scoped to the trading app (admin-ui is unaffected). */
+:root {
+  --background: #f7f7f4;
+  --card: #ffffff;
+  --secondary: #efefeb;
+  --muted: #efefeb;
+  --border: #0d110f1c;
+  --positive: #0a8f55;
+  --positive-soft: #00e47c1f;
+  --danger: #d43d2a;
+  --danger-soft: #d43d2a1a;
+  --trade-buy: #0a8f55;
+  --trade-sell: #d43d2a;
+  --surface-shadow: none;
+}
+.dark {
+  --background: #0b0e0c;
+  --card: #121614;
+  --popover: #171c19;
+  --secondary: #171c19;
+  --muted: #171c19;
+  --muted-foreground: #d1d1d1;
+  --border: #ffffff17;
+  --positive: #00e47c;
+  --positive-soft: #00e47c1a;
+  --danger: #ff5d6c;
+  --danger-soft: #ff5d6c1a;
+  --trade-buy: #00e47c;
+  --trade-sell: #ff5d6c;
+  --surface-shadow: none;
+}
+
+@layer components {
+  .panel {
+    @apply overflow-hidden rounded-[10px] border bg-card;
+  }
+  .panel-heading {
+    @apply flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4;
+  }
+  .eyebrow {
+    @apply text-[11px] font-semibold tracking-[0.08em] uppercase;
+  }
+}
+
+@keyframes market-ticker {
+  to {
+    transform: translateX(-50%);
+  }
+}
+.market-ticker {
+  animation: market-ticker 100s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .market-ticker {
+    animation: none;
+  }
+}
+
+@layer utilities {
+  .price-grid {
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklch, var(--border), transparent 55%) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklch, var(--border), transparent 55%) 1px,
+        transparent 1px
+      );
+    background-size: 48px 48px;
+  }
+}

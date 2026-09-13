@@ -1,0 +1,61 @@
+{
+  "remediationDate": "2026-09-12",
+  "findings": [
+    "CV-01",
+    "CV-02"
+  ],
+  "status": "Implemented and locally verified; not independent audit or production approval",
+  "baseline": "metadao-comparison-2026-09-12.json",
+  "program": "CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3",
+  "artifact": {
+    "bytes": 690840,
+    "sha256": "1b8b3fa1ce785b47618eb712b88613ca472fa21db6ec9f6a399db63e182540e1",
+    "validatorBytesVerified": true,
+    "ledger": ".local/cv-fixes-cDWuAd",
+    "productionDeployment": false
+  },
+  "tests": {
+    "hostRustPassed": 25,
+    "generatedPropertyCases": 100000,
+    "validatorCasesPassed": 30,
+    "validatorAssertions": 10199,
+    "validatorExecution": "28-case main run + separately opted-in fee epoch + separately added multi-maker regression",
+    "sbfFaultInjectionPassed": 1,
+    "fastTypeScriptPassed": 119,
+    "fastTypeScriptAssertions": 6547,
+    "fastTypeScriptOptInSkipped": 34,
+    "applicationPassed": 2,
+    "applicationAssertions": 47,
+    "hostLineCoveragePercent": 28.38,
+    "coreLineCoveragePercent": 100,
+    "invariantLineCoveragePercent": 100,
+    "fullProgramCoverageAchieved": false
+  },
+  "sha256": {
+    "Cargo.lock": "b77503dba851cb65fc14deb1bb84da0ebb4b1081d6d37219f627fa97c710341b",
+    "apps/ui/src/modules/PortfolioPageModule/components/PositionActions.tsx": "0e19963a5e4b03204ab951d382c5843da88bd4ddffb2c251462d2fc9b91e490c",
+    "crates/protocol-core/src/lib.rs": "cd9c08c86cc63acd5d99c2543eeb20a584bcbad92f187f023cbba738e6dab98c",
+    "crates/protocol-core/tests/comparative_audit.rs": "83cf0286193665295f0bd16e745c6e66c4e02b34a2738c5b881b0499b2cb19dc",
+    "crates/protocol-core/tests/invariants.rs": "281f0f4a59101fd42fccdd42850c28e53c9baa6554ba9a24c058b9ed09515327",
+    "packages/solana-client/src/claims.ts": "406d5fd9231e83552dccebe1a9df340f61b9b5639c7c82ded7bed9e8c8f62d61",
+    "packages/solana-client/src/idl.json": "672b032953936de2400bd462f4459c73226de1003c116790309535f382135d9c",
+    "packages/solana-client/src/transactions.ts": "67e0d6c7ac37908ca893e1d4878ec99ff5f2c002c24e9d66844fd3004c0a5d3e",
+    "packages/solana-client/test/claims.test.ts": "13023407327b5dfba3b4ae74eec3f5262bf9a8739e31e75381640590041479ee",
+    "packages/solana-client/test/local-validator.test.ts": "94513a090da2ae31432d4828e39546c8bfb02e345b4e9683875f52e95b5c27a6",
+    "packages/solana-client/test/token2022-validator.test.ts": "8cba5ae6f5f121dd8fa302e7542e4784ddfa52ef2c6ce670ee5fe67c6be7b657",
+    "programs/conditional-stocks/src/custody.rs": "8cd683e018de0235ef76a40e068859fcc162bb2db8f690d8bf0e7c579c0bc393",
+    "programs/conditional-stocks/src/exchange.rs": "e5a22f35cb95850666317ef7815a6fa6ecd7997db55942c806e11d207d51b8c5",
+    "programs/conditional-stocks/src/governance.rs": "0023c499020c47f7e284235eda8e415eb4b6d33a044066cec224b98b2359f565",
+    "programs/conditional-stocks/src/invariants.rs": "8158180d2716c4df6b2ec5e84c99a84481516fc87e6420ee5661b329cfded58a",
+    "programs/conditional-stocks/src/lib.rs": "27021cd724f611c12d60ece4fcbc2c2a625e6bc4880d58667c9ed9b8e690bc16",
+    "programs/conditional-stocks/src/state.rs": "949ed439f6bd72ac4718310b0711c351be4550066940b0cd39998a671e4d920d",
+    "programs/conditional-stocks/src/token_policy.rs": "f0aa0d8b5ca641d26f87eee7bddd4fc4c83dd7f919c475b86c120b15c275e879",
+    "programs/conditional-stocks/tests/claim_invariants.rs": "c0412b2b4b122b079c60b59586f253b7f5701b3c68c0ed11586cadbcccc6dee8",
+    "programs/conditional-stocks/tests/native_governance.rs": "a24f5f58c369b95b6a3dc7be1f7e92d41d1ed8be7b18bee91e88340af77939f6",
+    "programs/conditional-stocks/tests/sbf_hardening.rs": "58ce8d8be24468bb44b00d7194f74abede97e8336d1a5c85e4b60a5bf06b5d80",
+    "programs/conditional-stocks/tests/token_policy.rs": "618634cdc8483d0843c1888be3fa749d9447ac55ea55dc7a6f407caaa93c44d5",
+    "services/solana-indexer/src/reconcile.ts": "d0ed9e4e88e47297170c714d789f87924748b5b4c0d62321189d2af3e9864b0d",
+    "services/solana-indexer/test/reconcile.test.ts": "e4b7c21d0afd9dcd5ccf845e9e67252c7ff3eef1dec139ca4995e481bb6ccc71",
+    "target/deploy/conditional_stocks.so": "1b8b3fa1ce785b47618eb712b88613ca472fa21db6ec9f6a399db63e182540e1"
+  }
+}

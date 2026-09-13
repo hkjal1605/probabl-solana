@@ -1,0 +1,502 @@
+diff --git a/node_modules/ponder/.bun-tag-8f4dd4ad78b0109f b/.bun-tag-8f4dd4ad78b0109f
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/esm/bin/commands/dev.js b/dist/esm/bin/commands/dev.js
+index 3c8d86118263e9ba040c58393e017ea9178bb7f6..b161729d8d0d7e2e6867265ea68fd44d2f5e4e6c 100644
+--- a/dist/esm/bin/commands/dev.js
++++ b/dist/esm/bin/commands/dev.js
+@@ -15,7 +15,7 @@ import { createQueue } from '../../utils/queue.js';
+ import { isolatedController } from "../isolatedController.js";
+ import { runCodegen } from "../utils/codegen.js";
+ import { createExit } from "../utils/exit.js";
+-export async function dev({ cliOptions }) {
++export async function dev({ cliOptions, onBuild }) {
+     const options = buildOptions({ cliOptions });
+     const logger = createLogger({
+         level: options.logLevel,
+@@ -279,6 +279,14 @@ export async function dev({ cliOptions }) {
+                     database: preCompileResult.result.databaseConfig.kind,
+                     command: cliOptions.command,
+                 }, 1);
++                if (onBuild) await onBuild({ common, database,
++                    preBuild: preCompileResult.result,
++                    namespaceBuild: { schema, viewsSchema: undefined },
++                    schemaBuild: compileSchemaResult.result,
++                    indexingBuild: indexingBuildResult.result,
++                    apiBuild: apiBuildResult.result,
++                    crashRecoveryCheckpoint,
++                });
+                 createServer({ common, database, apiBuild: apiBuildResult.result });
+                 metrics.initializeIndexingMetrics({
+                     indexingBuild: indexingBuildResult.result,
+diff --git a/dist/esm/database/index.js b/dist/esm/database/index.js
+index 0b02ae25b4e1bb5f223e82689a94c738b46c28fb..aae5c48ed0eea33b3dc9ab2721b03a858bb8d1f5 100644
+--- a/dist/esm/database/index.js
++++ b/dist/esm/database/index.js
+@@ -2,7 +2,7 @@ import { eq, getTableName, getViewName, isTable, isView, sql, } from "drizzle-or
+ import { drizzle as drizzleNodePg } from "drizzle-orm/node-postgres";
+ import { pgSchema, pgTable } from "drizzle-orm/pg-core";
+ import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
+-import { Kysely, Migrator, PostgresDialect, WithSchemaPlugin } from "kysely";
++import { Kysely, Migrator, PostgresDialect, WithSchemaPlugin, OperationNodeTransformer } from "kysely";
+ import prometheus from "prom-client";
+ import { hexToBigInt } from "viem";
+ import { getLiveQueryNotifyProcedureName, getLiveQueryProcedureName, getPartitionName, getReorgSequenceName, getReorgTableName, } from '../drizzle/onchain.js';
+@@ -17,6 +17,14 @@ import { startClock } from '../utils/timer.js';
+ import { wait } from '../utils/wait.js';
+ import { crashRecovery, createLiveQueryProcedures, dropLiveQueryTriggers, dropTriggers, } from "./actions.js";
+ import { createQB, parseDbError } from "./queryBuilder.js";
++// Raw SQL and Kysely references must target the same private cache.
++class SyncSchemaTransformer extends OperationNodeTransformer {
++    transformRaw(node) {
++        return super.transformRaw({ ...node, sqlFragments: node.sqlFragments.map(
++            (fragment) => fragment.replaceAll("ponder_sync", PONDER_SYNC.PONDER_SYNC_SCHEMA),
++        ) });
++    }
++}
+ export const SCHEMATA = pgSchema("information_schema").table("schemata", (t) => ({
+     schemaName: t.text().primaryKey(),
+ }));
+@@ -232,13 +240,16 @@ export const createDatabase = ({ common, namespace, preBuild, schemaBuild, }) =>
+                         common.metrics.ponder_postgres_query_total.inc({ pool: "migrate" });
+                     }
+                 },
+-                plugins: [new WithSchemaPlugin("ponder_sync")],
++                plugins: [new WithSchemaPlugin(PONDER_SYNC.PONDER_SYNC_SCHEMA), {
++                    transformQuery: ({ node }) => new SyncSchemaTransformer().transformNode(node),
++                    transformResult: async ({ result }) => result,
++                }],
+             });
+             const migrationProvider = buildMigrationProvider(common.logger);
+             const migrator = new Migrator({
+                 db: kysely,
+                 provider: migrationProvider,
+-                migrationTableSchema: "ponder_sync",
++                migrationTableSchema: PONDER_SYNC.PONDER_SYNC_SCHEMA,
+             });
+             // Note: inline operation of database wrapper because this is the only place where kysely is used
+             for (let i = 0; i <= 9; i++) {
+diff --git a/dist/esm/runtime/historical.js b/dist/esm/runtime/historical.js
+index aa453e461e0dcb99f9837cc29c1f51f35be159b5..e8aa7c8995b4abe2575170fe9376a480a2302320 100644
+--- a/dist/esm/runtime/historical.js
++++ b/dist/esm/runtime/historical.js
+@@ -667,7 +667,9 @@ export async function* getLocalEventGenerator(params) {
+ export async function* getLocalSyncGenerator(params) {
+     const backfillEndClock = startClock();
+     const label = { chain: params.chain.name };
+-    let first = hexToNumber(params.syncProgress.start.number);
++    // Fetch only the range that extraction needs after durable crash recovery.
++    let first = Math.max(hexToNumber(params.syncProgress.start.number),
++        Number(decodeCheckpoint(params.from).blockNumber));
+     const last = params.syncProgress.end === undefined
+         ? params.syncProgress.finalized
+         : hexToNumber(params.syncProgress.end.number) >
+@@ -697,7 +699,7 @@ export async function* getLocalSyncGenerator(params) {
+         return;
+     }
+     const totalInterval = [
+-        hexToNumber(params.syncProgress.start.number),
++        first,
+         hexToNumber(last.number),
+     ];
+     const requiredIntervals = getRequiredIntervals({
+@@ -737,7 +739,7 @@ export async function* getLocalSyncGenerator(params) {
+                 cache_rate: formatPercentage((total - required) / total),
+             });
+         }
+-        first = hexToNumber(params.syncProgress.current.number) + 1;
++        first = Math.max(first, hexToNumber(params.syncProgress.current.number) + 1);
+     }
+     else {
+         params.common.logger.info({
+diff --git a/dist/esm/sync-store/schema.js b/dist/esm/sync-store/schema.js
+index 8f017aab5bac9b8be411356b74eca9488e3cfcb0..118bfd3c8e3cdeec6df8e564276cb31003a15710 100644
+--- a/dist/esm/sync-store/schema.js
++++ b/dist/esm/sync-store/schema.js
+@@ -18,7 +18,11 @@ const numeric78 = customType({
+  * @dev The order of the schemas represents the order of the migrations.
+  * @dev The schemas must match the files in "./sql".
+  */
+-export const PONDER_SYNC_SCHEMAS = ["ponder_sync"];
++// Conditional Stocks patch v1: isolate disposable cache by deployment schema.
++const syncSchema = process.env.PONDER_SYNC_SCHEMA ?? "ponder_sync";
++if (!/^[a-z_][a-z0-9_]{0,62}$/.test(syncSchema)) throw new Error("Invalid PONDER_SYNC_SCHEMA");
++export const CONDITIONAL_STOCKS_CACHE_PATCH = 1;
++export const PONDER_SYNC_SCHEMAS = [syncSchema];
+ /**
+  * Latest database schema for the sync.
+  */
+diff --git a/dist/esm/utils/pg.js b/dist/esm/utils/pg.js
+index cb5d8212a351aa6f819777f93cf51acf2abd84e0..29e36d0a1ac07381df80870e3189a25c856cc8b7 100644
+--- a/dist/esm/utils/pg.js
++++ b/dist/esm/utils/pg.js
+@@ -1,3 +1,4 @@
++export const CONDITIONAL_STOCKS_POSTGRES_PATCH = 1;
+ import pg, {} from "pg";
+ import parse from "pg-connection-string";
+ // The default parser for numeric[] (1231) seems to parse values as Number
+@@ -49,15 +50,16 @@ export function createPool(config, logger) {
+         // @ts-expect-error
+         connect(callback) {
+             if (callback) {
+-                super.connect(() => {
++                super.connect((error) => {
++          if (error) { callback(error); return; }
+                     this.query(`
+-            SET synchronous_commit = off;
++            SET synchronous_commit = on;
+             SET idle_in_transaction_session_timeout = 3600000;`, callback);
+                 });
+             }
+             else {
+                 return super.connect().then(() => this.query(`
+-            SET synchronous_commit = off;
++            SET synchronous_commit = on;
+             SET idle_in_transaction_session_timeout = 3600000;`).then(() => { }));
+             }
+         }
+@@ -111,11 +113,12 @@ export function createReadonlyPool(config, logger, namespace) {
+         // @ts-expect-error
+         connect(callback) {
+             if (callback) {
+-                super.connect(() => {
++                super.connect((error) => {
++          if (error) { callback(error); return; }
+                     this.query(`
+           SET search_path = "${namespace}";
+           SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;
+-          SET work_mem = '512MB';
++          SET work_mem = '16MB';
+           SET lock_timeout = '500ms';`, callback);
+                 });
+             }
+@@ -123,7 +126,7 @@ export function createReadonlyPool(config, logger, namespace) {
+                 return super.connect().then(() => this.query(`
+           SET search_path = "${namespace}";
+           SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;
+-          SET work_mem = '512MB';
++          SET work_mem = '16MB';
+           SET lock_timeout = '500ms';`).then(() => { }));
+             }
+         }
+diff --git a/dist/types/bin/commands/dev.d.ts b/dist/types/bin/commands/dev.d.ts
+index 7f40ee4921f2488336f297a308f30ca9585168bd..71a91d19bdc335f2e6884949d420fd0ff6f475ac 100644
+--- a/dist/types/bin/commands/dev.d.ts
++++ b/dist/types/bin/commands/dev.d.ts
+@@ -1,5 +1,7 @@
+ import type { CliOptions } from "../ponder.js";
+-export declare function dev({ cliOptions }: {
++import type { PonderApp } from "./start.js";
++export declare function dev({ cliOptions, onBuild }: {
+     cliOptions: CliOptions;
++    onBuild?: (app: PonderApp) => Promise<PonderApp>;
+ }): Promise<() => Promise<[void, void, void]>>;
+ //# sourceMappingURL=dev.d.ts.map
+\ No newline at end of file
+diff --git a/dist/types/runtime/historical.d.ts b/dist/types/runtime/historical.d.ts
+index 9df93a1d1d78679f5321deeda8a5996eb6fcdde3..01a08a74771fc425b6c5e98357ec7caa8b7bae45 100644
+--- a/dist/types/runtime/historical.d.ts
++++ b/dist/types/runtime/historical.d.ts
+@@ -93,6 +93,7 @@ export declare function getLocalEventGenerator(params: {
+     blockRange: [number, number];
+ }, void, unknown>;
+ export declare function getLocalSyncGenerator(params: {
++    from: string;
+     common: Common;
+     chain: Chain;
+     rpc: Rpc;
+diff --git a/dist/types/sync-store/schema.d.ts b/dist/types/sync-store/schema.d.ts
+index 22cd94d2b3d3ea84775ab36c64b2664baf8fa239..bf3af4caf22a388043e3c3ec15807c9b0a92287e 100644
+--- a/dist/types/sync-store/schema.d.ts
++++ b/dist/types/sync-store/schema.d.ts
+@@ -5,15 +5,16 @@ import type { FragmentId } from '../internal/types.js';
+  * @dev The order of the schemas represents the order of the migrations.
+  * @dev The schemas must match the files in "./sql".
+  */
+-export declare const PONDER_SYNC_SCHEMAS: readonly ["ponder_sync"];
++export declare const CONDITIONAL_STOCKS_CACHE_PATCH = 1;
++export declare const PONDER_SYNC_SCHEMAS: readonly [string];
+ /**
+  * Latest database schema for the sync.
+  */
+-export declare const PONDER_SYNC_SCHEMA: "ponder_sync";
+-export declare const PONDER_SYNC: import("drizzle-orm/pg-core").PgSchema<"ponder_sync">;
++export declare const PONDER_SYNC_SCHEMA: string;
++export declare const PONDER_SYNC: import("drizzle-orm/pg-core").PgSchema<string>;
+ export declare const blocks: import("drizzle-orm/pg-core").PgTableWithColumns<{
+     name: "blocks";
+-    schema: "ponder_sync";
++    schema: string;
+     columns: {
+         chainId: import("drizzle-orm/pg-core").PgColumn<{
+             name: "chainId";
+@@ -404,7 +405,7 @@ export declare const blocks: import("drizzle-orm/pg-core").PgTableWithColumns<{
+ }>;
+ export declare const transactions: import("drizzle-orm/pg-core").PgTableWithColumns<{
+     name: "transactions";
+-    schema: "ponder_sync";
++    schema: string;
+     columns: {
+         chainId: import("drizzle-orm/pg-core").PgColumn<{
+             name: "chainId";
+@@ -768,7 +769,7 @@ export declare const transactions: import("drizzle-orm/pg-core").PgTableWithColu
+ }>;
+ export declare const transactionReceipts: import("drizzle-orm/pg-core").PgTableWithColumns<{
+     name: "transaction_receipts";
+-    schema: "ponder_sync";
++    schema: string;
+     columns: {
+         chainId: import("drizzle-orm/pg-core").PgColumn<{
+             name: "chainId";
+@@ -1041,7 +1042,7 @@ export declare const transactionReceipts: import("drizzle-orm/pg-core").PgTableW
+ }>;
+ export declare const logs: import("drizzle-orm/pg-core").PgTableWithColumns<{
+     name: "logs";
+-    schema: "ponder_sync";
++    schema: string;
+     columns: {
+         chainId: import("drizzle-orm/pg-core").PgColumn<{
+             name: "chainId";
+@@ -1275,7 +1276,7 @@ export declare const logs: import("drizzle-orm/pg-core").PgTableWithColumns<{
+ }>;
+ export declare const traces: import("drizzle-orm/pg-core").PgTableWithColumns<{
+     name: "traces";
+-    schema: "ponder_sync";
++    schema: string;
+     columns: {
+         chainId: import("drizzle-orm/pg-core").PgColumn<{
+             name: "chainId";
+@@ -1553,7 +1554,7 @@ export declare const traces: import("drizzle-orm/pg-core").PgTableWithColumns<{
+ }>;
+ export declare const rpcRequestResults: import("drizzle-orm/pg-core").PgTableWithColumns<{
+     name: "rpc_request_results";
+-    schema: "ponder_sync";
++    schema: string;
+     columns: {
+         requestHash: import("drizzle-orm/pg-core").PgColumn<{
+             name: "requestHash";
+@@ -1628,7 +1629,7 @@ export declare const rpcRequestResults: import("drizzle-orm/pg-core").PgTableWit
+ }>;
+ export declare const intervals: import("drizzle-orm/pg-core").PgTableWithColumns<{
+     name: "intervals";
+-    schema: "ponder_sync";
++    schema: string;
+     columns: {
+         fragmentId: import("drizzle-orm/pg-core").PgColumn<{
+             name: "fragmentId";
+@@ -1690,7 +1691,7 @@ export declare const intervals: import("drizzle-orm/pg-core").PgTableWithColumns
+ }>;
+ export declare const factories: import("drizzle-orm/pg-core").PgTableWithColumns<{
+     name: "factories";
+-    schema: "ponder_sync";
++    schema: string;
+     columns: {
+         id: import("drizzle-orm/pg-core").PgColumn<{
+             name: "id";
+@@ -1733,7 +1734,7 @@ export declare const factories: import("drizzle-orm/pg-core").PgTableWithColumns
+ }>;
+ export declare const factoryAddresses: import("drizzle-orm/pg-core").PgTableWithColumns<{
+     name: "factory_addresses";
+-    schema: "ponder_sync";
++    schema: string;
+     columns: {
+         id: import("drizzle-orm/pg-core").PgColumn<{
+             name: "id";
+diff --git a/src/bin/commands/dev.ts b/src/bin/commands/dev.ts
+index 7cb2dcf12d94516cf4fb3782a1f24628e3991af3..62734d66133addd4b1cf4a719fd2e8cf7aa18709 100644
+--- a/src/bin/commands/dev.ts
++++ b/src/bin/commands/dev.ts
+@@ -23,8 +23,12 @@ import { isolatedController } from "../isolatedController.js";
+ import type { CliOptions } from "../ponder.js";
+ import { runCodegen } from "../utils/codegen.js";
+ import { createExit } from "../utils/exit.js";
++import type { PonderApp } from "./start.js";
+ 
+-export async function dev({ cliOptions }: { cliOptions: CliOptions }) {
++export async function dev({ cliOptions, onBuild }: {
++  cliOptions: CliOptions;
++  onBuild?: (app: PonderApp) => Promise<PonderApp>;
++}) {
+   const options = buildOptions({ cliOptions });
+ 
+   const logger = createLogger({
+@@ -327,6 +331,14 @@ export async function dev({ cliOptions }: { cliOptions: CliOptions }) {
+           1,
+         );
+ 
++        if (onBuild) await onBuild({ common, database,
++          preBuild: preCompileResult.result,
++          namespaceBuild: { schema, viewsSchema: undefined },
++          schemaBuild: compileSchemaResult.result,
++          indexingBuild: indexingBuildResult.result,
++          apiBuild: apiBuildResult.result,
++          crashRecoveryCheckpoint,
++        });
+         createServer({ common, database, apiBuild: apiBuildResult.result });
+ 
+         metrics.initializeIndexingMetrics({
+diff --git a/src/database/index.ts b/src/database/index.ts
+index dd9ba5ee5dc79387bff0c806ca8dac28ea49f2c4..cd212dd035d7db30c4b388877a1a840a9186289f 100644
+--- a/src/database/index.ts
++++ b/src/database/index.ts
+@@ -10,7 +10,7 @@ import {
+ import { drizzle as drizzleNodePg } from "drizzle-orm/node-postgres";
+ import { pgSchema, pgTable } from "drizzle-orm/pg-core";
+ import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
+-import { Kysely, Migrator, PostgresDialect, WithSchemaPlugin } from "kysely";
++import { Kysely, Migrator, PostgresDialect, WithSchemaPlugin, OperationNodeTransformer, type RawNode } from "kysely";
+ import type { Pool } from "pg";
+ import prometheus from "prom-client";
+ import { hexToBigInt } from "viem";
+@@ -50,6 +50,16 @@ import {
+ } from "./actions.js";
+ import { createQB, parseDbError, type QB } from "./queryBuilder.js";
+ 
++// Older migrations contain explicitly qualified raw SQL in addition to Kysely
++// table references. Both must target the same isolated cache schema.
++class SyncSchemaTransformer extends OperationNodeTransformer {
++  protected override transformRaw(node: RawNode): RawNode {
++    return super.transformRaw({ ...node, sqlFragments: node.sqlFragments.map(
++      (fragment) => fragment.replaceAll("ponder_sync", PONDER_SYNC.PONDER_SYNC_SCHEMA),
++    ) });
++  }
++}
++
+ export type Database = {
+   driver: PostgresDriver | PGliteDriver;
+   syncQB: QB<typeof PONDER_SYNC>;
+@@ -430,14 +440,17 @@ export const createDatabase = ({
+             common.metrics.ponder_postgres_query_total.inc({ pool: "migrate" });
+           }
+         },
+-        plugins: [new WithSchemaPlugin("ponder_sync")],
++        plugins: [new WithSchemaPlugin(PONDER_SYNC.PONDER_SYNC_SCHEMA), {
++          transformQuery: ({ node }) => new SyncSchemaTransformer().transformNode(node),
++          transformResult: async ({ result }) => result,
++        }],
+       });
+ 
+       const migrationProvider = buildMigrationProvider(common.logger);
+       const migrator = new Migrator({
+         db: kysely,
+         provider: migrationProvider,
+-        migrationTableSchema: "ponder_sync",
++        migrationTableSchema: PONDER_SYNC.PONDER_SYNC_SCHEMA,
+       });
+ 
+       // Note: inline operation of database wrapper because this is the only place where kysely is used
+diff --git a/src/runtime/historical.ts b/src/runtime/historical.ts
+index 87ea9aac20913b6874d6a96e210bb8346578f5e7..56a6754029c05b22ac916a914de6e033e7731961 100644
+--- a/src/runtime/historical.ts
++++ b/src/runtime/historical.ts
+@@ -1104,11 +1104,15 @@ export async function* getLocalSyncGenerator(params: {
+   cachedIntervals: CachedIntervals;
+   database: Database;
+   isCatchup: boolean;
++  from: string;
+ }) {
+   const backfillEndClock = startClock();
+   const label = { chain: params.chain.name };
+ 
+-  let first = hexToNumber(params.syncProgress.start.number);
++  // Extraction already resumes at the durable recovery cursor. Do not refetch
++  // an evicted deployment-to-checkpoint prefix that extraction will never read.
++  let first = Math.max(hexToNumber(params.syncProgress.start.number),
++    Number(decodeCheckpoint(params.from).blockNumber));
+   const last =
+     params.syncProgress.end === undefined
+       ? params.syncProgress.finalized
+@@ -1154,7 +1158,7 @@ export async function* getLocalSyncGenerator(params: {
+   }
+ 
+   const totalInterval = [
+-    hexToNumber(params.syncProgress.start.number),
++    first,
+     hexToNumber(last!.number),
+   ] satisfies Interval;
+ 
+@@ -1211,7 +1215,7 @@ export async function* getLocalSyncGenerator(params: {
+       });
+     }
+ 
+-    first = hexToNumber(params.syncProgress.current.number) + 1;
++    first = Math.max(first, hexToNumber(params.syncProgress.current.number) + 1);
+   } else {
+     params.common.logger.info({
+       msg: "Started fetching backfill JSON-RPC data",
+diff --git a/src/sync-store/schema.ts b/src/sync-store/schema.ts
+index 3d56d384d7bfd6766e64d0575de19beea44398af..6980af2690429a379699136d4050d3d74802a0f9 100644
+--- a/src/sync-store/schema.ts
++++ b/src/sync-store/schema.ts
+@@ -29,7 +29,13 @@ const numeric78 = customType<{ data: bigint; driverData: string }>({
+  * @dev The order of the schemas represents the order of the migrations.
+  * @dev The schemas must match the files in "./sql".
+  */
+-export const PONDER_SYNC_SCHEMAS = ["ponder_sync"] as const;
++// Conditional Stocks patch v1: isolate disposable cache by deployment schema.
++const syncSchema = process.env.PONDER_SYNC_SCHEMA ?? "ponder_sync";
++if (!/^[a-z_][a-z0-9_]{0,62}$/.test(syncSchema)) {
++  throw new Error("Invalid PONDER_SYNC_SCHEMA");
++}
++export const CONDITIONAL_STOCKS_CACHE_PATCH = 1;
++export const PONDER_SYNC_SCHEMAS = [syncSchema] as const;
+ /**
+  * Latest database schema for the sync.
+  */
+diff --git a/src/utils/pg.ts b/src/utils/pg.ts
+index 72fba0db8936ea0e1ada6126ffb166d8e714f94f..8093e9d6ecd24d11fb37c5dae4a84c709484c735 100644
+--- a/src/utils/pg.ts
++++ b/src/utils/pg.ts
+@@ -1,3 +1,4 @@
++export const CONDITIONAL_STOCKS_POSTGRES_PATCH = 1;
+ import pg, { type PoolConfig } from "pg";
+ import parse from "pg-connection-string";
+ import type { Logger } from "@/internal/logger.js";
+@@ -66,10 +67,11 @@ export function createPool(config: PoolConfig, logger: Logger) {
+       callback: (err: Error) => void | undefined,
+     ): void | Promise<void> {
+       if (callback) {
+-        super.connect(() => {
++        super.connect((error) => {
++          if (error) { callback(error); return; }
+           this.query(
+             `
+-            SET synchronous_commit = off;
++            SET synchronous_commit = on;
+             SET idle_in_transaction_session_timeout = 3600000;`,
+             callback,
+           );
+@@ -77,7 +79,7 @@ export function createPool(config: PoolConfig, logger: Logger) {
+       } else {
+         return super.connect().then(() =>
+           this.query(`
+-            SET synchronous_commit = off;
++            SET synchronous_commit = on;
+             SET idle_in_transaction_session_timeout = 3600000;`).then(() => {}),
+         );
+       }
+@@ -150,12 +152,13 @@ export function createReadonlyPool(
+       callback: (err: Error) => void | undefined,
+     ): void | Promise<void> {
+       if (callback) {
+-        super.connect(() => {
++        super.connect((error) => {
++          if (error) { callback(error); return; }
+           this.query(
+             `
+           SET search_path = "${namespace}";
+           SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;
+-          SET work_mem = '512MB';
++          SET work_mem = '16MB';
+           SET lock_timeout = '500ms';`,
+             callback,
+           );
+@@ -166,7 +169,7 @@ export function createReadonlyPool(
+             `
+           SET search_path = "${namespace}";
+           SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;
+-          SET work_mem = '512MB';
++          SET work_mem = '16MB';
+           SET lock_timeout = '500ms';`,
+           ).then(() => {}),
+         );

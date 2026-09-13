@@ -1,0 +1,14 @@
+{
+  "name": "@conditional-stocks/contract-bindings",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "bun run generate",
+    "generate": "bun scripts/generate.ts",
+    "typecheck": "tsc --noEmit"
+  }
+}

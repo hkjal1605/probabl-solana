@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "probabl-ui",
+  "main": ".open-next/worker.js",
+  // Current UTC date supported by the pinned workerd runtime.
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "preview_urls": false,
+  // Preserve API_URL and INDEXER_URL configured in the dashboard. Secrets are
+  // also supported; never put database credentials or signing keys in this UI.
+  "keep_vars": true,
+  "vars": { "PROBABL_HOSTING": "cloudflare" },
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "probabl-ui" }],
+  "observability": { "enabled": true },
+  "dev": { "ip": "127.0.0.1", "port": 8787 }
+}

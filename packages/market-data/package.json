@@ -1,0 +1,16 @@
+{
+  "name": "@conditional-stocks/market-data",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test tests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "viem": "2.56.3"
+  }
+}

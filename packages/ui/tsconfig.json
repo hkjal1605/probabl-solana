@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "types": ["react"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}

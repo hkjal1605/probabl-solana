@@ -1,0 +1,23 @@
+{
+  "name": "@conditional-stocks/polymarket-ingestor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "e2e:anvil": "bun scripts/anvil-e2e.ts",
+    "start": "bun src/main.ts",
+    "test": "bun test tests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@conditional-stocks/contract-bindings": "workspace:*",
+    "@conditional-stocks/market-data": "workspace:*",
+    "hono": "4.13.5",
+    "viem": "2.56.3",
+    "@conditional-stocks/db": "workspace:*",
+    "@conditional-stocks/shared": "workspace:*"
+  }
+}

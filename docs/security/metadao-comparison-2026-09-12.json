@@ -1,0 +1,31 @@
+{
+  "reviewDate": "2026-09-12",
+  "scope": "Every first-party runtime Rust file under crates/protocol-core/src and programs/conditional-stocks/src; source comparison, not independent audit or complete monorepo review",
+  "upstream": {
+    "repository": "https://github.com/metaDAOproject/programs",
+    "commit": "1a8d0d7359ba6f869b84a60b1d709e85ad263ba0",
+    "crate": "programs/conditional_vault",
+    "version": "0.4.0",
+    "onchainArtifactVerified": false,
+    "productionCodeReused": false
+  },
+  "localProgram": "CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3",
+  "artifact": {
+    "bytes": 666392,
+    "localValidatorBytesVerified": true,
+    "ledger": ".local/audit-validator-hU9Vk7",
+    "productionDeployment": false
+  },
+  "sha256": {
+    "crates/protocol-core/src/lib.rs": "f076525eeacd0eae3d7b1a814e69561bbef617b09b7a812824695c8ff40fbf61",
+    "programs/conditional-stocks/src/lib.rs": "1a1962ae889f536031a57cebf222e82411e160abfb6ef4acbb1a9e8f47d41794",
+    "programs/conditional-stocks/src/state.rs": "918b11b9c8bc7044876d92e8447b9227951dde05f569df04adfde1ce6838e404",
+    "programs/conditional-stocks/src/custody.rs": "4e2965abb66249a2b68af8dfbdbb69a0e196446934e623e39d048c43d88f28e2",
+    "programs/conditional-stocks/src/exchange.rs": "9096ade957ea434837da66f30db18ff527539624963b1a10519fd2b827cd9103",
+    "programs/conditional-stocks/src/governance.rs": "0023c499020c47f7e284235eda8e415eb4b6d33a044066cec224b98b2359f565",
+    "programs/conditional-stocks/src/token_policy.rs": "f0aa0d8b5ca641d26f87eee7bddd4fc4c83dd7f919c475b86c120b15c275e879",
+    "Cargo.lock": "b77503dba851cb65fc14deb1bb84da0ebb4b1081d6d37219f627fa97c710341b",
+    "target/deploy/conditional_stocks.so": "e4e7e5ab399199dd4a268e2a296bce914943b7a7e8427a202c9d3e15f87318ec",
+    "packages/solana-client/src/idl.json": "d512ab385ad26b90502d1a55eb00918a18c888b1dd72c0fb17cf11091690378a"
+  }
+}

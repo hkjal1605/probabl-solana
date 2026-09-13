@@ -1,0 +1,24 @@
+{
+  "name": "@conditional-stocks/solana-indexer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./projection": "./src/projection.ts"
+  },
+  "scripts": {
+    "start": "bun src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@conditional-stocks/solana-client": "workspace:*",
+    "@solana/web3.js": "1.98.4",
+    "@solana/spl-token": "0.4.14",
+    "@coral-xyz/anchor": "0.32.1",
+    "hono": "4.13.5",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}

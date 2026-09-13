@@ -1,0 +1,2503 @@
+{
+  "address": "CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3",
+  "metadata": {
+    "name": "conditional_stocks",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "accept_admin",
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "successor",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel",
+      "discriminator": [
+        232,
+        219,
+        223,
+        41,
+        219,
+        236,
+        220,
+        190
+      ],
+      "accounts": [
+        {
+          "name": "actor",
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "order",
+            "wallet"
+          ]
+        },
+        {
+          "name": "order",
+          "writable": true
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "order.owner",
+                "account": "Order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "trader",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  97,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.config",
+                "account": "Market"
+              },
+              {
+                "kind": "account",
+                "path": "order.owner",
+                "account": "Order"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_fees",
+      "discriminator": [
+        82,
+        251,
+        233,
+        156,
+        12,
+        52,
+        184,
+        202
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          },
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "destination"
+          ]
+        },
+        {
+          "name": "destination",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "destination.owner",
+                "account": "Wallet"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "asset",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "configure",
+      "discriminator": [
+        245,
+        7,
+        108,
+        117,
+        95,
+        196,
+        54,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "roles",
+          "type": {
+            "defined": {
+              "name": "Roles"
+            }
+          }
+        },
+        {
+          "name": "maker_bps",
+          "type": "u16"
+        },
+        {
+          "name": "taker_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "create_market",
+      "discriminator": [
+        103,
+        226,
+        97,
+        235,
+        200,
+        188,
+        251,
+        254
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          }
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "arg",
+                "path": "id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "terms",
+          "type": {
+            "defined": {
+              "name": "Terms"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "deposit",
+      "discriminator": [
+        242,
+        35,
+        198,
+        137,
+        82,
+        225,
+        242,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "source",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "asset",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deposit_bounded",
+      "discriminator": [
+        211,
+        233,
+        173,
+        140,
+        8,
+        63,
+        27,
+        53
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "source",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "asset",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "minimum_credit",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "admin"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "roles",
+          "type": {
+            "defined": {
+              "name": "Roles"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "initialize_asset",
+      "discriminator": [
+        214,
+        153,
+        49,
+        248,
+        95,
+        248,
+        208,
+        179
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "asset",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "initialize_claim",
+      "discriminator": [
+        100,
+        184,
+        96,
+        221,
+        157,
+        222,
+        134,
+        17
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "asset",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "initialize_wallet",
+      "discriminator": [
+        213,
+        0,
+        239,
+        240,
+        73,
+        100,
+        188,
+        193
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "market"
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "trader",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  97,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.config",
+                "account": "Market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "invalidate_nonce",
+      "discriminator": [
+        223,
+        74,
+        15,
+        213,
+        131,
+        69,
+        11,
+        94
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "trader"
+          ]
+        },
+        {
+          "name": "trader",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  97,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "trader.config",
+                "account": "Trader"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "minimum",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "lifecycle",
+      "discriminator": [
+        211,
+        146,
+        198,
+        201,
+        148,
+        184,
+        16,
+        98
+      ],
+      "accounts": [
+        {
+          "name": "actor",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          },
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "action",
+          "type": "u8"
+        },
+        {
+          "name": "commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "merge",
+      "discriminator": [
+        148,
+        141,
+        236,
+        47,
+        174,
+        126,
+        69,
+        111
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "yes_mint",
+          "writable": true
+        },
+        {
+          "name": "no_mint",
+          "writable": true
+        },
+        {
+          "name": "yes_vault",
+          "writable": true
+        },
+        {
+          "name": "no_vault",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "underlying_vault"
+        }
+      ],
+      "args": [
+        {
+          "name": "collateral",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "pause",
+      "discriminator": [
+        211,
+        22,
+        221,
+        251,
+        74,
+        121,
+        193,
+        47
+      ],
+      "accounts": [
+        {
+          "name": "guardian",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        },
+        {
+          "name": "reason",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "place",
+      "discriminator": [
+        143,
+        53,
+        56,
+        40,
+        41,
+        16,
+        5,
+        75
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          },
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "order",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "base_vault"
+        },
+        {
+          "name": "quote_vault"
+        }
+      ],
+      "args": [
+        {
+          "name": "terms",
+          "type": {
+            "defined": {
+              "name": "OrderTerms"
+            }
+          }
+        },
+        {
+          "name": "plan",
+          "type": {
+            "defined": {
+              "name": "Plan"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "propose_admin",
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "successor",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "redeem",
+      "discriminator": [
+        184,
+        12,
+        86,
+        149,
+        70,
+        196,
+        97,
+        225
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "yes_mint",
+          "writable": true
+        },
+        {
+          "name": "no_mint",
+          "writable": true
+        },
+        {
+          "name": "yes_vault",
+          "writable": true
+        },
+        {
+          "name": "no_vault",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "underlying_vault"
+        }
+      ],
+      "args": [
+        {
+          "name": "collateral",
+          "type": "u8"
+        },
+        {
+          "name": "yes_amount",
+          "type": "u64"
+        },
+        {
+          "name": "no_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "resolve",
+      "discriminator": [
+        246,
+        150,
+        236,
+        206,
+        108,
+        63,
+        58,
+        10
+      ],
+      "accounts": [
+        {
+          "name": "actor",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          },
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "yes",
+          "type": "u8"
+        },
+        {
+          "name": "no",
+          "type": "u8"
+        },
+        {
+          "name": "evidence",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "uri",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "split",
+      "discriminator": [
+        124,
+        189,
+        27,
+        43,
+        216,
+        40,
+        147,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "yes_mint",
+          "writable": true
+        },
+        {
+          "name": "no_mint",
+          "writable": true
+        },
+        {
+          "name": "yes_vault",
+          "writable": true
+        },
+        {
+          "name": "no_vault",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "underlying_vault"
+        }
+      ],
+      "args": [
+        {
+          "name": "collateral",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "transfer_credit",
+      "discriminator": [
+        51,
+        61,
+        74,
+        6,
+        115,
+        204,
+        141,
+        155
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "source"
+          ]
+        },
+        {
+          "name": "market",
+          "relations": [
+            "source",
+            "destination"
+          ]
+        },
+        {
+          "name": "source",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "destination.owner",
+                "account": "Wallet"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "asset",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw",
+      "discriminator": [
+        183,
+        18,
+        70,
+        156,
+        148,
+        109,
+        161,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "asset",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_bounded",
+      "discriminator": [
+        147,
+        147,
+        9,
+        100,
+        136,
+        222,
+        112,
+        250
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "asset",
+          "type": "u8"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "minimum_received",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "Market",
+      "discriminator": [
+        219,
+        190,
+        213,
+        55,
+        0,
+        227,
+        198,
+        154
+      ]
+    },
+    {
+      "name": "Order",
+      "discriminator": [
+        134,
+        173,
+        223,
+        185,
+        77,
+        86,
+        28,
+        51
+      ]
+    },
+    {
+      "name": "Trader",
+      "discriminator": [
+        74,
+        133,
+        32,
+        105,
+        47,
+        50,
+        5,
+        238
+      ]
+    },
+    {
+      "name": "Wallet",
+      "discriminator": [
+        24,
+        89,
+        59,
+        139,
+        81,
+        154,
+        232,
+        95
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "Change",
+      "discriminator": [
+        74,
+        53,
+        52,
+        229,
+        246,
+        217,
+        240,
+        213
+      ]
+    },
+    {
+      "name": "Trade",
+      "discriminator": [
+        24,
+        254,
+        218,
+        152,
+        253,
+        43,
+        18,
+        81
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidAddress",
+      "msg": "Invalid or zero address"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidTerms",
+      "msg": "Invalid immutable terms or amount"
+    },
+    {
+      "code": 6002,
+      "name": "Unauthorized",
+      "msg": "Unauthorized signer"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidState",
+      "msg": "Invalid lifecycle transition"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidAsset",
+      "msg": "Invalid asset index or mint"
+    },
+    {
+      "code": 6005,
+      "name": "Arithmetic",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6006,
+      "name": "InsufficientFunds",
+      "msg": "Insufficient available balance"
+    },
+    {
+      "code": 6007,
+      "name": "Insolvent",
+      "msg": "Custody does not cover recorded liabilities"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidAccount",
+      "msg": "Account identity, owner, PDA or writability mismatch"
+    },
+    {
+      "code": 6009,
+      "name": "StalePlan",
+      "msg": "Stale execution plan"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidOrder",
+      "msg": "Order is not open or not releasable"
+    },
+    {
+      "code": 6011,
+      "name": "FeeCap",
+      "msg": "Current fees exceed the owner's cap"
+    },
+    {
+      "code": 6012,
+      "name": "AdminDelay",
+      "msg": "Admin transfer delay has not elapsed"
+    },
+    {
+      "code": 6013,
+      "name": "Commitment",
+      "msg": "Resolution does not match the prepared commitment"
+    },
+    {
+      "code": 6014,
+      "name": "UnsupportedTokenExtension",
+      "msg": "Token extension needs a separately reviewed issuer integration"
+    },
+    {
+      "code": 6015,
+      "name": "TransferSlippage",
+      "msg": "Actual spendable tokens received are below the signed minimum"
+    },
+    {
+      "code": 6016,
+      "name": "ClaimBacking",
+      "msg": "Conditional backing does not cover outstanding claim supply"
+    },
+    {
+      "code": 6017,
+      "name": "TokenDelta",
+      "msg": "Unexpected claim mint supply or custody balance delta"
+    },
+    {
+      "code": 6018,
+      "name": "FractionalRedemption",
+      "msg": "Redemption would discard a fractional raw unit; retain or combine the odd claim"
+    }
+  ],
+  "types": [
+    {
+      "name": "Change",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "account",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "asset",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Config",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "seed_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "roles",
+            "type": {
+              "defined": {
+                "name": "Roles"
+              }
+            }
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "maker_bps",
+            "type": "u16"
+          },
+          {
+            "name": "taker_bps",
+            "type": "u16"
+          },
+          {
+            "name": "pending_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin_after",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Leg",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quantity",
+            "type": "u64"
+          },
+          {
+            "name": "expected_remaining",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Market",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "terms",
+            "type": {
+              "defined": {
+                "name": "Terms"
+              }
+            }
+          },
+          {
+            "name": "mints",
+            "type": {
+              "array": [
+                "pubkey",
+                6
+              ]
+            }
+          },
+          {
+            "name": "decimals",
+            "type": {
+              "array": [
+                "u8",
+                2
+              ]
+            }
+          },
+          {
+            "name": "vaults_initialized",
+            "type": "u8"
+          },
+          {
+            "name": "state",
+            "type": "u8"
+          },
+          {
+            "name": "sequence",
+            "type": {
+              "array": [
+                "u64",
+                2
+              ]
+            }
+          },
+          {
+            "name": "open_notional",
+            "type": "u128"
+          },
+          {
+            "name": "credits",
+            "type": {
+              "array": [
+                "u128",
+                6
+              ]
+            }
+          },
+          {
+            "name": "escrow",
+            "type": {
+              "array": [
+                "u128",
+                6
+              ]
+            }
+          },
+          {
+            "name": "backing",
+            "type": {
+              "array": [
+                "u64",
+                2
+              ]
+            }
+          },
+          {
+            "name": "fees",
+            "type": {
+              "array": [
+                "u64",
+                4
+              ]
+            }
+          },
+          {
+            "name": "resolution_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "payouts",
+            "type": {
+              "array": [
+                "u8",
+                2
+              ]
+            }
+          },
+          {
+            "name": "evidence",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "evidence_uri",
+            "type": "string"
+          },
+          {
+            "name": "resolved_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Order",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "terms",
+            "type": {
+              "defined": {
+                "name": "OrderTerms"
+              }
+            }
+          },
+          {
+            "name": "remaining",
+            "type": "u64"
+          },
+          {
+            "name": "filled",
+            "type": "u64"
+          },
+          {
+            "name": "reserved",
+            "type": "u64"
+          },
+          {
+            "name": "open_notional",
+            "type": "u64"
+          },
+          {
+            "name": "sequence",
+            "type": "u64"
+          },
+          {
+            "name": "fee_carry",
+            "type": "u16"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderTerms",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "salt",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "quantity",
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "type": "u128"
+          },
+          {
+            "name": "expiry",
+            "type": "i64"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "max_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "branch",
+            "type": "u8"
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "funding",
+            "type": "u8"
+          },
+          {
+            "name": "tif",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Plan",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "deadline",
+            "type": "i64"
+          },
+          {
+            "name": "next_sequence",
+            "type": "u64"
+          },
+          {
+            "name": "maker_bps",
+            "type": "u16"
+          },
+          {
+            "name": "taker_bps",
+            "type": "u16"
+          },
+          {
+            "name": "legs",
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Leg"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Roles",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "guardian",
+            "type": "pubkey"
+          },
+          {
+            "name": "resolution_admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Terms",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "condition",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "yes_index",
+            "type": "u8"
+          },
+          {
+            "name": "no_index",
+            "type": "u8"
+          },
+          {
+            "name": "rules_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "metadata_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "metadata_uri",
+            "type": "string"
+          },
+          {
+            "name": "trading_open",
+            "type": "i64"
+          },
+          {
+            "name": "trading_cutoff",
+            "type": "i64"
+          },
+          {
+            "name": "tick",
+            "type": "u128"
+          },
+          {
+            "name": "step",
+            "type": "u64"
+          },
+          {
+            "name": "min_notional",
+            "type": "u64"
+          },
+          {
+            "name": "max_quantity",
+            "type": "u64"
+          },
+          {
+            "name": "max_order",
+            "type": "u64"
+          },
+          {
+            "name": "max_wallet",
+            "type": "u64"
+          },
+          {
+            "name": "max_market",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Trade",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "taker",
+            "type": "pubkey"
+          },
+          {
+            "name": "maker",
+            "type": "pubkey"
+          },
+          {
+            "name": "branch",
+            "type": "u8"
+          },
+          {
+            "name": "quantity",
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "type": "u128"
+          },
+          {
+            "name": "quote",
+            "type": "u64"
+          },
+          {
+            "name": "buyer_fee",
+            "type": "u64"
+          },
+          {
+            "name": "seller_fee",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Trader",
+      "docs": [
+        "Owner-wide invalidation across every market in this protocol deployment.",
+        "Never closed or reset when another market wallet is initialized."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "minimum_nonce",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Wallet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "balances",
+            "type": {
+              "array": [
+                "u64",
+                6
+              ]
+            }
+          },
+          {
+            "name": "open_notional",
+            "type": "u128"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+}

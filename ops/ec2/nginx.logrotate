@@ -1,0 +1,16 @@
+/var/log/nginx/*.log {
+    daily
+    maxsize 10M
+    rotate 7
+    missingok
+    notifempty
+    compress
+    delaycompress
+    dateext
+    dateformat -%Y%m%d-%H%M%S
+    create 0640 www-data adm
+    sharedscripts
+    postrotate
+        /usr/sbin/nginx -s reopen >/dev/null 2>&1 || true
+    endscript
+}
