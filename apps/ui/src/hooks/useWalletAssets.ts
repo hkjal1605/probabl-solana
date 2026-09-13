@@ -5,6 +5,8 @@ import { protocolConfig } from "@/config/protocol";
 import { api } from "@/lib/api/client";
 import type { MarketView } from "@/lib/api/types";
 import { spotUsdValue } from "@conditional-stocks/shared/spot-prices";
+import { readPollInterval } from "@/lib/api/read-policy";
+import { useReadFreshness } from "./useReadFreshness";
 
 export function assetsForMarkets(markets: MarketView[]) {
   return [
@@ -44,7 +46,9 @@ export function useWalletAssets(markets: MarketView[]) {
       queryKey: [
         "whole-balances",
         account,
-        protocolConfig.chainId,
+        protocolConfig.genesisHash,
+        protocolConfig.programId,
+        protocolConfig.config,
         asset.token,
       ],
       queryFn: async ({ signal }: { signal: AbortSignal }) => {
@@ -55,13 +59,15 @@ export function useWalletAssets(markets: MarketView[]) {
           balance.decimals !== asset.decimals ||
           !/^(0|[1-9][0-9]{0,77})$/.test(balance.canonicalBalance) ||
           BigInt(balance.canonicalBalance) >= 1n << 64n ||
-          Object.values(balance.creditBalances??{}).some(n=>!/^(0|[1-9][0-9]{0,19})$/.test(n)||BigInt(n)>=1n<<64n)
+          Object.values(balance.creditBalances ?? {}).some(
+            (n) => !/^(0|[1-9][0-9]{0,19})$/.test(n) || BigInt(n) >= 1n << 64n,
+          )
         )
           throw new Error("Invalid canonical balance or token metadata.");
         return balance;
       },
       enabled: Boolean(account),
-      refetchInterval: 8000,
+      refetchInterval: readPollInterval,
     })),
   });
   const balances = assets.flatMap((asset, index) => {
@@ -69,6 +75,12 @@ export function useWalletAssets(markets: MarketView[]) {
     return balance ? [{ ...asset, balance }] : [];
   });
   return {
+    ...useReadFreshness({
+      data: queries.length && queries.every((q) => q.data !== undefined) ? true : undefined,
+      dataUpdatedAt: Math.min(...queries.map((q) => q.dataUpdatedAt)),
+      isError: queries.some((q) => q.isError),
+      failureCount: Math.max(0, ...queries.map((q) => q.failureCount)),
+    }),
     assets,
     balances,
     isPending: queries.some((q) => q.isPending),

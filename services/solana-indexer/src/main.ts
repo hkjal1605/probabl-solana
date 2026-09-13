@@ -5,23 +5,14 @@ import {
   big,
   key,
   hex,
-  coder,
   walletAddress,
   type MarketAccount,
-  type WalletAccount,
   supportedMint,
 } from "@conditional-stocks/solana-client";
-import {
-  getAssociatedTokenAddressSync,
-  unpackAccount,
-} from "@solana/spl-token";
-import {
-  snapshot,
-  marketView,
-  indexedOrder,
-  liveOrder,
-  type Snapshot,
-} from "./projection.ts";
+import { getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token";
+import { snapshot, marketView, indexedOrder, liveOrder, type Snapshot } from "./projection.ts";
+import { ReadCache } from "@conditional-stocks/shared/read-cache";
+import { readPositions } from "./positions.ts";
 import { initializeHistory, replayHistory } from "./history.ts";
 import { reconcileVaults } from "./reconcile.ts";
 
@@ -34,9 +25,7 @@ const client = new SolanaClient({
   rpcUrl: required("SOLANA_RPC_URL"),
   config: required("SOLANA_CONFIG"),
   genesisHash: required("SOLANA_GENESIS_HASH"),
-  ...(process.env.SOLANA_PROGRAM_ID
-    ? { programId: process.env.SOLANA_PROGRAM_ID }
-    : {}),
+  ...(process.env.SOLANA_PROGRAM_ID ? { programId: process.env.SOLANA_PROGRAM_ID } : {}),
 });
 const db = new Pool({
   connectionString: required("DATABASE_URL"),
@@ -55,11 +44,7 @@ async function refresh() {
   try {
     const next = await snapshot(client);
     await replayHistory(db, client, domain, next.slot);
-    reconciliation = await reconcileVaults(
-      client,
-      [...next.markets.keys()],
-      next.slot,
-    );
+    reconciliation = await reconcileVaults(client, [...next.markets.keys()], next.slot);
     // A single atomic upsert prevents concurrent/restarted indexers publishing an older slot.
     await db.query(
       `INSERT INTO solana_snapshots VALUES ($1,$2,now(),$3::jsonb)
@@ -70,30 +55,32 @@ async function refresh() {
         next.slot,
         JSON.stringify({
           markets: [...next.markets].map(([id, m]) => marketView(id, m)),
-          orders: [...next.orders].map(([id, o]) =>
-            indexedOrder(id, o, next.slot),
-          ),
+          orders: [...next.orders].map(([id, o]) => indexedOrder(id, o, next.slot)),
         }),
       ],
     );
     current = next;
     lastError = null;
   } catch (error) {
-    lastError =
-      error instanceof Error ? error.message : "Indexer refresh failed";
+    lastError = error instanceof Error ? error.message : "Indexer refresh failed";
     console.error(lastError);
   }
 }
 await refresh();
 let stopped = false;
+let refreshFailures = 0;
 const loop = async () => {
   while (!stopped) {
-    await Bun.sleep(1500);
-    if (!stopped) await refresh();
+    await Bun.sleep(Math.min(15_000, 1500 * 2 ** Math.min(refreshFailures, 4)));
+    if (!stopped) {
+      await refresh();
+      refreshFailures = lastError ? refreshFailures + 1 : 0;
+    }
   }
 };
 const running = loop();
 const app = new Hono();
+const walletReads = new ReadCache(3000, 256, 2000);
 const state = () => {
   if (!current || lastError || Date.now() - current.observedAt > 15_000)
     throw new Error("Finalized indexer snapshot unavailable");
@@ -103,7 +90,11 @@ app.onError(
   (error) =>
     new Response(JSON.stringify({ error: { message: error.message } }), {
       status: 503,
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+        "retry-after": "3",
+      },
     }),
 );
 app.get("/health", (c) => {
@@ -133,8 +124,7 @@ app.get("/orders", (c) => {
     status = c.req.query("status");
   const rows = [...s.orders].filter(
     ([, o]) =>
-      (!maker || o.owner.toBase58() === maker) &&
-      (!status || status !== "open" || o.status === 1),
+      (!maker || o.owner.toBase58() === maker) && (!status || status !== "open" || o.status === 1),
   );
   return c.json({
     orders: rows.map(([id, o]) => indexedOrder(id, o, s.slot)),
@@ -155,99 +145,54 @@ app.get("/orderbook/:id", (c) => {
 app.get("/positions/:owner", async (c) => {
   const s = state(),
     owner = key(c.req.param("owner"));
-  const positions = [];
-  for (const [id, m] of s.markets) {
-    if (m.vaults_initialized !== 63) continue;
-    const addresses = [
-      walletAddress(key(id), owner, client.program),
-      ...m.mints
-        .slice(2)
-        .map((mint) => getAssociatedTokenAddressSync(mint, owner, true)),
-    ];
-    const response = await client.connection.getMultipleAccountsInfoAndContext(
-      addresses,
-      {
-        commitment: "finalized",
-        minContextSlot: s.slot,
-      },
-    );
-    const info = response.value[0];
-    if (info && !info.owner.equals(client.program))
-      throw new Error("Foreign position credit account");
-    const w = info
-      ? (coder.accounts.decode("Wallet", info.data) as WalletAccount)
-      : null;
-    const amounts = m.mints.slice(2).map((mint, i) => {
-      const tokenInfo = response.value[i + 1];
-      let external = 0n;
-      if (tokenInfo) {
-        const account = unpackAccount(addresses[i + 1]!, tokenInfo);
-        if (!account.owner.equals(owner) || !account.mint.equals(mint))
-          throw new Error("Position token identity mismatch");
-        external = account.amount;
-      }
-      return (external + (w ? big(w.balances[i + 2]!) : 0n)).toString();
-    });
-    if (amounts.every((n) => n === "0")) continue;
-    positions.push({
-      marketId: id,
-      conditionId: id,
-      stockYes: amounts[0],
-      stockNo: amounts[1],
-      quoteYes: amounts[2],
-      quoteNo: amounts[3],
-      redeemable: m.state === 6 || m.state === 7,
-      baseTokenDecimals: m.decimals[0],
-      quoteTokenDecimals: m.decimals[1],
-      protocolVersion: 2,
-      priceFormat: "raw-unit-ratio-x18",
-    });
-  }
-  return c.json({ positions });
+  c.header("Cache-Control", "no-store");
+  const response = await walletReads.get(`positions:${owner}`, () =>
+    readPositions(client, s, owner),
+  );
+  state(); // Don't publish cached wallet reads after indexer integrity/readiness failed.
+  return c.json(response);
 });
 app.get("/balances/:owner", async (c) => {
   const owner = key(c.req.param("owner")),
     mint = key(c.req.query("token") ?? "");
-  const metadata = await supportedMint(client.connection, mint);
-  let amount = 0n;
-  const ata = getAssociatedTokenAddressSync(
-      mint,
-      owner,
-      true,
-      metadata.program,
-    ),
-    info = await client.connection.getAccountInfo(ata);
-  if (info) amount = unpackAccount(ata, info, metadata.program).amount;
-  const s = state(),
-    creditBalances: Record<string, string> = {};
-  for (const [id, m] of s.markets) {
-    const asset = m.mints.findIndex((k) => k.equals(mint)),
-      w = s.wallets.get(
-        walletAddress(key(id), owner, client.program).toBase58(),
-      );
-    if (asset >= 0 && w) creditBalances[id] = w.balances[asset]!.toString();
-  }
-  return c.json({
-    account: owner.toBase58(),
-    token: mint.toBase58(),
-    decimals: metadata.decimals,
-    tokenProgram: metadata.program.toBase58(),
-    extensions: metadata.extensions,
-    issuerCanFreeze: metadata.freezeAuthority !== null,
-    amountFormat: "raw-units-decimal-formatted",
-    canonicalBalance: amount.toString(),
-    creditBalances,
-    blockNumber: String(s.slot),
+  state();
+  c.header("Cache-Control", "no-store");
+  const response = await walletReads.get(`balance:${owner}:${mint}`, async () => {
+    const metadata = await supportedMint(client.connection, mint);
+    let amount = 0n;
+    const ata = getAssociatedTokenAddressSync(mint, owner, true, metadata.program),
+      info = await client.connection.getAccountInfo(ata);
+    if (info) amount = unpackAccount(ata, info, metadata.program).amount;
+    const s = state(),
+      creditBalances: Record<string, string> = {};
+    for (const [id, m] of s.markets) {
+      const asset = m.mints.findIndex((k) => k.equals(mint)),
+        w = s.wallets.get(walletAddress(key(id), owner, client.program).toBase58());
+      if (asset >= 0 && w) creditBalances[id] = w.balances[asset]!.toString();
+    }
+    return {
+      account: owner.toBase58(),
+      token: mint.toBase58(),
+      decimals: metadata.decimals,
+      tokenProgram: metadata.program.toBase58(),
+      extensions: metadata.extensions,
+      issuerCanFreeze: metadata.freezeAuthority !== null,
+      amountFormat: "raw-units-decimal-formatted",
+      canonicalBalance: amount.toString(),
+      creditBalances,
+      blockNumber: String(s.slot),
+      observedAt: Date.now(),
+    };
   });
+  state();
+  return c.json(response);
 });
 app.get("/payouts/:owner", (c) => {
   const s = state(),
     owner = key(c.req.param("owner")),
     payouts = [];
   for (const [id, m] of s.markets) {
-    const w = s.wallets.get(
-      walletAddress(key(id), owner, client.program).toBase58(),
-    );
+    const w = s.wallets.get(walletAddress(key(id), owner, client.program).toBase58());
     if (!w) continue;
     for (let asset = 0; asset < 6; asset++) {
       const amount = big(w.balances[asset]!);
@@ -276,14 +221,12 @@ app.get("/payouts/:owner", (c) => {
 });
 app.get("/resolutions/:id", async (c) => {
   const m: MarketAccount | undefined = state().markets.get(c.req.param("id"));
-  if (!m || ![6, 7].includes(m.state))
-    return c.json({ error: "not-found" }, 404);
+  if (!m || ![6, 7].includes(m.state)) return c.json({ error: "not-found" }, 404);
   const event = await db.query(
     `SELECT signature,data FROM solana_events WHERE domain=$1 AND market=$2 AND name='Change' AND data->>'kind'='3' ORDER BY slot DESC LIMIT 1`,
     [domain, c.req.param("id")],
   );
-  if (!event.rows[0])
-    throw new Error("Resolution transaction has not been indexed");
+  if (!event.rows[0]) throw new Error("Resolution transaction has not been indexed");
   return c.json({
     admin: event.rows[0].data.account,
     evidenceHash: hex(m.evidence),

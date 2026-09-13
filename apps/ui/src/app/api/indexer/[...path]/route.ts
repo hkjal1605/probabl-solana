@@ -39,8 +39,11 @@ export async function GET(
       await response.body?.cancel();
       throw new Error("Indexer redirects are not permitted");
     }
+    const headers = new Headers({ ...privateResponseHeaders, "content-type": "application/json" });
+    const retryAfter = response.headers.get("retry-after");
+    if (retryAfter) headers.set("retry-after", retryAfter);
     return new Response(response.body, {
-      headers: { ...privateResponseHeaders, "content-type": "application/json" },
+      headers,
       status: response.status,
     });
   } catch (error) {

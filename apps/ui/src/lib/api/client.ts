@@ -7,12 +7,14 @@ import type {
   TradeView,
   WholeBalanceView,
 } from "./types";
+import { retryAfterMs } from "./read-policy";
 
 export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
     public readonly requestId: string | null,
+    public readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = "ApiError";
@@ -58,7 +60,12 @@ export async function requestJson<T>(
       error && typeof error === "object" && "message" in error && typeof error.message === "string"
         ? error.message
         : `Data unavailable (${response.status})`;
-    throw new ApiError(message, response.status, response.headers.get("x-request-id"));
+    throw new ApiError(
+      message,
+      response.status,
+      response.headers.get("x-request-id"),
+      retryAfterMs(response.headers.get("retry-after")),
+    );
   }
   return response.json() as Promise<T>;
 }
@@ -102,9 +109,22 @@ export const api = {
       throw error;
     }
   },
-  readiness: (marketId: string, signal?: AbortSignal) =>
-    requestJson<{ healthy: boolean }>(
+  readiness: async (marketId: string, signal?: AbortSignal) => {
+    const result = await requestJson<{ healthy: boolean; reason?: string; checkedAt?: number }>(
       `/api/gateway/system/readiness?marketId=${encodeURIComponent(marketId)}`,
       signal ? { signal } : {},
-    ),
+    );
+    if (
+      typeof result?.healthy !== "boolean" ||
+      (result.checkedAt !== undefined &&
+        (!Number.isSafeInteger(result.checkedAt) ||
+          result.checkedAt <= 0 ||
+          result.checkedAt > Date.now() + 5000)) ||
+      (result.reason !== undefined &&
+        !["ready", "closed", "scheduled", "paused", "unavailable"].includes(result.reason)) ||
+      (result.reason !== undefined && result.healthy !== (result.reason === "ready"))
+    )
+      throw new Error("Invalid trading readiness response");
+    return result;
+  },
 };

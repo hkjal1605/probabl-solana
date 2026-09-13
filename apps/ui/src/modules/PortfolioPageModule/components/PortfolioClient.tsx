@@ -22,6 +22,7 @@ import { groupMarkets } from "@/lib/markets/presentation";
 import { orderHistoryCsv, wholeReserved } from "@/lib/portfolio/presentation";
 import { OrdersClient } from "@/modules/OrdersPageModule/components/OrdersClient";
 import { PendingPayouts } from "./PendingPayouts";
+import { RefreshStatus } from "@/components/data/RefreshStatus";
 
 export function PortfolioClient({ markets: initial }: { markets: MarketView[] }) {
   const wallet = useWallet(),
@@ -49,14 +50,17 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
   const known =
     Boolean(
       !assetQuery.isPending &&
-        !assetQuery.isError &&
+        !assetQuery.isInitialError &&
         !ordersQuery.isPending &&
-        !ordersQuery.isError &&
+        !ordersQuery.isInitialError &&
         !ordersQuery.data?.openTruncated &&
-        !marketQuery.isError,
+        !marketQuery.isInitialError,
     ) && balances.length > 0;
   const total =
     known &&
+    assetQuery.isDataFresh &&
+    ordersQuery.isDataFresh &&
+    marketQuery.isDataFresh &&
     balances.every(
       (a) => a.reference !== null || BigInt(a.balance.canonicalBalance) + a.reserved === 0n,
     )
@@ -102,7 +106,16 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
         </section>
       ) : (
         <>
-          {marketQuery.isError && (
+          <RefreshStatus
+            active={
+              marketQuery.isRefreshError ||
+              assetQuery.isRefreshError ||
+              ordersQuery.isRefreshError ||
+              positionsQuery.isRefreshError
+            }
+            label="portfolio data"
+          />
+          {marketQuery.isInitialError && (
             <DataError
               message="Market metadata is unavailable. Asset totals may be incomplete."
               retry={() => {
@@ -110,7 +123,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
               }}
             />
           )}
-          {(ordersQuery.isError || positionsQuery.isError) && (
+          {(ordersQuery.isInitialError || positionsQuery.isInitialError) && (
             <DataError
               message="Some holdings or order reservations could not be loaded."
               retry={() => {
@@ -167,7 +180,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                   </p>
                 </div>
               ))}
-              {assetQuery.isError && (
+              {assetQuery.isInitialError && (
                 <DataError
                   message="Canonical wallet balances are unavailable."
                   retry={() => {
@@ -202,7 +215,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
             <OrderHistory
               markets={markets}
               orders={ordersQuery.orders}
-              error={ordersQuery.isError}
+              error={ordersQuery.isInitialError}
               truncated={ordersQuery.data?.truncated ?? false}
             />
           </div>

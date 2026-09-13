@@ -3,6 +3,7 @@ import { Button } from "@conditional-stocks/ui-kit/button";
 import { useMemo, useState } from "react";
 import { EmptyState } from "@/components/ui/page";
 import { useTrades } from "@/hooks/useProtocolData";
+import { RefreshStatus } from "@/components/data/RefreshStatus";
 import type { MarketView, TradeView } from "@/lib/api/types";
 import { formatNumber } from "@/lib/format/display";
 import { executionImpact, executionPoints } from "@/lib/markets/history";
@@ -75,6 +76,7 @@ export function PriceChart({
           </fieldset>
         </div>
       )}
+      {!mini && <RefreshStatus active={query.isRefreshError} label="trade history" />}
       <div
         className="relative min-h-60"
         onPointerMove={(event) => {

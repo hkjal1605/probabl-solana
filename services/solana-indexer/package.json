@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@conditional-stocks/shared": "workspace:*",
     "@conditional-stocks/solana-client": "workspace:*",
     "@solana/web3.js": "1.98.4",
     "@solana/spl-token": "0.4.14",

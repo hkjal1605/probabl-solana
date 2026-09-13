@@ -30,14 +30,12 @@ export function SpotReference({ price }: { price: SpotPrice | undefined }) {
         {price?.priceUsd ? formatSpotUsd(price.priceUsd) : "—"}
       </div>
       <div className="mt-2 text-xs font-medium text-muted-foreground">Spot reference · USD</div>
-      {label && (
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          {label}
-          {price?.priceUsd && ["stale", "unavailable", "restricted"].includes(status ?? "")
-            ? " · last known"
-            : ""}
-        </p>
-      )}
+      <div className="mt-1 min-h-4 text-[11px] text-muted-foreground">
+        {label}
+        {price?.priceUsd && ["stale", "unavailable", "restricted"].includes(status ?? "")
+          ? " · last known"
+          : ""}
+      </div>
     </div>
   );
 }

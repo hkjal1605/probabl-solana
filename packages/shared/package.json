@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./http": "./src/http.ts",
     "./endpoints": "./src/endpoints.ts",
-    "./spot-prices": "./src/spot-prices.ts"
+    "./spot-prices": "./src/spot-prices.ts",
+    "./read-cache": "./src/read-cache.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

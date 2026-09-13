@@ -36,7 +36,7 @@ interface Preparation {
 }
 export function useOrderTicket({ market }: { market: MarketView }) {
   const wallet = useWallet(),
-    readiness = useTradingReadiness(market.id);
+    readiness = useTradingReadiness(market);
   const [branch, setBranch] = useState<"YES" | "NO">("YES"),
     [side, setSide] = useState<"buy" | "sell">("buy"),
     [tif, setTif] = useState<"gtc" | "ioc">("gtc"),
@@ -49,54 +49,27 @@ export function useOrderTicket({ market }: { market: MarketView }) {
   const [preparation, setPreparation] = useState<Preparation | null>(null),
     [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const { busy, run } = useAsyncAction(
-    [
-      wallet.account,
-      market.id,
-      branch,
-      side,
-      tif,
-      funding,
-      quantity,
-      price,
-      maxFeeBps,
-    ].join(":"),
+    [wallet.account, market.id, branch, side, tif, funding, quantity, price, maxFeeBps].join(":"),
   );
   useEffect(() => {
     setPreparation(null);
-  }, [
-    wallet.account,
-    market.id,
-    branch,
-    side,
-    tif,
-    funding,
-    quantity,
-    price,
-    maxFeeBps,
-  ]);
+  }, [wallet.account, market.id, branch, side, tif, funding, quantity, price, maxFeeBps]);
   useEffect(() => {
     if (!preparation) return;
-    const timer = setInterval(
-      () => setNowSeconds(Math.floor(Date.now() / 1000)),
-      1000,
-    );
+    const timer = setInterval(() => setNowSeconds(Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(timer);
   }, [preparation]);
   const quoteExpired = preparation
     ? BigInt(preparation.plan.deadline) <= BigInt(nowSeconds)
     : false;
-  const preview = useMemo(
-    () => previewOrder(quantity, price, market),
-    [quantity, price, market],
-  );
+  const preview = useMemo(() => previewOrder(quantity, price, market), [quantity, price, market]);
   const prepare = () =>
     run(async (assertCurrent) => {
       setPreparation(null);
-      if (!readiness.ready) throw new Error(readiness.reason);
+      await readiness.requireReady();
+      assertCurrent();
       if (!wallet.account || !preview.valid)
-        throw new Error(
-          "Connect your wallet and enter a valid quantity and price.",
-        );
+        throw new Error("Connect your wallet and enter a valid quantity and price.");
       await wallet.ensureNetwork();
       const token = wallet.sessionToken ?? (await wallet.authenticate());
       assertCurrent();
@@ -115,11 +88,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
           tif,
         }),
       );
-      const result = await api.prepare<Preparation>(
-        "orders/prepare",
-        { order: candidate },
-        token,
-      );
+      const result = await api.prepare<Preparation>("orders/prepare", { order: candidate }, token);
       const localFunding = await solana().funding(candidate);
       if (localFunding.approvalCall)
         verifyEnvelope(localFunding.approvalCall, {
@@ -140,6 +109,8 @@ export function useOrderTicket({ market }: { market: MarketView }) {
   const approve = () =>
     run(async (assertCurrent) => {
       if (!preparation?.funding.approvalCall) return;
+      await readiness.requireReady();
+      assertCurrent();
       const fresh = await solana().funding(preparation.order);
       assertCurrent();
       if (!fresh.approvalCall || !fresh.balanceSufficient)
@@ -148,19 +119,18 @@ export function useOrderTicket({ market }: { market: MarketView }) {
         transaction: preparation.funding.approvalCall,
       });
       await wallet.sendTransaction(fresh.approvalCall);
-      toast.success(
-        "Order funding confirmed. Review the execution quote again.",
-      );
+      toast.success("Order funding confirmed. Review the execution quote again.");
       setPreparation(null);
     });
   const submit = () =>
     run(async (assertCurrent) => {
       if (!preparation || !wallet.account || !readiness.ready)
         throw new Error("Review a currently tradable order first.");
+      await readiness.requireReady();
+      assertCurrent();
       if (
         preparation.order.maker !== wallet.account ||
-        BigInt(preparation.plan.deadline) <=
-          BigInt(Math.floor(Date.now() / 1000))
+        BigInt(preparation.plan.deadline) <= BigInt(Math.floor(Date.now() / 1000))
       )
         throw new Error("Wallet changed or quote expired.");
       const expected = atomicTransaction({

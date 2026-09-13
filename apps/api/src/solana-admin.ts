@@ -33,6 +33,7 @@ import {
   noOutcome,
 } from "@conditional-stocks/market-data";
 import { PolymarketIngestorClient } from "./polymarket-client.ts";
+import { ReadCache } from "@conditional-stocks/shared/read-cache";
 
 const creationChecks = [
   "stock-and-quote",
@@ -67,6 +68,12 @@ export async function mountSolanaAdmin(
   domain: string,
   authenticate: (header: string | undefined) => Promise<string>,
 ) {
+  // Only informational public reads share this cache; all governance actions stay live.
+  const publicReads = new ReadCache(3000);
+  const publicMarket = (id: string) => {
+    const market = key(address(id));
+    return publicReads.get(market.toBase58(), () => client.market(market));
+  };
   await db.query(`CREATE TABLE IF NOT EXISTS solana_evidence(domain text NOT NULL,hash text NOT NULL,envelope jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(domain,hash));
     CREATE TABLE IF NOT EXISTS solana_evidence_actions(id uuid PRIMARY KEY,domain text NOT NULL,packet_hash text NOT NULL,kind text NOT NULL,actor text NOT NULL,payload jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
     CREATE INDEX IF NOT EXISTS solana_evidence_actions_packet ON solana_evidence_actions(domain,packet_hash,created_at);
@@ -434,7 +441,7 @@ export async function mountSolanaAdmin(
     });
   });
   app.get("/v1/markets/:id/polymarket", async (c) => {
-    const m = await client.market(key(address(c.req.param("id")))),
+    const m = await publicMarket(c.req.param("id")),
       source = polymarket(),
       metadata = await source.metadata(hex(m.terms.condition));
     assertMapping(metadata.normalized, m);
@@ -447,7 +454,7 @@ export async function mountSolanaAdmin(
     });
   });
   app.get("/v1/markets/:id/probability", async (c) => {
-    const m = await client.market(key(address(c.req.param("id"))));
+    const m = await publicMarket(c.req.param("id"));
     return c.json({
       informationalOnly: true,
       probability: await polymarket().probability(hex(m.terms.condition)),

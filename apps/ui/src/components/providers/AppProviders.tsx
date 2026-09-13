@@ -7,12 +7,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { UiStateProvider } from "./UiStateProvider";
 import { WalletProvider } from "./WalletProvider";
+import { readQueryDefaults } from "@/lib/api/read-policy";
 
 export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
-        defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1, staleTime: 10_000 } },
+        defaultOptions: { queries: readQueryDefaults },
       }),
   );
   return (

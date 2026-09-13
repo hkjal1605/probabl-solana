@@ -23,10 +23,7 @@ import { marketPriceBound, quantityForSpend } from "@/lib/trading/entry";
 
 export function OrderTicket({ market }: { market: MarketView }) {
   const t = useOrderTicket({ market });
-  const quantityLabel = formatTokenAmount(
-    BigInt(t.preview.quantityRaw),
-    market.baseTokenDecimals,
-  );
+  const quantityLabel = formatTokenAmount(BigInt(t.preview.quantityRaw), market.baseTokenDecimals);
   const prefill = useUiStore((s) => s.prefill);
   const setPrefill = useUiStore((s) => s.setPrefill);
   const assets = useWalletAssets([market]),
@@ -42,9 +39,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
     t.setSide("sell");
     t.setFunding("claim");
     t.setQuantity(prefill.quantity);
-    t.setPrice(
-      (prefill.branch === "YES" ? market.yes : market.no).bestBidExact ?? "",
-    );
+    t.setPrice((prefill.branch === "YES" ? market.yes : market.no).bestBidExact ?? "");
     t.setPreparation(null);
     setEntry("Quantity");
     setKind("Limit");
@@ -67,11 +62,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
     setEntryError(null);
     action();
   };
-  const priceFor = (
-    branch: "YES" | "NO",
-    side: "buy" | "sell",
-    orderKind = kind,
-  ) => {
+  const priceFor = (branch: "YES" | "NO", side: "buy" | "sell", orderKind = kind) => {
     try {
       return orderKind === "Market"
         ? marketPriceBound(market, branch, side)
@@ -116,8 +107,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
           ).toString()
         : null
       : claim;
-  const balanceError =
-    t.funding === "whole" ? assets.isError : positions.isError;
+  const balanceError = t.funding === "whole" ? !assets.isDataFresh : !positions.isDataFresh;
   const maxQuantity = () =>
     edit(() => {
       if (available === null || balanceError) return;
@@ -130,26 +120,19 @@ export function OrderTicket({ market }: { market: MarketView }) {
                 market,
               )
             : formatTokenAmount(
-                (BigInt(available) / BigInt(market.baseStep)) *
-                  BigInt(market.baseStep),
+                (BigInt(available) / BigInt(market.baseStep)) * BigInt(market.baseStep),
                 market.baseTokenDecimals,
               );
         setEntry("Quantity");
         t.setQuantity(value);
       } catch (error) {
         setEntryError(
-          error instanceof Error
-            ? error.message
-            : "Available balance cannot fund an order.",
+          error instanceof Error ? error.message : "Available balance cannot fund an order.",
         );
       }
     });
   return (
-    <aside
-      id="trade-ticket"
-      className="panel p-5"
-      aria-label="Trade conditional stock"
-    >
+    <aside id="trade-ticket" className="panel p-5" aria-label="Trade conditional stock">
       <div className="mb-5 flex items-center justify-between gap-2">
         <h2 className="text-base font-semibold">Trade conditional stock</h2>
         <span className="text-xs text-muted-foreground">Self-custodied</span>
@@ -189,9 +172,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                 {market.ticker}-{branch}
               </strong>
               <span className="font-mono text-xs">
-                {formatNumber(
-                  (branch === "YES" ? market.yes : market.no).bestAsk,
-                )}
+                {formatNumber((branch === "YES" ? market.yes : market.no).bestAsk)}
               </span>
             </Button>
           ))}
@@ -199,15 +180,19 @@ export function OrderTicket({ market }: { market: MarketView }) {
         {!prepared ? (
           <>
             <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
-              <span>
+              <span
+                title={
+                  balanceError && available !== null
+                    ? "Last-known balance; refreshing before it can be used."
+                    : undefined
+                }
+              >
                 Available{" "}
-                {available === null || balanceError
+                {available === null
                   ? "—"
                   : formatTokenAmount(
                       BigInt(available),
-                      t.side === "buy"
-                        ? market.quoteTokenDecimals
-                        : market.baseTokenDecimals,
+                      t.side === "buy" ? market.quoteTokenDecimals : market.baseTokenDecimals,
                     )}{" "}
                 {t.side === "buy" ? "USDC" : market.ticker}
                 {t.funding === "claim" ? `-${t.branch}` : ""}
@@ -228,42 +213,26 @@ export function OrderTicket({ market }: { market: MarketView }) {
               <div className="mt-2 flex items-center rounded-lg border bg-background pr-3">
                 <Input
                   id="ticket-quantity"
-                  aria-label={
-                    entry === "Spend" && t.side === "buy" ? "Spend" : "Quantity"
-                  }
+                  aria-label={entry === "Spend" && t.side === "buy" ? "Spend" : "Quantity"}
                   className="h-12 border-0 bg-transparent font-mono text-lg shadow-none"
                   inputMode="decimal"
-                  value={
-                    entry === "Spend" && t.side === "buy" ? spend : t.quantity
-                  }
+                  value={entry === "Spend" && t.side === "buy" ? spend : t.quantity}
                   onChange={(event) =>
                     edit(() => {
                       if (entry === "Spend" && t.side === "buy") {
                         setSpend(event.target.value);
                         try {
-                          t.setQuantity(
-                            quantityForSpend(
-                              event.target.value,
-                              t.price,
-                              market,
-                            ),
-                          );
+                          t.setQuantity(quantityForSpend(event.target.value, t.price, market));
                         } catch (error) {
                           t.setQuantity("");
-                          setEntryError(
-                            error instanceof Error
-                              ? error.message
-                              : "Invalid amount",
-                          );
+                          setEntryError(error instanceof Error ? error.message : "Invalid amount");
                         }
                       } else t.setQuantity(event.target.value);
                     })
                   }
                 />
                 <span className="text-xs font-medium text-muted-foreground">
-                  {entry === "Spend" && t.side === "buy"
-                    ? "USDC"
-                    : market.ticker}
+                  {entry === "Spend" && t.side === "buy" ? "USDC" : market.ticker}
                 </span>
               </div>
             </div>
@@ -298,9 +267,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                     t.setPrice(event.target.value);
                     if (entry === "Spend") {
                       try {
-                        t.setQuantity(
-                          quantityForSpend(spend, event.target.value, market),
-                        );
+                        t.setQuantity(quantityForSpend(spend, event.target.value, market));
                       } catch {
                         t.setQuantity("");
                       }
@@ -311,9 +278,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
               <span className="text-xs text-muted-foreground">USDC</span>
             </div>
             <details className="rounded-lg border p-3 text-sm">
-              <summary className="cursor-pointer font-medium">
-                Advanced order controls
-              </summary>
+              <summary className="cursor-pointer font-medium">Advanced order controls</summary>
               <div className="mt-4 space-y-4">
                 {t.side === "buy" && (
                   <Segmented
@@ -338,8 +303,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                       disabled={kind === "Market"}
                       value={t.tif}
                       onValueChange={(value) => {
-                        if (value === "gtc" || value === "ioc")
-                          edit(() => t.setTif(value));
+                        if (value === "gtc" || value === "ioc") edit(() => t.setTif(value));
                       }}
                     >
                       <SelectTrigger id="ticket-tif" className="mt-2 w-full">
@@ -356,14 +320,10 @@ export function OrderTicket({ market }: { market: MarketView }) {
                     <Select
                       value={t.funding}
                       onValueChange={(value) => {
-                        if (value === "whole" || value === "claim")
-                          edit(() => t.setFunding(value));
+                        if (value === "whole" || value === "claim") edit(() => t.setFunding(value));
                       }}
                     >
-                      <SelectTrigger
-                        id="ticket-funding"
-                        className="mt-2 w-full"
-                      >
+                      <SelectTrigger id="ticket-funding" className="mt-2 w-full">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -375,9 +335,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                 </div>
                 {
                   <div>
-                    <Label htmlFor="max-fee-bps">
-                      Maximum trading fee (bps)
-                    </Label>
+                    <Label htmlFor="max-fee-bps">Maximum trading fee (bps)</Label>
                     <Input
                       id="max-fee-bps"
                       type="number"
@@ -385,23 +343,17 @@ export function OrderTicket({ market }: { market: MarketView }) {
                       max="1000"
                       step="1"
                       value={t.maxFeeBps}
-                      onChange={(e) =>
-                        edit(() => t.setMaxFeeBps(e.target.value))
-                      }
+                      onChange={(e) => edit(() => t.setMaxFeeBps(e.target.value))}
                     />
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                      100 bps = 1%. Fees come from received active claims. A
-                      fill above your signed cap reverts; inactive claims are
-                      unaffected.
+                      100 bps = 1%. Fees come from received active claims. A fill above your signed
+                      cap reverts; inactive claims are unaffected.
                     </p>
                   </div>
                 }
                 <p className="text-xs text-muted-foreground">
                   Quantity step:{" "}
-                  {formatTokenAmount(
-                    BigInt(market.baseStep),
-                    market.baseTokenDecimals,
-                  )}{" "}
+                  {formatTokenAmount(BigInt(market.baseStep), market.baseTokenDecimals)}{" "}
                   {market.ticker}. IOC releases any unfilled remainder.
                 </p>
               </div>
@@ -411,11 +363,9 @@ export function OrderTicket({ market }: { market: MarketView }) {
                 {entryError}
               </p>
             )}
-            {!t.readiness.ready && (
-              <p role="status" className="text-sm text-warning">
-                {t.readiness.reason}
-              </p>
-            )}
+            <p role="status" className="min-h-5 text-xs text-muted-foreground">
+              {!t.readiness.ready ? t.readiness.reason : null}
+            </p>
             <Button
               variant="brand"
               className="w-full text-sm"
@@ -423,14 +373,10 @@ export function OrderTicket({ market }: { market: MarketView }) {
               disabled={
                 t.busy ||
                 (Boolean(t.wallet.account) &&
-                  (!t.preview.valid ||
-                    !t.readiness.ready ||
-                    market.lifecycle !== "open"))
+                  (!t.preview.valid || !t.readiness.ready || market.lifecycle !== "open"))
               }
               onClick={() =>
-                t.wallet.account
-                  ? t.prepare()
-                  : t.wallet.connect().catch(() => undefined)
+                t.wallet.account ? t.prepare() : t.wallet.connect().catch(() => undefined)
               }
             >
               {t.busy && <LoaderCircle className="animate-spin" />}
@@ -441,11 +387,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
           <>
             <div className="flex items-center justify-between">
               <strong>Review order</strong>
-              <Button
-                variant="link"
-                size="sm"
-                onClick={() => t.setPreparation(null)}
-              >
+              <Button variant="link" size="sm" onClick={() => t.setPreparation(null)}>
                 Edit order
               </Button>
             </div>
@@ -454,14 +396,8 @@ export function OrderTicket({ market }: { market: MarketView }) {
                 label="Order"
                 value={`${t.side} ${quantityLabel} ${market.ticker}-${t.branch}`}
               />
-              <Row
-                label="Price · TIF"
-                value={`${t.price} · ${t.tif.toUpperCase()}`}
-              />
-              <Row
-                label="Funding"
-                value={t.funding === "whole" ? "Whole token" : "Active claim"}
-              />
+              <Row label="Price · TIF" value={`${t.price} · ${t.tif.toUpperCase()}`} />
+              <Row label="Funding" value={t.funding === "whole" ? "Whole token" : "Active claim"} />
               {prepared.plan && (
                 <>
                   <Row
@@ -490,11 +426,9 @@ export function OrderTicket({ market }: { market: MarketView }) {
             )}
             {BigInt(prepared.funding.transferFee ?? "0") > 0n && (
               <p className="text-sm text-warning">
-                Issuer transfer fee: {prepared.funding.transferFee} raw
-                funding-token units. Your wallet deposit is{" "}
-                {prepared.funding.depositAmount} raw units, including this fee.
-                Vault credit excludes the fee; withdrawal may incur another
-                issuer fee.
+                Issuer transfer fee: {prepared.funding.transferFee} raw funding-token units. Your
+                wallet deposit is {prepared.funding.depositAmount} raw units, including this fee.
+                Vault credit excludes the fee; withdrawal may incur another issuer fee.
               </p>
             )}
             {t.quoteExpired && (
@@ -505,10 +439,9 @@ export function OrderTicket({ market }: { market: MarketView }) {
             {prepared.plan && (
               <>
                 <p className="text-xs leading-5 text-muted-foreground">
-                  All reviewed fills execute together or revert. You pay gas,
-                  including for a reverted transaction. Received assets and
-                  refunds are credited to you and can be withdrawn from
-                  Portfolio.
+                  All reviewed fills execute together or revert. You pay gas, including for a
+                  reverted transaction. Received assets and refunds are credited to you and can be
+                  withdrawn from Portfolio.
                 </p>
                 <Button variant="outline" size="sm" onClick={t.prepare}>
                   Refresh quote
@@ -522,14 +455,13 @@ export function OrderTicket({ market }: { market: MarketView }) {
               onClick={prepared.funding.approvalCall ? t.approve : t.submit}
               disabled={
                 t.busy ||
+                !t.readiness.ready ||
                 !prepared.funding.balanceSufficient ||
                 (!prepared.funding.approvalCall && Boolean(t.quoteExpired))
               }
             >
               {t.busy && <LoaderCircle className="animate-spin" />}
-              {prepared.funding.approvalCall
-                ? "Fund order vault"
-                : "Sign and place atomically"}
+              {prepared.funding.approvalCall ? "Fund order vault" : "Sign and place atomically"}
             </Button>
           </>
         )}
@@ -545,11 +477,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
         />
         <Row
           label="Maximum reservation"
-          value={
-            t.side === "buy"
-              ? formatUsd(t.preview.cost)
-              : `${quantityLabel} ${market.ticker}`
-          }
+          value={t.side === "buy" ? formatUsd(t.preview.cost) : `${quantityLabel} ${market.ticker}`}
         />
         <div className="grid grid-cols-2 gap-2 text-xs leading-5">
           <div className="rounded-lg border border-positive/30 bg-positive-soft p-3">
@@ -562,13 +490,12 @@ export function OrderTicket({ market }: { market: MarketView }) {
           </div>
         </div>
         <p className="text-xs leading-5 text-muted-foreground">
-          Outcomes illustrate a full fill at your limit before fees. Partial
-          fills, price improvement and released IOC quantities change the actual
-          claims received.
+          Outcomes illustrate a full fill at your limit before fees. Partial fills, price
+          improvement and released IOC quantities change the actual claims received.
         </p>
         <p className="text-xs leading-5 text-muted-foreground">
-          One user transaction places and matches your order. Exact vault
-          funding, if needed, is separate. Balances update after indexing.
+          One user transaction places and matches your order. Exact vault funding, if needed, is
+          separate. Balances update after indexing.
         </p>
       </div>
     </aside>

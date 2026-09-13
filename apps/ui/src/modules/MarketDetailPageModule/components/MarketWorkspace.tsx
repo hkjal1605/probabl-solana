@@ -4,6 +4,7 @@ import { Tabs, TabsContent } from "@conditional-stocks/ui-kit/tabs";
 import Link from "next/link";
 import { useState } from "react";
 import { LifecycleBadge } from "@/components/data/StatusBadge";
+import { RefreshStatus } from "@/components/data/RefreshStatus";
 import { PriceChart } from "@/components/market/PriceChart";
 import { SpotReference } from "@/components/market/SpotReference";
 import { TokenIdentity } from "@/components/market/TokenIdentity";
@@ -162,20 +163,11 @@ export function MarketWorkspace({
           }
         />
       </div>
-      {query.isError && (
-        <DataError
-          message="Live market refresh failed. Displayed quotes may be stale; review again before signing."
-          retry={() => {
-            void query.refetch();
-          }}
-        />
-      )}
-      {market.bookQuality && market.bookQuality !== "available" && (
+      <RefreshStatus active={query.isRefreshError} label="market data" />
+      {market.bookQuality === "truncated" && (
         <DataError
           message={
-            market.bookQuality === "truncated"
-              ? "Book display limit reached. Best-price and depth indicators are withheld; the API still reviews against its full candidate book."
-              : "Order book data is temporarily unavailable. Quotes are withheld."
+            "Book display limit reached. Best-price and depth indicators are withheld; the API still reviews against its full candidate book."
           }
         />
       )}
@@ -190,12 +182,24 @@ export function MarketWorkspace({
               onChange={setBookTab}
             />
           </div>
+          <RefreshStatus
+            active={query.isRefreshError || market.bookQuality === "unavailable"}
+            label="book data where available"
+          />
           {bookTab === "Trades" ? (
             <TradeTable market={market} trades={trades} />
           ) : (
             <div className="grid grid-cols-2 divide-x">
-              <BranchDepth book={market.yes} label={`${market.ticker}-YES`} />
-              <BranchDepth book={market.no} label={`${market.ticker}-NO`} />
+              <BranchDepth
+                book={market.yes}
+                label={`${market.ticker}-YES`}
+                available={market.bookQuality === "available"}
+              />
+              <BranchDepth
+                book={market.no}
+                label={`${market.ticker}-NO`}
+                available={market.bookQuality === "available"}
+              />
             </div>
           )}
           <p className="border-t px-3 py-3 text-xs font-medium leading-5 text-muted-foreground">
@@ -236,7 +240,8 @@ export function MarketWorkspace({
               <ClaimTable markets={[market]} />
             </TabsContent>
             <TabsContent value="trades">
-              {tradeQuery.isError ? (
+              <RefreshStatus active={tradeQuery.isRefreshError} label="trades" />
+              {tradeQuery.isInitialError ? (
                 <DataError message="Trade history is unavailable." />
               ) : (
                 <TradeTable market={market} trades={trades} />
@@ -251,7 +256,15 @@ export function MarketWorkspace({
     </Page>
   );
 }
-function BranchDepth({ book, label }: { book: BranchBook; label: string }) {
+function BranchDepth({
+  book,
+  label,
+  available,
+}: {
+  book: BranchBook;
+  label: string;
+  available: boolean;
+}) {
   const max = Math.max(1, ...book.bids.map((l) => l.quantity), ...book.asks.map((l) => l.quantity));
   const row = (level: BranchBook["asks"][number], ask: boolean) => (
     <div
@@ -279,13 +292,21 @@ function BranchDepth({ book, label }: { book: BranchBook; label: string }) {
         <span>SIZE</span>
       </div>
       {[...book.asks.slice(0, 5)].reverse().map((l) => row(l, true))}
-      {!book.asks.length && <p className="px-3 py-4 text-xs text-muted-foreground">No asks</p>}
+      {!book.asks.length && (
+        <p className="px-3 py-4 text-xs text-muted-foreground">
+          {available ? "No asks" : "Updating asks…"}
+        </p>
+      )}
       <div className="my-2 border-y px-3 py-3">
         <strong className="font-mono">{formatNumber(midpoint(book))}</strong>
         <span className="ml-2 text-xs text-muted-foreground">spr {formatNumber(book.spread)}</span>
       </div>
       {book.bids.slice(0, 5).map((l) => row(l, false))}
-      {!book.bids.length && <p className="px-3 py-4 text-xs text-muted-foreground">No bids</p>}
+      {!book.bids.length && (
+        <p className="px-3 py-4 text-xs text-muted-foreground">
+          {available ? "No bids" : "Updating bids…"}
+        </p>
+      )}
     </div>
   );
 }

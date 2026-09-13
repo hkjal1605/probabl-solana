@@ -258,6 +258,7 @@
       "name": "@conditional-stocks/solana-indexer",
       "version": "0.1.0",
       "dependencies": {
+        "@conditional-stocks/shared": "workspace:*",
         "@conditional-stocks/solana-client": "workspace:*",
         "@coral-xyz/anchor": "0.32.1",
         "@solana/spl-token": "0.4.14",

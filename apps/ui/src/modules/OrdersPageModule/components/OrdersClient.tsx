@@ -16,6 +16,7 @@ import { useWallet } from "@/components/providers/WalletProvider";
 import { DataError, EmptyState } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/segmented";
 import { useOrderRecovery } from "@/hooks/useOrderRecovery";
+import { RefreshStatus } from "@/components/data/RefreshStatus";
 import type { MarketView } from "@/lib/api/types";
 import { displayPrice, formatNumber, shortAddress, tokenAmount } from "@/lib/format/display";
 
@@ -65,7 +66,8 @@ export function OrdersClient({
             : "Showing the most recent order history plus older open orders. Earlier closed orders are not included."}
         </p>
       )}
-      {query.isError ? (
+      <RefreshStatus active={query.isRefreshError} label="orders" />
+      {query.isInitialError ? (
         <DataError
           message="Order history is unavailable. Existing orders are not cancelled."
           retry={() => {

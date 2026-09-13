@@ -23,6 +23,7 @@ import { useUiStore } from "@/components/providers/UiStateProvider";
 import { DataError, EmptyState, Page, PageHeading, Stat } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/segmented";
 import { useMarkets } from "@/hooks/useProtocolData";
+import { RefreshStatus } from "@/components/data/RefreshStatus";
 import type { MarketView } from "@/lib/api/types";
 import { formatNumber } from "@/lib/format/display";
 import {
@@ -152,7 +153,8 @@ export function MarketsExplorer({
           onChange={(view) => setFilters({ view })}
         />
       </div>
-      {query.isError && (
+      <RefreshStatus active={query.isRefreshError} label="markets" />
+      {query.isInitialError && (
         <DataError
           retry={() => {
             void query.refetch();

@@ -1,8 +1,5 @@
 "use client";
-import {
-  formatTokenAmount,
-  parseTokenAmount,
-} from "@conditional-stocks/domain";
+import { formatTokenAmount, parseTokenAmount } from "@conditional-stocks/domain";
 import { Button } from "@conditional-stocks/ui-kit/button";
 import {
   Dialog,
@@ -25,16 +22,16 @@ import type { MarketView, PositionView } from "@/lib/api/types";
 import { key, type SolanaClient } from "@conditional-stocks/solana-client";
 import { readClaimMarket, solana, transactionReceipt } from "@/lib/trading/rpc";
 
-type RecoveryTransaction = Awaited<
-  ReturnType<SolanaClient["redemptionTransaction"]>
->;
+type RecoveryTransaction = Awaited<ReturnType<SolanaClient["redemptionTransaction"]>>;
 
 export function PositionActions({
   position,
   market,
+  disabled = false,
 }: {
   position: PositionView;
   market: MarketView;
+  disabled?: boolean;
 }) {
   const wallet = useWallet(),
     cache = useQueryClient();
@@ -49,28 +46,14 @@ export function PositionActions({
     scope: string;
     transaction?: RecoveryTransaction;
   } | null>(null);
-  const scope = [
-    wallet.account,
-    market.id,
-    kind,
-    collateral,
-    branch,
-    amount,
-    open,
-  ].join(":");
+  const scope = [wallet.account, market.id, kind, collateral, branch, amount, open].join(":");
   const { busy, run } = useAsyncAction(scope);
   const reviewed = review?.scope === scope ? review : null;
-  const decimals =
-      collateral === "Stock"
-        ? market.baseTokenDecimals
-        : market.quoteTokenDecimals,
+  const decimals = collateral === "Stock" ? market.baseTokenDecimals : market.quoteTokenDecimals,
     symbol = collateral === "Stock" ? market.ticker : "USDC";
-  const yes = BigInt(
-      collateral === "Stock" ? position.stockYes : position.quoteYes,
-    ),
+  const yes = BigInt(collateral === "Stock" ? position.stockYes : position.quoteYes),
     no = BigInt(collateral === "Stock" ? position.stockNo : position.quoteNo);
-  const available =
-    kind === "Merge" ? (yes < no ? yes : no) : branch === "YES" ? yes : no;
+  const available = kind === "Merge" ? (yes < no ? yes : no) : branch === "YES" ? yes : no;
   const redeemable = position.redeemable;
   const allClaims = kind === "Redeem" && branch === "All";
   let raw = 0n;
@@ -80,6 +63,7 @@ export function PositionActions({
     /* Invalid input is not actionable. */
   }
   const valid =
+    !disabled &&
     (allClaims
       ? yes + no > 0n
       : raw > 0n &&
@@ -92,8 +76,7 @@ export function PositionActions({
   };
   const prepareReview = () =>
     run(async (assertCurrent) => {
-      if (!wallet.account || !valid)
-        throw new Error("Choose a valid claim action first.");
+      if (!wallet.account || !valid) throw new Error("Choose a valid claim action first.");
       if (kind !== "Redeem") {
         setReview({ scope });
         return;
@@ -130,23 +113,15 @@ export function PositionActions({
         (!reviewed.transaction ||
           nothingToBurn ||
           ![6, 7].includes(canonical.state) ||
-          canonical.payouts.some(
-            (p, i) => p !== reviewed.transaction!.payouts[i],
-          ))
+          canonical.payouts.some((p, i) => p !== reviewed.transaction!.payouts[i]))
       )
-        throw new Error(
-          "Redemption changed or has no exact payout; review again.",
-        );
+        throw new Error("Redemption changed or has no exact payout; review again.");
       // Sign the locally prepared redemption bytes, not a newly recomputed plan.
       const transaction =
         kind === "Redeem"
           ? reviewed.transaction!
           : await solana().positionTransaction(
-              kind === "Split"
-                ? "split"
-                : kind === "Merge"
-                  ? "merge"
-                  : "redeem",
+              kind === "Split" ? "split" : kind === "Merge" ? "merge" : "redeem",
               key(market.id),
               key(wallet.account),
               collateral === "Stock" ? 0 : 1,
@@ -155,8 +130,7 @@ export function PositionActions({
             );
       const approval = false;
       assertCurrent();
-      const fees =
-        transaction.issuerTransfers?.filter((t) => BigInt(t.fee) > 0n) ?? [];
+      const fees = transaction.issuerTransfers?.filter((t) => BigInt(t.fee) > 0n) ?? [];
       if (
         fees.length &&
         !window.confirm(
@@ -184,14 +158,9 @@ export function PositionActions({
           cache.invalidateQueries({ queryKey: [key] }),
         ),
       );
-      if (approval)
-        toast.success(
-          "Approval confirmed. Review the claim action again to continue.",
-        );
+      if (approval) toast.success("Approval confirmed. Review the claim action again to continue.");
       else {
-        toast.success(
-          `${kind} confirmed. Canonical balances update after indexing.`,
-        );
+        toast.success(`${kind} confirmed. Canonical balances update after indexing.`);
         setOpen(false);
         setAmount("");
       }
@@ -208,7 +177,7 @@ export function PositionActions({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" disabled={disabled}>
           <Combine />
           {position.redeemable ? "Redeem" : "Manage"}
         </Button>
@@ -253,8 +222,8 @@ export function PositionActions({
           {allClaims ? (
             <div className="rounded-lg border bg-secondary p-4 text-sm leading-6">
               Available: {formatTokenAmount(yes, decimals)} YES and{" "}
-              {formatTokenAmount(no, decimals)} NO claims. Review will show the
-              exact payout, quantities burned and any retained claim.
+              {formatTokenAmount(no, decimals)} NO claims. Review will show the exact payout,
+              quantities burned and any retained claim.
             </div>
           ) : (
             <div>
@@ -264,11 +233,7 @@ export function PositionActions({
                   <Button
                     size="sm"
                     variant="link"
-                    onClick={() =>
-                      edit(() =>
-                        setAmount(formatTokenAmount(available, decimals)),
-                      )
-                    }
+                    onClick={() => edit(() => setAmount(formatTokenAmount(available, decimals)))}
                   >
                     Max · {formatTokenAmount(available, decimals)}
                   </Button>
@@ -295,48 +260,42 @@ export function PositionActions({
               aria-label="Exact redemption review"
             >
               <p>
-                Merge {formatTokenAmount(recovery.merge, decimals)} complete
-                sets; redeem {formatTokenAmount(recovery.redeemYes, decimals)}{" "}
-                YES and {formatTokenAmount(recovery.redeemNo, decimals)} NO.
+                Merge {formatTokenAmount(recovery.merge, decimals)} complete sets; redeem{" "}
+                {formatTokenAmount(recovery.redeemYes, decimals)} YES and{" "}
+                {formatTokenAmount(recovery.redeemNo, decimals)} NO.
               </p>
               <p>
-                Receive {formatTokenAmount(recovery.credit, decimals)} {symbol}{" "}
-                credit ({recovery.credit.toString()} raw units).
+                Receive {formatTokenAmount(recovery.credit, decimals)} {symbol} credit (
+                {recovery.credit.toString()} raw units).
               </p>
               <p>
-                Burn {recovery.burnYes.toString()} YES /{" "}
-                {recovery.burnNo.toString()} NO raw claims. Retain{" "}
-                {recovery.retainedYes.toString()} YES /{" "}
-                {recovery.retainedNo.toString()} NO raw claims.
+                Burn {recovery.burnYes.toString()} YES / {recovery.burnNo.toString()} NO raw claims.
+                Retain {recovery.retainedYes.toString()} YES / {recovery.retainedNo.toString()} NO
+                raw claims.
               </p>
               {nothingToBurn && (
                 <p role="status" className="text-warning">
-                  Nothing can be redeemed in whole raw units. Keep the claim or
-                  combine it with another claim. No tokens will be burned.
+                  Nothing can be redeemed in whole raw units. Keep the claim or combine it with
+                  another claim. No tokens will be burned.
                 </p>
               )}
               {zeroPayout && (
                 <p role="alert" className="text-warning">
-                  Zero payout: these losing claims will be permanently burned
-                  for no collateral.
+                  Zero payout: these losing claims will be permanently burned for no collateral.
                 </p>
               )}
               <p>
-                Returned credit belongs to your connected wallet. Network gas
-                applies; issuer fees may apply when you later withdraw.
+                Returned credit belongs to your connected wallet. Network gas applies; issuer fees
+                may apply when you later withdraw.
               </p>
             </div>
           ) : (
             reviewed && (
               <div className="rounded-lg border bg-secondary p-4 text-sm leading-6">
                 Review: {kind} {formatTokenAmount(raw, decimals)} {symbol}
-                {kind === "Redeem"
-                  ? `-${branch} claims`
-                  : kind === "Merge"
-                    ? " claim pairs"
-                    : ""}
-                . Returned assets belong to your connected wallet. Network gas
-                applies; confirmed transactions cannot be undone.
+                {kind === "Redeem" ? `-${branch} claims` : kind === "Merge" ? " claim pairs" : ""}.
+                Returned assets belong to your connected wallet. Network gas applies; confirmed
+                transactions cannot be undone.
               </div>
             )
           )}
@@ -355,9 +314,8 @@ export function PositionActions({
           </Button>
         </fieldset>
         <p className="text-xs leading-5 text-muted-foreground">
-          Merge and redemption use the Solana program. Credited assets can be
-          withdrawn from Portfolio. Only your wallet can withdraw your credited
-          assets.
+          Merge and redemption use the Solana program. Credited assets can be withdrawn from
+          Portfolio. Only your wallet can withdraw your credited assets.
         </p>
       </DialogContent>
     </Dialog>

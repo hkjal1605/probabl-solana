@@ -20,15 +20,13 @@ import {
   envelope,
   type OrderWire,
 } from "@conditional-stocks/solana-client";
-import {
-  snapshot,
-  liveOrder,
-} from "@conditional-stocks/solana-indexer/projection";
+import { snapshot, liveOrder } from "@conditional-stocks/solana-indexer/projection";
 import { logger } from "./logger.ts";
 import { requestLogging } from "@conditional-stocks/shared/http";
 import { mountSolanaAdmin } from "./solana-admin.ts";
 import { JupiterSpotPrices, jupiterEnvironment } from "./jupiter.ts";
 import { mountSpotPrices } from "./spot-prices.ts";
+import { mountTradingReadiness } from "./readiness.ts";
 
 const required = (name: string) => {
   const v = process.env[name];
@@ -39,9 +37,7 @@ const client = new SolanaClient({
   rpcUrl: required("SOLANA_RPC_URL"),
   config: required("SOLANA_CONFIG"),
   genesisHash: required("SOLANA_GENESIS_HASH"),
-  ...(process.env.SOLANA_PROGRAM_ID
-    ? { programId: process.env.SOLANA_PROGRAM_ID }
-    : {}),
+  ...(process.env.SOLANA_PROGRAM_ID ? { programId: process.env.SOLANA_PROGRAM_ID } : {}),
 });
 const db = new Pool({
   connectionString: required("DATABASE_URL"),
@@ -65,9 +61,7 @@ mountSpotPrices(
 );
 app.use("*", async (c, next) =>
   bodyLimit({
-    maxSize: /^\/v1\/admin\/evidence\/(creation|resolution)\/prepare$/.test(
-      c.req.path,
-    )
+    maxSize: /^\/v1\/admin\/evidence\/(creation|resolution)\/prepare$/.test(c.req.path)
       ? 36 * 1024 * 1024
       : 64_000,
   })(c, next),
@@ -86,23 +80,17 @@ async function authenticate(header: string | undefined) {
     "SELECT owner FROM solana_sessions WHERE token_hash=$1 AND domain=$2 AND expires_at>now()",
     [hash(header.slice(7)), domain],
   );
-  if (!result.rows[0])
-    throw new HTTPException(401, { message: "Session expired" });
+  if (!result.rows[0]) throw new HTTPException(401, { message: "Session expired" });
   return result.rows[0].owner;
 }
-app.get("/health", (c) =>
-  c.json({ status: "ok", chain: "solana", service: "probabl-api" }),
-);
+app.get("/health", (c) => c.json({ status: "ok", chain: "solana", service: "probabl-api" }));
 app.get("/ready", async (c) => {
   try {
     await client.assertNetwork();
     const config = await client.configAccount();
     await db.query("SELECT 1");
     const response = await fetch(
-      new URL(
-        "/reconciliation",
-        process.env.INDEXER_URL ?? "http://127.0.0.1:42069",
-      ),
+      new URL("/reconciliation", process.env.INDEXER_URL ?? "http://127.0.0.1:42069"),
       { signal: AbortSignal.timeout(2000), redirect: "error" },
     );
     const indexed = (await response.json()) as { healthy?: boolean };
@@ -112,20 +100,7 @@ app.get("/ready", async (c) => {
     return c.json({ healthy: false, chain: "solana" }, 503);
   }
 });
-app.get("/v1/system/readiness", async (c) => {
-  const cfg = await client.configAccount();
-  if (cfg.paused) return c.json({ healthy: false }, 503);
-  const marketId = c.req.query("marketId");
-  if (marketId) {
-    const m = await client.market(key(address(marketId)));
-    if (
-      m.state !== 2 ||
-      big(m.terms.trading_cutoff) <= BigInt(Math.floor(Date.now() / 1000))
-    )
-      return c.json({ healthy: false }, 503);
-  }
-  return c.json({ healthy: true, chain: "solana" });
-});
+mountTradingReadiness(app, client);
 app.post("/v1/auth/challenge", async (c) => {
   const body = await c.req.json(),
     owner = address(body.address),
@@ -142,9 +117,7 @@ app.post("/v1/auth/challenge", async (c) => {
     await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
       domain + ":authentication",
     ]);
-    await tx.query(
-      "DELETE FROM solana_auth_challenges WHERE expires_at<=now()",
-    );
+    await tx.query("DELETE FROM solana_auth_challenges WHERE expires_at<=now()");
     await tx.query("DELETE FROM solana_sessions WHERE expires_at<=now()");
     const total = await tx.query<{ count: string }>(
       "SELECT count(*) FROM solana_auth_challenges WHERE domain=$1",
@@ -152,15 +125,13 @@ app.post("/v1/auth/challenge", async (c) => {
     );
     if (Number(total.rows[0]?.count) >= 1000)
       throw new HTTPException(429, {
-        message:
-          "Sign-in capacity reached; retry after outstanding challenges expire",
+        message: "Sign-in capacity reached; retry after outstanding challenges expire",
       });
     const count = await tx.query<{ count: string }>(
       "SELECT count(*) FROM solana_auth_challenges WHERE domain=$1 AND owner=$2",
       [domain, owner],
     );
-    if (Number(count.rows[0]?.count) >= 5)
-      throw new Error("Too many pending sign-in requests");
+    if (Number(count.rows[0]?.count) >= 5) throw new Error("Too many pending sign-in requests");
     const message = `Sign in to probabl\nOrigin: ${origin}\nSolana genesis: ${client.deployment.genesisHash}\nProgram: ${client.program}\nConfig: ${client.config}\nWallet: ${owner}\nNonce: ${id}\nExpires: ${new Date(Date.now() + 120_000).toISOString()}`;
     await tx.query(
       "INSERT INTO solana_auth_challenges VALUES($1,$2,$3,$4,now()+interval '2 minutes')",
@@ -208,10 +179,11 @@ app.post("/v1/auth/verify", async (c) => {
       [body.challengeId, domain, owner],
     );
     if (consumed.rowCount !== 1) throw new Error("Challenge already consumed");
-    await tx.query(
-      "INSERT INTO solana_sessions VALUES($1,$2,$3,now()+interval '8 hours')",
-      [hash(token), domain, owner],
-    );
+    await tx.query("INSERT INTO solana_sessions VALUES($1,$2,$3,now()+interval '8 hours')", [
+      hash(token),
+      domain,
+      owner,
+    ]);
     await tx.query("COMMIT");
     return c.json({ token });
   } catch (e) {
@@ -287,32 +259,25 @@ async function prepare(order: OrderWire) {
 app.post("/v1/orders/prepare", async (c) => {
   const owner = await authenticate(c.req.header("authorization")),
     order = parseOrder((await c.req.json()).order);
-  if (order.maker !== owner)
-    throw new Error("Order signer differs from session wallet");
+  if (order.maker !== owner) throw new Error("Order signer differs from session wallet");
   return c.json(await prepare(order));
 });
 app.post("/v1/orders/transaction", async (c) => {
   const owner = await authenticate(c.req.header("authorization")),
     body = await c.req.json(),
     order = parseOrder(body.order);
-  if (order.maker !== owner)
-    throw new Error("Order signer differs from session wallet");
+  if (order.maker !== owner) throw new Error("Order signer differs from session wallet");
   const plan = parseAtomicPlan(body.plan, order);
   if (BigInt(plan.deadline) <= BigInt(Math.floor(Date.now() / 1000)))
     throw new Error("Quote expired");
   const transaction = envelope([client.placement(order, plan)], client.program);
   const built = await client.prepareTransaction(key(owner), transaction);
-  const simulation = await client.connection.simulateTransaction(
-    built.transaction,
-    {
-      sigVerify: false,
-      commitment: "confirmed",
-    },
-  );
+  const simulation = await client.connection.simulateTransaction(built.transaction, {
+    sigVerify: false,
+    commitment: "confirmed",
+  });
   if (simulation.value.err)
-    throw new Error(
-      `Placement simulation failed: ${JSON.stringify(simulation.value.err)}`,
-    );
+    throw new Error(`Placement simulation failed: ${JSON.stringify(simulation.value.err)}`);
   return c.json({
     orderHash: orderId(order, client.program),
     executionVersion: 1,

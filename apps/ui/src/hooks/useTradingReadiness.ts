@@ -2,27 +2,43 @@
 import { useQuery } from "@tanstack/react-query";
 import { protocolConfig } from "@/config/protocol";
 import { api } from "@/lib/api/client";
+import type { MarketView } from "@/lib/api/types";
+import { readPollInterval } from "@/lib/api/read-policy";
+import { localTradingStatus, readinessMessage, requireTradingReady } from "@/lib/trading/readiness";
+import { useReadFreshness } from "./useReadFreshness";
 
-export function useTradingReadiness(marketId: string) {
-  const configured =
-    Boolean(protocolConfig.config && protocolConfig.genesisHash);
+export function useTradingReadiness(market: MarketView) {
+  const configured = Boolean(protocolConfig.config && protocolConfig.genesisHash);
   const query = useQuery({
-    queryKey: ["trading-readiness", marketId, protocolConfig.chainId],
-    queryFn: ({ signal }) => api.readiness(marketId, signal),
+    queryKey: [
+      "trading-readiness",
+      market.id,
+      protocolConfig.genesisHash,
+      protocolConfig.programId,
+      protocolConfig.config,
+    ],
+    queryFn: ({ signal }) => api.readiness(market.id, signal),
     enabled: configured,
-    refetchInterval: 3000,
-    retry: false,
-    staleTime: 0,
+    refetchInterval: readPollInterval,
+    staleTime: 5000,
   });
-  const ready = configured && !query.isError && query.data?.healthy === true;
+  const freshness = useReadFreshness(query, 15_000);
+  const local = localTradingStatus(market);
+  const ready =
+    configured && freshness.isDataFresh && query.data?.healthy === true && local === "ready";
   return {
     ready,
     reason: !configured
       ? "Atomic trading contracts are not configured for this UI deployment."
-      : query.isPending
-        ? "Checking trading services…"
-        : ready
-          ? "Trading services ready"
-          : "Trading is temporarily unavailable. Cancellation and claim recovery remain available.",
+      : ready
+        ? "Trading services ready"
+        : readinessMessage(
+            local !== "ready" ? local : freshness.isDataFresh ? query.data?.reason : undefined,
+          ),
+    // An explicitly requested action always rechecks, regardless of cached UI status.
+    requireReady: async () => {
+      if (!configured) throw new Error("Trading is not configured.");
+      await requireTradingReady(market, () => api.readiness(market.id));
+    },
   };
 }

@@ -27,6 +27,8 @@ export function marketPriceBound(
   side: "buy" | "sell",
   slippageBps = 100,
 ): string {
+  if (market.bookQuality && market.bookQuality !== "available")
+    throw new Error("Wait for a fresh order book before setting a market-order bound");
   const book = branch === "YES" ? market.yes : market.no;
   const price = side === "buy" ? book.bestAskExact : book.bestBidExact;
   if (!price || !Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10000)
