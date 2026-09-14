@@ -1,3 +1,4 @@
+import { EmptyState } from "@/components/ui/page";
 import {
   Table,
   TableBody,
@@ -5,10 +6,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@conditional-stocks/ui-kit/table";
-import { EmptyState } from "@/components/ui/page";
+} from "@/components/ui/table";
 import { protocolConfig } from "@/config/protocol";
-import type { MarketView, TradeView } from "@/types/api";
 import {
   displayPrice,
   formatNumber,
@@ -16,6 +15,7 @@ import {
   shortAddress,
   tokenAmount,
 } from "@/lib/format/display";
+import type { MarketView, TradeView } from "@/types/api";
 export function TradeTable({ market, trades }: { market: MarketView; trades: TradeView[] }) {
   if (!trades.length) return <EmptyState>No indexed fills for this market yet.</EmptyState>;
   return (

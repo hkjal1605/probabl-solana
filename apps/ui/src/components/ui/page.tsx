@@ -1,6 +1,9 @@
-import { Button } from "@conditional-stocks/ui-kit/button";
-import { cn } from "@conditional-stocks/ui-kit/utils";
 import type { ReactNode } from "react";
+import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Empty, EmptyDescription } from "@/components/ui/empty";
+import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
 
 export function Page({ children, className }: { children: ReactNode; className?: string }) {
   return (
@@ -23,7 +26,7 @@ export function PageHeading({
   return (
     <div className="mb-8 flex flex-wrap items-start justify-between gap-6">
       <div>
-        <h1 className="text-[32px] font-semibold leading-tight tracking-[-0.045em]">{title}</h1>
+        <h1 className="scroll-m-20 text-3xl font-semibold tracking-tight">{title}</h1>
         {description && (
           <div className="mt-3 max-w-3xl text-sm font-medium leading-6 text-muted-foreground">
             {description}
@@ -52,9 +55,17 @@ export function Stat({
 }
 export function EmptyState({ children }: { children: ReactNode }) {
   return (
-    <div className="grid min-h-40 place-content-center gap-3 p-8 text-center text-sm font-medium leading-6 text-muted-foreground">
-      {children}
-    </div>
+    <Empty className="min-h-40">
+      <EmptyDescription>{children}</EmptyDescription>
+    </Empty>
+  );
+}
+export function LoadingState({ children = "Loading…" }: { children?: ReactNode }) {
+  return (
+    <Empty className="min-h-40" role="status" aria-busy="true">
+      <Spinner />
+      <EmptyDescription>{children}</EmptyDescription>
+    </Empty>
   );
 }
 export function DataError({
@@ -65,16 +76,15 @@ export function DataError({
   message?: string;
 }) {
   return (
-    <div
-      role="alert"
-      className="my-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger"
-    >
-      <span>{message}</span>
+    <Alert variant="destructive" className="my-4">
+      <AlertDescription>{message}</AlertDescription>
       {retry && (
-        <Button variant="outline" size="sm" onClick={retry}>
-          Retry
-        </Button>
+        <AlertAction>
+          <Button variant="outline" size="sm" onClick={retry}>
+            Retry
+          </Button>
+        </AlertAction>
       )}
-    </div>
+    </Alert>
   );
 }

@@ -1,4 +1,4 @@
-import { Skeleton } from "@conditional-stocks/ui-kit/skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 export default function Loading() {
   return (
     <main

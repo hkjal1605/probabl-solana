@@ -1,5 +1,5 @@
-import { Button } from "@conditional-stocks/ui-kit/button";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { EmptyState, Page } from "@/components/ui/page";
 
 export default function NotFound() {
@@ -8,8 +8,8 @@ export default function NotFound() {
       <EmptyState>
         <h1 className="text-2xl font-semibold text-foreground">Page not found</h1>
         <p>This page or market is not available.</p>
-        <Button asChild variant="brand">
-          <Link href="/markets">Explore markets</Link>
+        <Button variant="default" render={<Link href="/markets" />} nativeButton={false}>
+          Explore markets
         </Button>
       </EmptyState>
     </Page>

@@ -1,6 +1,17 @@
 "use client";
-import { Badge } from "@conditional-stocks/ui-kit/badge";
-import { Button } from "@conditional-stocks/ui-kit/button";
+import Link from "next/link";
+import { useState } from "react";
+import { RefreshStatus } from "@/components/data/RefreshStatus";
+import { useWallet } from "@/components/providers/WalletProvider";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { DataError, EmptyState, LoadingState } from "@/components/ui/page";
+import { Progress } from "@/components/ui/progress";
+import { Segmented } from "@/components/ui/segmented";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
   TableBody,
@@ -8,17 +19,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@conditional-stocks/ui-kit/table";
-import { LoaderCircle } from "lucide-react";
-import Link from "next/link";
-import { useState } from "react";
-import { useWallet } from "@/components/providers/WalletProvider";
-import { DataError, EmptyState } from "@/components/ui/page";
-import { Segmented } from "@/components/ui/segmented";
+} from "@/components/ui/table";
 import { useOrderRecovery } from "@/hooks/useOrderRecovery";
-import { RefreshStatus } from "@/components/data/RefreshStatus";
-import type { MarketView } from "@/types/api";
 import { displayPrice, formatNumber, shortAddress, tokenAmount } from "@/lib/format/display";
+import type { MarketView } from "@/types/api";
 
 export function OrdersClient({
   markets,
@@ -36,7 +40,7 @@ export function OrdersClient({
     return (
       <EmptyState>
         <p>Connect to see canonical orders.</p>
-        <Button variant="brand" onClick={() => wallet.connect().catch(() => undefined)}>
+        <Button variant="default" onClick={() => wallet.connect().catch(() => undefined)}>
           Connect wallet
         </Button>
       </EmptyState>
@@ -47,7 +51,7 @@ export function OrdersClient({
       (view === "All" || (view === "Open orders" ? o.status === "open" : o.status !== "open")),
   );
   return (
-    <section className={embedded ? "min-w-0" : "panel"} aria-label="Orders">
+    <Card className={embedded ? "min-w-0 ring-0 p-0" : ""} aria-label="Orders">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
         <span className="text-xs font-medium text-muted-foreground">
           {orders.length} {view.toLowerCase()}
@@ -75,7 +79,7 @@ export function OrdersClient({
           }}
         />
       ) : query.isPending ? (
-        <EmptyState>Reading canonical orders…</EmptyState>
+        <LoadingState>Reading canonical orders…</LoadingState>
       ) : !orders.length ? (
         <EmptyState>
           {view === "Open orders"
@@ -113,9 +117,11 @@ export function OrdersClient({
                     <Link href={`/markets/${order.marketId}`} className="line-clamp-2 font-medium">
                       {market?.question ?? shortAddress(order.marketId)}
                     </Link>
-                    <code className="mt-1 block text-xs text-muted-foreground" title={order.id}>
-                      {shortAddress(order.id)}
-                    </code>
+                    <InfoTooltip content={order.id}>
+                      <code className="mt-1 block text-xs text-muted-foreground">
+                        {shortAddress(order.id)}
+                      </code>
+                    </InfoTooltip>
                   </TableCell>
                   <TableCell>
                     <strong className={order.branch === 0 ? "text-positive" : "text-danger"}>
@@ -134,14 +140,22 @@ export function OrdersClient({
                     {market
                       ? `${formatNumber(tokenAmount(order.filled, market.baseTokenDecimals), 3)} / ${formatNumber(tokenAmount(order.quantity, market.baseTokenDecimals), 3)}`
                       : "—"}
-                    <div className="mt-2 h-1 rounded-full bg-muted">
-                      <span
-                        className="block h-full rounded-full bg-positive"
-                        style={{
-                          width: `${BigInt(order.quantity) > 0n ? Math.min(100, Number((BigInt(order.filled) * 10000n) / BigInt(order.quantity)) / 100) : 0}%`,
-                        }}
-                      />
-                    </div>
+                    <Progress
+                      className="mt-2"
+                      aria-label="Order filled"
+                      value={
+                        BigInt(order.quantity) > 0n
+                          ? Math.max(
+                              0,
+                              Math.min(
+                                100,
+                                Number((BigInt(order.filled) * 10000n) / BigInt(order.quantity)) /
+                                  100,
+                              ),
+                            )
+                          : 0
+                      }
+                    />
                   </TableCell>
                   <TableCell className="text-xs font-medium text-muted-foreground">
                     {order.tif === 0 ? "GTC" : "IOC"} ·{" "}
@@ -181,7 +195,7 @@ export function OrdersClient({
                           query.cancel(order.id, expired ? "expired" : closed ? "closed" : "cancel")
                         }
                       >
-                        {query.canceling === order.id && <LoaderCircle className="animate-spin" />}
+                        {query.canceling === order.id && <Spinner className="animate-spin" />}
                         {query.pending.has(order.id)
                           ? "Pending chain"
                           : expired || closed
@@ -196,6 +210,6 @@ export function OrdersClient({
           </TableBody>
         </Table>
       )}
-    </section>
+    </Card>
   );
 }

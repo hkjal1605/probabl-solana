@@ -1,5 +1,19 @@
 "use client";
-import { Button } from "@conditional-stocks/ui-kit/button";
+import { ArrowUpRight, Menu, Moon, Sun } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
+import { Logo } from "@/components/brand/Logo";
+import { useUiStore } from "@/components/providers/UiStateProvider";
+import { Button } from "@/components/ui/button";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import {
+  NavigationMenu,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuList,
+} from "@/components/ui/navigation-menu";
 import {
   Sheet,
   SheetClose,
@@ -8,14 +22,7 @@ import {
   SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from "@conditional-stocks/ui-kit/sheet";
-import { ArrowUpRight, Menu, Moon, Sun } from "lucide-react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
-import { Logo } from "@/components/brand/Logo";
-import { useUiStore } from "@/components/providers/UiStateProvider";
+} from "@/components/ui/sheet";
 import { WalletButton } from "@/components/wallet/WalletButton";
 import { cn } from "@/lib/utils";
 import { FundsDialog } from "./FundsDialog";
@@ -41,37 +48,43 @@ export function SiteHeader() {
     <>
       <header className="relative z-40 flex h-[62px] shrink-0 items-center gap-4 border-b px-[18px] sm:h-[68px] sm:gap-8 sm:px-8 min-[93.75rem]:px-[max(32px,calc((100vw_-_1376px)/2))]">
         <Logo />
-        <nav
+        <NavigationMenu
           aria-label="Main navigation"
           className={cn(
             "hidden items-center gap-6 text-sm font-medium text-muted-foreground md:flex",
             landing && "ml-auto",
           )}
         >
-          {navigation.map(
-            ([label, href]) =>
-              href && (
-                <Link
-                  key={href}
-                  href={href}
-                  aria-current={path.startsWith(href) ? "page" : undefined}
-                  className="transition-colors hover:text-positive aria-[current=page]:text-foreground"
+          <NavigationMenuList>
+            {navigation.map(
+              ([label, href]) =>
+                href && (
+                  <NavigationMenuItem key={href}>
+                    <NavigationMenuLink
+                      active={path.startsWith(href)}
+                      render={<Link href={href} />}
+                    >
+                      {label}
+                    </NavigationMenuLink>
+                  </NavigationMenuItem>
+                ),
+            )}
+            {landing && (
+              <NavigationMenuItem>
+                <InfoTooltip content="Documentation coming soon">
+                  <span aria-disabled="true">Docs</span>
+                </InfoTooltip>
+                <NavigationMenuLink
+                  href="https://x.com/probabldottrade"
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
-                  {label}
-                </Link>
-              ),
-          )}
-          {landing && (
-            <>
-              <span aria-disabled="true" title="Documentation coming soon">
-                Docs
-              </span>
-              <a href="https://x.com/probabldottrade" target="_blank" rel="noopener noreferrer">
-                X
-              </a>
-            </>
-          )}
-        </nav>
+                  X
+                </NavigationMenuLink>
+              </NavigationMenuItem>
+            )}
+          </NavigationMenuList>
+        </NavigationMenu>
         <div className={cn("ml-auto flex items-center gap-2 sm:gap-3", landing && "md:ml-0")}>
           <Button
             variant="ghost"
@@ -87,10 +100,8 @@ export function SiteHeader() {
             {mounted && resolvedTheme === "dark" ? <Sun /> : <Moon />}
           </Button>
           {landing ? (
-            <Button asChild variant="outline">
-              <Link href="/markets">
-                Launch app <ArrowUpRight />
-              </Link>
+            <Button variant="outline" render={<Link href="/markets" />} nativeButton={false}>
+              Launch app <ArrowUpRight />
             </Button>
           ) : (
             <>
@@ -105,15 +116,17 @@ export function SiteHeader() {
             </>
           )}
           <Sheet>
-            <SheetTrigger asChild>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                className="md:hidden"
-                aria-label="Open navigation"
-              >
-                <Menu />
-              </Button>
+            <SheetTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  className="md:hidden"
+                  aria-label="Open navigation"
+                />
+              }
+            >
+              <Menu />
             </SheetTrigger>
             <SheetContent>
               <SheetHeader>
@@ -131,10 +144,19 @@ export function SiteHeader() {
                   .map(
                     ([label, href]) =>
                       href && (
-                        <SheetClose asChild key={href}>
-                          <Button asChild variant="ghost" className="justify-start">
-                            <Link href={href}>{label}</Link>
-                          </Button>
+                        <SheetClose
+                          key={href}
+                          nativeButton={false}
+                          render={
+                            <Button
+                              variant="ghost"
+                              className="justify-start"
+                              render={<Link href={href} />}
+                              nativeButton={false}
+                            />
+                          }
+                        >
+                          {label}
                         </SheetClose>
                       ),
                   )}

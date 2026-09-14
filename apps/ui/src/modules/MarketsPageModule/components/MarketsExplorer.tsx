@@ -1,13 +1,23 @@
 "use client";
-import { Button } from "@conditional-stocks/ui-kit/button";
-import { Input } from "@conditional-stocks/ui-kit/input";
+import Link from "next/link";
+import { RefreshStatus } from "@/components/data/RefreshStatus";
+import { EventCard } from "@/components/market/EventCard";
+import { TokenIdentity } from "@/components/market/TokenIdentity";
+import { useUiStore } from "@/components/providers/UiStateProvider";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { DataError, EmptyState, LoadingState, Page, PageHeading, Stat } from "@/components/ui/page";
+import { Segmented } from "@/components/ui/segmented";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@conditional-stocks/ui-kit/select";
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -15,16 +25,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@conditional-stocks/ui-kit/table";
-import Link from "next/link";
-import { EventCard } from "@/components/market/EventCard";
-import { TokenIdentity } from "@/components/market/TokenIdentity";
-import { useUiStore } from "@/components/providers/UiStateProvider";
-import { DataError, EmptyState, Page, PageHeading, Stat } from "@/components/ui/page";
-import { Segmented } from "@/components/ui/segmented";
+} from "@/components/ui/table";
 import { useMarkets } from "@/hooks/useProtocolData";
-import { RefreshStatus } from "@/components/data/RefreshStatus";
-import type { MarketView } from "@/types/api";
 import { formatNumber } from "@/lib/format/display";
 import {
   compact,
@@ -35,6 +37,7 @@ import {
   midpoint,
   percent,
 } from "@/lib/markets/presentation";
+import type { MarketView } from "@/types/api";
 
 export function MarketsExplorer({
   markets: initial,
@@ -93,19 +96,12 @@ export function MarketsExplorer({
         </div>
       </PageHeading>
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <div className="flex gap-1">
-          {["All", "Macro", "Earnings", "Policy", "Other"].map((category) => (
-            <Button
-              key={category}
-              size="sm"
-              variant={filters.category === category ? "secondary" : "ghost"}
-              aria-pressed={filters.category === category}
-              onClick={() => setFilters({ category })}
-            >
-              {category}
-            </Button>
-          ))}
-        </div>
+        <Segmented
+          label="Market category"
+          value={filters.category}
+          options={["All", "Macro", "Earnings", "Policy", "Other"]}
+          onChange={(category) => setFilters({ category })}
+        />
         <Input
           className="w-full sm:w-56"
           aria-label="Search markets"
@@ -116,6 +112,7 @@ export function MarketsExplorer({
         <div className="hidden flex-1 xl:block" />
         <Select
           value={filters.lifecycle}
+          items={{ active: "Active markets", resolving: "Resolution", all: "All lifecycle states" }}
           onValueChange={(value) => {
             if (value === "active" || value === "resolving" || value === "all")
               setFilters({ lifecycle: value });
@@ -125,13 +122,16 @@ export function MarketsExplorer({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="active">Active markets</SelectItem>
-            <SelectItem value="resolving">Resolution</SelectItem>
-            <SelectItem value="all">All lifecycle states</SelectItem>
+            <SelectGroup>
+              <SelectItem value="active">Active markets</SelectItem>
+              <SelectItem value="resolving">Resolution</SelectItem>
+              <SelectItem value="all">All lifecycle states</SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
         <Select
           value={filters.sort}
+          items={{ depth: "Depth ↓", impact: "Impact ↓", cutoff: "Cutoff ↑" }}
           onValueChange={(value) => {
             if (value === "depth" || value === "impact" || value === "cutoff")
               setFilters({ sort: value });
@@ -141,9 +141,11 @@ export function MarketsExplorer({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="depth">Depth ↓</SelectItem>
-            <SelectItem value="impact">Impact ↓</SelectItem>
-            <SelectItem value="cutoff">Cutoff ↑</SelectItem>
+            <SelectGroup>
+              <SelectItem value="depth">Depth ↓</SelectItem>
+              <SelectItem value="impact">Impact ↓</SelectItem>
+              <SelectItem value="cutoff">Cutoff ↑</SelectItem>
+            </SelectGroup>
           </SelectContent>
         </Select>
         <Segmented
@@ -161,10 +163,10 @@ export function MarketsExplorer({
           }}
         />
       )}
-      {!visible.length ? (
-        <EmptyState>
-          {query.isPending ? "Loading markets…" : "No markets match this view. Try another filter."}
-        </EmptyState>
+      {query.isPending && !visible.length ? (
+        <LoadingState>Loading markets…</LoadingState>
+      ) : !visible.length ? (
+        <EmptyState>No markets match this view. Try another filter.</EmptyState>
       ) : filters.view === "Feed" ? (
         <div className="grid gap-[18px] min-[1101px]:grid-cols-2">
           {visible.map((assets) => (
@@ -172,7 +174,7 @@ export function MarketsExplorer({
           ))}
         </div>
       ) : (
-        <div className="panel">
+        <Card className="">
           <Table>
             <TableHeader>
               <TableRow>
@@ -204,15 +206,25 @@ export function MarketsExplorer({
                       return (
                         <TableCell key={token.baseToken}>
                           {asset ? (
-                            <Link
-                              href={`/markets/${asset.id}`}
-                              className={`block min-w-24 rounded-md px-4 py-3 text-center ${(impactPercent(asset) ?? 0) >= 0 ? "bg-positive-soft text-positive" : "bg-danger-soft text-danger"}`}
+                            <Button
+                              variant="outline"
+                              nativeButton={false}
+                              render={<Link href={`/markets/${asset.id}`} />}
+                              className="h-auto min-w-24 flex-col gap-2 py-3"
                             >
-                              <b className="font-mono">{percent(impactPercent(asset))}</b>
-                              <p className="mt-1 font-mono text-xs">
-                                {formatNumber(midpoint(asset.yes))}
-                              </p>
-                            </Link>
+                              <Badge
+                                variant={
+                                  impactPercent(asset) === null
+                                    ? "secondary"
+                                    : (impactPercent(asset) ?? 0) >= 0
+                                      ? "positive"
+                                      : "destructive"
+                                }
+                              >
+                                {percent(impactPercent(asset))}
+                              </Badge>
+                              <span>{formatNumber(midpoint(asset.yes))}</span>
+                            </Button>
                           ) : (
                             "—"
                           )}
@@ -229,7 +241,7 @@ export function MarketsExplorer({
               })}
             </TableBody>
           </Table>
-        </div>
+        </Card>
       )}
     </Page>
   );

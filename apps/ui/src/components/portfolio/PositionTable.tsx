@@ -1,6 +1,13 @@
 "use client";
+
 import { formatTokenAmount } from "@conditional-stocks/domain";
-import { Button } from "@conditional-stocks/ui-kit/button";
+import { useRouter } from "next/navigation";
+import { RefreshStatus } from "@/components/data/RefreshStatus";
+import { useUiStore } from "@/components/providers/UiStateProvider";
+import { useWallet } from "@/components/providers/WalletProvider";
+import { Button } from "@/components/ui/button";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { DataError, EmptyState, LoadingState } from "@/components/ui/page";
 import {
   Table,
   TableBody,
@@ -8,16 +15,11 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@conditional-stocks/ui-kit/table";
-import { useRouter } from "next/navigation";
-import { useUiStore } from "@/components/providers/UiStateProvider";
-import { useWallet } from "@/components/providers/WalletProvider";
-import { DataError, EmptyState } from "@/components/ui/page";
+} from "@/components/ui/table";
 import { useOrders, usePositions } from "@/hooks/useProtocolData";
-import type { MarketView } from "@/types/api";
 import { formatNumber, tokenAmount } from "@/lib/format/display";
 import { midpoint } from "@/lib/markets/presentation";
-import { RefreshStatus } from "@/components/data/RefreshStatus";
+import type { MarketView } from "@/types/api";
 
 export function PositionTable({
   markets,
@@ -49,7 +51,8 @@ export function PositionTable({
         Available wallet claims can still be managed in the Claims tab.
       </EmptyState>
     );
-  if (positions.isPending || orders.isPending) return <EmptyState>Reading positions…</EmptyState>;
+  if (positions.isPending || orders.isPending)
+    return <LoadingState>Reading positions…</LoadingState>;
   const refreshing = positions.isRefreshError || orders.isRefreshError;
   const rows = markets
     .flatMap((market) =>
@@ -109,20 +112,18 @@ export function PositionTable({
                   </p>
                 )}
               </TableCell>
-              <TableCell
-                className="font-mono text-muted-foreground"
-                title="Complete execution basis is not available from the canonical indexer."
-              >
-                —
+              <TableCell className="font-mono text-muted-foreground">
+                <InfoTooltip content="Complete execution basis is not available from the canonical indexer.">
+                  <span>—</span>
+                </InfoTooltip>
               </TableCell>
               <TableCell className="font-mono">
                 {formatNumber(midpoint(branch === 0 ? market.yes : market.no))}
               </TableCell>
-              <TableCell
-                className="font-mono text-muted-foreground"
-                title="An unknown cost basis cannot be treated as zero."
-              >
-                —
+              <TableCell className="font-mono text-muted-foreground">
+                <InfoTooltip content="An unknown cost basis cannot be treated as zero.">
+                  <span>—</span>
+                </InfoTooltip>
               </TableCell>
               <TableCell>
                 <Button

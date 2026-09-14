@@ -1,24 +1,41 @@
 "use client";
-import { Button } from "@conditional-stocks/ui-kit/button";
-import { Tabs, TabsContent } from "@conditional-stocks/ui-kit/tabs";
 import Link from "next/link";
 import { useState } from "react";
-import { LifecycleBadge } from "@/components/data/StatusBadge";
 import { RefreshStatus } from "@/components/data/RefreshStatus";
+import { LifecycleBadge } from "@/components/data/StatusBadge";
 import { PriceChart } from "@/components/market/PriceChart";
 import { SpotReference } from "@/components/market/SpotReference";
 import { TokenIdentity } from "@/components/market/TokenIdentity";
 import { ClaimTable } from "@/components/portfolio/ClaimTable";
 import { PositionTable } from "@/components/portfolio/PositionTable";
+import { Badge } from "@/components/ui/badge";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import { Button } from "@/components/ui/button";
+import { Card, CardHeader } from "@/components/ui/card";
 import {
   LineTabsList as TabsList,
   LineTabsTrigger as TabsTrigger,
 } from "@/components/ui/line-tabs";
-import { DataError, EmptyState, Page, Stat } from "@/components/ui/page";
+import { DataError, EmptyState, LoadingState, Page, Stat } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/segmented";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useProbabilityStream } from "@/hooks/useProbabilityStream";
 import { useMarkets, useTrades } from "@/hooks/useProtocolData";
-import type { BranchBook, MarketView, TradeView } from "@/types/api";
 import { formatNumber, formatTime } from "@/lib/format/display";
 import {
   compact,
@@ -28,7 +45,9 @@ import {
   midpoint,
   percent,
 } from "@/lib/markets/presentation";
+import { cn } from "@/lib/utils";
 import { OrdersClient } from "@/modules/OrdersPageModule/components/OrdersClient";
+import type { BranchBook, MarketView, TradeView } from "@/types/api";
 import { MarketRules } from "./MarketRules";
 import { OrderTicket } from "./OrderTicket";
 import { TradeTable } from "./TradeTable";
@@ -50,7 +69,10 @@ export function MarketWorkspace({
   initialMarkets?: MarketView[];
   initialTrades?: TradeView[];
 }) {
-  const query = useMarkets(initialMarkets.filter((m) => m.id === marketId), marketId),
+  const query = useMarkets(
+      initialMarkets.filter((m) => m.id === marketId),
+      marketId,
+    ),
     tradeQuery = useTrades(marketId);
   const indexedMarket = query.markets.find((m) => m.id === marketId);
   const stream = useProbabilityStream(
@@ -69,11 +91,13 @@ export function MarketWorkspace({
               void query.refetch();
             }}
           />
+        ) : query.isPending ? (
+          <LoadingState>Loading market…</LoadingState>
         ) : (
           <EmptyState>
-            {query.isPending ? "Loading market…" : "Market not found in the canonical indexer."}
-            <Button asChild variant="outline">
-              <Link href="/markets">Explore markets</Link>
+            Market not found in the canonical indexer.
+            <Button variant="outline" render={<Link href="/markets" />} nativeButton={false}>
+              Explore markets
             </Button>
           </EmptyState>
         )}
@@ -86,9 +110,19 @@ export function MarketWorkspace({
       : initialTrades;
   return (
     <Page className="pt-6 lg:pt-6">
-      <nav aria-label="Breadcrumb" className="mb-4 text-xs font-medium text-muted-foreground">
-        <Link href="/markets">Markets</Link> / {marketCategory(market)} / {market.ticker}
-      </nav>
+      <Breadcrumb className="mb-4">
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink render={<Link href="/markets" />}>Markets</BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>{marketCategory(market)}</BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>{market.ticker}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
       <div className="flex flex-wrap items-start justify-between gap-5">
         <div className="max-w-4xl">
           <h1 className="text-2xl font-semibold leading-tight tracking-[-0.04em] sm:text-[28px]">
@@ -117,21 +151,18 @@ export function MarketWorkspace({
             .filter((m) => eventKey(m) === eventKey(market))
             .map((m) => (
               <Button
-                asChild
                 variant={m.id === market.id ? "secondary" : "ghost"}
                 size="sm"
                 key={m.id}
-              >
-                <Link
-                  href={`/markets/${m.id}`}
-                  aria-current={m.id === market.id ? "page" : undefined}
-                >
-                  <TokenIdentity
-                    symbol={m.ticker}
-                    metadata={m.baseTokenMetadata}
-                    showName={false}
+                render={
+                  <Link
+                    href={`/markets/${m.id}`}
+                    aria-current={m.id === market.id ? "page" : undefined}
                   />
-                </Link>
+                }
+                nativeButton={false}
+              >
+                <TokenIdentity symbol={m.ticker} metadata={m.baseTokenMetadata} showName={false} />
               </Button>
             ))}
         </nav>
@@ -173,15 +204,15 @@ export function MarketWorkspace({
       )}
       <div className="grid items-start gap-4 min-[761px]:grid-cols-[minmax(0,1fr)_300px] min-[1101px]:grid-cols-[minmax(0,1fr)_clamp(320px,27vw,380px)_clamp(360px,30vw,420px)]">
         <PriceChart market={market} initialTrades={trades} />
-        <section className="panel min-w-0 min-[761px]:col-start-1 min-[761px]:row-start-2 min-[1101px]:col-start-2 min-[1101px]:row-start-1">
-          <div className="panel-heading">
+        <Card className="min-w-0 min-[761px]:col-start-1 min-[761px]:row-start-2 min-[1101px]:col-start-2 min-[1101px]:row-start-1">
+          <CardHeader className="flex flex-wrap items-center justify-between gap-3">
             <Segmented
               label="Book panel"
               options={["Order book", "Trades"]}
               value={bookTab}
               onChange={setBookTab}
             />
-          </div>
+          </CardHeader>
           <RefreshStatus
             active={query.isRefreshError || market.bookQuality === "unavailable"}
             label="book data where available"
@@ -205,11 +236,11 @@ export function MarketWorkspace({
           <p className="border-t px-3 py-3 text-xs font-medium leading-5 text-muted-foreground">
             Books are independent — a YES quote says nothing about NO liquidity.
           </p>
-        </section>
+        </Card>
         <div className="min-[761px]:col-start-2 min-[761px]:row-span-2 min-[761px]:row-start-1 min-[1101px]:col-start-3">
           <OrderTicket key={market.id} market={market} />
         </div>
-        <section className="panel min-w-0 min-[761px]:col-span-2 min-[761px]:row-start-3 min-[1101px]:row-start-2">
+        <Card className="min-w-0 min-[761px]:col-span-2 min-[761px]:row-start-3 min-[1101px]:row-start-2">
           <Tabs value={tab} onValueChange={setTab} className="gap-0">
             <TabsList aria-label="Market information">
               {[
@@ -251,7 +282,7 @@ export function MarketWorkspace({
               <MarketRules market={market} />
             </TabsContent>
           </Tabs>
-        </section>
+        </Card>
       </div>
     </Page>
   );
@@ -267,46 +298,52 @@ function BranchDepth({
 }) {
   const max = Math.max(1, ...book.bids.map((l) => l.quantity), ...book.asks.map((l) => l.quantity));
   const row = (level: BranchBook["asks"][number], ask: boolean) => (
-    <div
+    <TableRow
       key={level.priceExact}
-      className={`relative flex justify-between px-3 py-1.5 font-mono text-xs ${ask ? "text-danger" : "text-positive"}`}
+      className={cn("font-mono", ask ? "text-danger" : "text-positive")}
+      style={{
+        backgroundImage: `linear-gradient(to left, var(--${ask ? "danger" : "positive"}-soft) ${(level.quantity / max) * 100}%, transparent ${(level.quantity / max) * 100}%)`,
+      }}
     >
-      <span
-        aria-hidden="true"
-        className={`absolute inset-y-0 right-0 ${ask ? "bg-danger-soft" : "bg-positive-soft"}`}
-        style={{ width: `${(level.quantity / max) * 100}%` }}
-      />
-      <span className="relative">{formatNumber(level.price)}</span>
-      <span className="relative">{formatNumber(level.quantity, 2)}</span>
-    </div>
+      <TableCell>{formatNumber(level.price)}</TableCell>
+      <TableCell className="text-right">{formatNumber(level.quantity, 2)}</TableCell>
+    </TableRow>
   );
   return (
     <div className="min-w-0 pb-3">
-      <h3
-        className={`px-3 pt-4 pb-3 text-xs font-semibold ${label.endsWith("YES") ? "text-positive" : "text-danger"}`}
-      >
-        {label}
+      <h3 className="px-3 pb-3">
+        <Badge variant={label.endsWith("YES") ? "positive" : "destructive"}>{label}</Badge>
       </h3>
-      <div className="flex justify-between px-3 pb-2 text-[11px] font-semibold text-muted-foreground">
-        <span>PRICE</span>
-        <span>SIZE</span>
-      </div>
-      {[...book.asks.slice(0, 5)].reverse().map((l) => row(l, true))}
-      {!book.asks.length && (
-        <p className="px-3 py-4 text-xs text-muted-foreground">
-          {available ? "No asks" : "Updating asks…"}
-        </p>
-      )}
-      <div className="my-2 border-y px-3 py-3">
-        <strong className="font-mono">{formatNumber(midpoint(book))}</strong>
-        <span className="ml-2 text-xs text-muted-foreground">spr {formatNumber(book.spread)}</span>
-      </div>
-      {book.bids.slice(0, 5).map((l) => row(l, false))}
-      {!book.bids.length && (
-        <p className="px-3 py-4 text-xs text-muted-foreground">
-          {available ? "No bids" : "Updating bids…"}
-        </p>
-      )}
+      <Table aria-label={label}>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Price</TableHead>
+            <TableHead className="text-right">Size</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {[...book.asks.slice(0, 5)].reverse().map((l) => row(l, true))}
+          {!book.asks.length && (
+            <TableRow>
+              <TableCell colSpan={2}>{available ? "No asks" : "Updating asks…"}</TableCell>
+            </TableRow>
+          )}
+          <TableRow>
+            <TableCell colSpan={2}>
+              <strong className="font-mono">{formatNumber(midpoint(book))}</strong>
+              <span className="ml-2 text-xs text-muted-foreground">
+                spr {formatNumber(book.spread)}
+              </span>
+            </TableCell>
+          </TableRow>
+          {book.bids.slice(0, 5).map((l) => row(l, false))}
+          {!book.bids.length && (
+            <TableRow>
+              <TableCell colSpan={2}>{available ? "No bids" : "Updating bids…"}</TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
     </div>
   );
 }

@@ -1,46 +1,221 @@
-@import "@conditional-stocks/ui-kit/styles.css";
+@import "@fontsource-variable/manrope";
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: light;
+  /* Exact wordmark green. Pair filled brand controls with dark ink, never white. */
+  --primary: #00e191;
+  --primary-foreground: #062b1d;
+  --primary-hover: #00c780;
+  --background: #f7f7f4;
+  --foreground: #132c23;
+  --card: #ffffff;
+  --card-foreground: #132c23;
+  --popover: #ffffff;
+  --popover-foreground: #132c23;
+  --secondary: #efefeb;
+  --secondary-foreground: #244c3b;
+  --muted: #efefeb;
+  --muted-foreground: #50665b;
+  --accent: #d4f6e5;
+  --accent-foreground: #005c3b;
+  --destructive: #b12e44;
+  --border: #0d110f1c;
+  --input: #71897c;
+  --ring: #00794e;
+  --brand: #00e191;
+  /* Accessible brand ink for text/icons on light surfaces. */
+  --brand-strong: #006442;
+  --brand-soft: #d4f6e5;
+  --positive: #0a8f55;
+  --positive-soft: #00e47c1f;
+  --warning: #805000;
+  --warning-soft: #fff0cf;
+  --danger: #d43d2a;
+  --danger-soft: #d43d2a1a;
+  --info: #17617a;
+  --info-soft: #dff3fa;
+  --trade-buy: #0a8f55;
+  --trade-buy-foreground: #ffffff;
+  --trade-sell: #d43d2a;
+  --trade-sell-foreground: #ffffff;
+  --chart-1: #00754d;
+  --chart-2: #226b9c;
+  --chart-3: #7253a1;
+  --chart-4: #92610c;
+  --chart-5: #b12e44;
+  --overlay: #06120c;
+  --surface-shadow: none;
+  --radius: 0.75rem;
+  --sidebar: #edf5f0;
+  --sidebar-foreground: #132c23;
+  --sidebar-primary: #00e191;
+  --sidebar-primary-foreground: #062b1d;
+  --sidebar-accent: #d4f6e5;
+  --sidebar-accent-foreground: #005c3b;
+  --sidebar-border: #cdded4;
+  --sidebar-ring: #00794e;
+}
+
+.dark {
+  color-scheme: dark;
+  --primary: #00e191;
+  --primary-foreground: #062b1d;
+  --primary-hover: #3cedad;
+  /* Dominant background sampled from assets/logo-name.jpg. */
+  --background: #0b0e0c;
+  --foreground: #e8f5ee;
+  --card: #121614;
+  --card-foreground: #e8f5ee;
+  --popover: #171c19;
+  --popover-foreground: #e8f5ee;
+  --secondary: #171c19;
+  --secondary-foreground: #d8eee1;
+  --muted: #171c19;
+  --muted-foreground: #d1d1d1;
+  --accent: #16462f;
+  --accent-foreground: #76f3b8;
+  --destructive: #ff9faf;
+  --border: #ffffff17;
+  --input: #6b8979;
+  --ring: #00e191;
+  --brand: #00e191;
+  --brand-strong: #65efb2;
+  --brand-soft: #16462f;
+  --positive: #00e47c;
+  --positive-soft: #00e47c1a;
+  --warning: #ffd07a;
+  --warning-soft: #3b2c14;
+  --danger: #ff5d6c;
+  --danger-soft: #ff5d6c1a;
+  --info: #8dd9f0;
+  --info-soft: #18353f;
+  --trade-buy: #00e47c;
+  --trade-buy-foreground: #07281c;
+  --trade-sell: #ff5d6c;
+  --trade-sell-foreground: #3d111e;
+  --chart-1: #00e191;
+  --chart-2: #80c8fa;
+  --chart-3: #bfa3f5;
+  --chart-4: #ffd07a;
+  --chart-5: #ff9faf;
+  --overlay: #06120c;
+  --surface-shadow: none;
+  --sidebar: #0a0c09;
+  --sidebar-foreground: #e8f5ee;
+  --sidebar-primary: #00e191;
+  --sidebar-primary-foreground: #062b1d;
+  --sidebar-accent: #16462f;
+  --sidebar-accent-foreground: #76f3b8;
+  --sidebar-border: #304b3b;
+  --sidebar-ring: #00e191;
+}
+
+@theme inline {
+  --font-sans: "Manrope Variable", "Avenir Next", "Segoe UI", sans-serif;
+  --font-display: "Manrope Variable", "Avenir Next", "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-overlay: var(--overlay);
+  --color-trade-buy: var(--trade-buy);
+  --color-trade-buy-foreground: var(--trade-buy-foreground);
+  --color-trade-sell: var(--trade-sell);
+  --color-trade-sell-foreground: var(--trade-sell-foreground);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 10px);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --shadow-soft: var(--surface-shadow);
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply bg-background scroll-smooth font-sans;
+  }
+  body {
+    @apply min-h-svh bg-background font-sans text-foreground antialiased;
+  }
+  a,
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::selection {
+    @apply bg-primary text-primary-foreground;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* Keep a full-contrast outline even on primitives with outline-none utilities. */
+:is(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
 
 @source "../";
 
-/* Production trading visual language, scoped to the trading app (admin-ui is unaffected). */
-:root {
-  --background: #f7f7f4;
-  --card: #ffffff;
-  --secondary: #efefeb;
-  --muted: #efefeb;
-  --border: #0d110f1c;
-  --positive: #0a8f55;
-  --positive-soft: #00e47c1f;
-  --danger: #d43d2a;
-  --danger-soft: #d43d2a1a;
-  --trade-buy: #0a8f55;
-  --trade-sell: #d43d2a;
-  --surface-shadow: none;
-}
-.dark {
-  --background: #0b0e0c;
-  --card: #121614;
-  --popover: #171c19;
-  --secondary: #171c19;
-  --muted: #171c19;
-  --muted-foreground: #d1d1d1;
-  --border: #ffffff17;
-  --positive: #00e47c;
-  --positive-soft: #00e47c1a;
-  --danger: #ff5d6c;
-  --danger-soft: #ff5d6c1a;
-  --trade-buy: #00e47c;
-  --trade-sell: #ff5d6c;
-  --surface-shadow: none;
-}
-
 @layer components {
-  .panel {
-    @apply overflow-hidden rounded-[10px] border bg-card;
-  }
-  .panel-heading {
-    @apply flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4;
-  }
   .eyebrow {
     @apply text-[11px] font-semibold tracking-[0.08em] uppercase;
   }

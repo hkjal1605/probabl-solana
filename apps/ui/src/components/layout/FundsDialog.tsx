@@ -1,12 +1,12 @@
 "use client";
+import { useUiStore } from "@/components/providers/UiStateProvider";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@conditional-stocks/ui-kit/dialog";
-import { useUiStore } from "@/components/providers/UiStateProvider";
+} from "@/components/ui/dialog";
 import { useMarkets } from "@/hooks/useProtocolData";
 import { FundsClient } from "@/modules/FundsPageModule/components/FundsClient";
 

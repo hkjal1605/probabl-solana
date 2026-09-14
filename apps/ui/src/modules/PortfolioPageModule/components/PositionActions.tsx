@@ -1,6 +1,12 @@
 "use client";
+
 import { formatTokenAmount, parseTokenAmount } from "@conditional-stocks/domain";
-import { Button } from "@conditional-stocks/ui-kit/button";
+import { key, type SolanaClient } from "@conditional-stocks/solana-client";
+import { Combine } from "lucide-react";
+import { useState } from "react";
+import { useWallet } from "@/components/providers/WalletProvider";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -8,19 +14,17 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@conditional-stocks/ui-kit/dialog";
-import { Input } from "@conditional-stocks/ui-kit/input";
-import { Label } from "@conditional-stocks/ui-kit/label";
-import { refreshStores } from "@/stores/createResourceStore";
-import { Combine, LoaderCircle } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
-import { useWallet } from "@/components/providers/WalletProvider";
+} from "@/components/ui/dialog";
+import { Field, FieldGroup, FieldSet, FieldLabel as Label } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";
+import { Spinner } from "@/components/ui/spinner";
+import { toast } from "@/components/ui/toast";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
-import type { MarketView, PositionView } from "@/types/api";
-import { key, type SolanaClient } from "@conditional-stocks/solana-client";
+import { useConfirmation } from "@/hooks/useConfirmation";
 import { readClaimMarket, solana, transactionReceipt } from "@/lib/trading/rpc";
+import { refreshStores } from "@/stores/createResourceStore";
+import type { MarketView, PositionView } from "@/types/api";
 
 type RecoveryTransaction = Awaited<ReturnType<SolanaClient["redemptionTransaction"]>>;
 
@@ -47,6 +51,7 @@ export function PositionActions({
   } | null>(null);
   const scope = [wallet.account, market.id, kind, collateral, branch, amount, open].join(":");
   const { busy, run } = useAsyncAction(scope);
+  const { confirm, confirmation } = useConfirmation(scope);
   const reviewed = review?.scope === scope ? review : null;
   const decimals = collateral === "Stock" ? market.baseTokenDecimals : market.quoteTokenDecimals,
     symbol = collateral === "Stock" ? market.ticker : "USDC";
@@ -132,7 +137,7 @@ export function PositionActions({
       const fees = transaction.issuerTransfers?.filter((t) => BigInt(t.fee) > 0n) ?? [];
       if (
         fees.length &&
-        !window.confirm(
+        !(await confirm(
           "Issuer fees apply to this vault funding:\n" +
             fees
               .map(
@@ -141,21 +146,30 @@ export function PositionActions({
               )
               .join("\n") +
             "\nContinue?",
-        )
+        ))
       )
         return;
+      assertCurrent();
       const hash = await wallet.sendTransaction(transaction);
-      toast.success(
-        `${approval ? "Approval" : kind} submitted: ${hash.slice(0, 10)}… Waiting for confirmation.`,
-      );
+      toast.add({
+        type: "success",
+        title: `${approval ? "Approval" : kind} submitted: ${hash.slice(0, 10)}… Waiting for confirmation.`,
+      });
       const receipt = await transactionReceipt(hash);
       assertCurrent();
       if (receipt.status !== "success")
         throw new Error("Transaction reverted. Balances were not changed.");
       await refreshStores(["positions", "payout-credits"]);
-      if (approval) toast.success("Approval confirmed. Review the claim action again to continue.");
+      if (approval)
+        toast.add({
+          type: "success",
+          title: "Approval confirmed. Review the claim action again to continue.",
+        });
       else {
-        toast.success(`${kind} confirmed. Canonical balances update after indexing.`);
+        toast.add({
+          type: "success",
+          title: `${kind} confirmed. Canonical balances update after indexing.`,
+        });
         setOpen(false);
         setAmount("");
       }
@@ -164,150 +178,167 @@ export function PositionActions({
   return (
     <Dialog
       open={open}
-      onOpenChange={(value) => {
+      onOpenChange={(value, details) => {
+        if (busy) details.cancel();
         if (!busy) {
           setOpen(value);
           setReview(null);
         }
       }}
     >
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm" disabled={disabled}>
-          <Combine />
-          {position.redeemable ? "Redeem" : "Manage"}
-        </Button>
+      {confirmation}
+      <DialogTrigger render={<Button variant="outline" size="sm" disabled={disabled} />}>
+        <Combine />
+        {position.redeemable ? "Redeem" : "Manage"}
       </DialogTrigger>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+      <DialogContent
+        showCloseButton={!busy}
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+      >
         <DialogHeader>
           <DialogTitle>Manage conditional claims</DialogTitle>
           <DialogDescription>
             {market.ticker} · {market.question}
           </DialogDescription>
         </DialogHeader>
-        <fieldset disabled={busy} className="space-y-5">
-          <Segmented
-            label="Claim action"
-            value={kind}
-            options={["Split", "Merge", "Redeem"]}
-            onChange={(value) => edit(() => setKind(value))}
-            className="w-full"
-          />
-          <Segmented
-            label="Claim collateral"
-            value={collateral}
-            options={["Stock", "Cash"]}
-            onChange={(value) => edit(() => setCollateral(value))}
-            className="w-full"
-          />
-          <p className="text-sm font-medium leading-6 text-muted-foreground">
-            {kind === "Split"
-              ? `1 whole ${symbol} → 1 YES + 1 NO claim. Your wallet authorizes exact funding.`
-              : kind === "Merge"
-                ? `1 YES + 1 NO claim → 1 whole ${symbol}.`
-                : "Recover matching YES/NO pairs first, then redeem the excess at the finalized payout. INVALID recovery keeps any unmatched raw claim instead of rounding away its value. Losing claims pay zero."}
-          </p>
-          {kind === "Redeem" && (
+        <FieldSet disabled={busy} className="flex flex-col gap-5">
+          <FieldGroup>
             <Segmented
-              label="Redeem branch"
-              value={branch}
-              options={["All", "YES", "NO"]}
-              onChange={(value) => edit(() => setBranch(value))}
+              disabled={busy}
+              label="Claim action"
+              value={kind}
+              options={["Split", "Merge", "Redeem"]}
+              onChange={(value) => edit(() => setKind(value))}
+              className="w-full"
             />
-          )}
-          {allClaims ? (
-            <div className="rounded-lg border bg-secondary p-4 text-sm leading-6">
-              Available: {formatTokenAmount(yes, decimals)} YES and{" "}
-              {formatTokenAmount(no, decimals)} NO claims. Review will show the exact payout,
-              quantities burned and any retained claim.
-            </div>
-          ) : (
-            <div>
-              <div className="flex items-center justify-between">
-                <Label htmlFor="claim-amount">Amount ({symbol})</Label>
-                {kind !== "Split" && (
-                  <Button
-                    size="sm"
-                    variant="link"
-                    onClick={() => edit(() => setAmount(formatTokenAmount(available, decimals)))}
-                  >
-                    Max · {formatTokenAmount(available, decimals)}
-                  </Button>
-                )}
-              </div>
-              <Input
-                id="claim-amount"
-                className="mt-2 h-12 font-mono text-lg"
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => edit(() => setAmount(e.target.value))}
-                placeholder="0.00"
-              />
-            </div>
-          )}
-          {kind === "Redeem" && !redeemable && (
-            <p role="status" className="text-sm text-warning">
-              Redemption is not yet enabled for this market.
+            <Segmented
+              disabled={busy}
+              label="Claim collateral"
+              value={collateral}
+              options={["Stock", "Cash"]}
+              onChange={(value) => edit(() => setCollateral(value))}
+              className="w-full"
+            />
+            <p className="text-sm font-medium leading-6 text-muted-foreground">
+              {kind === "Split"
+                ? `1 whole ${symbol} → 1 YES + 1 NO claim. Your wallet authorizes exact funding.`
+                : kind === "Merge"
+                  ? `1 YES + 1 NO claim → 1 whole ${symbol}.`
+                  : "Recover matching YES/NO pairs first, then redeem the excess at the finalized payout. INVALID recovery keeps any unmatched raw claim instead of rounding away its value. Losing claims pay zero."}
             </p>
-          )}
-          {recovery ? (
-            <div
-              className="rounded-lg border bg-secondary p-4 text-sm leading-6"
-              aria-label="Exact redemption review"
+            {kind === "Redeem" && (
+              <Segmented
+                disabled={busy}
+                label="Redeem branch"
+                value={branch}
+                options={["All", "YES", "NO"]}
+                onChange={(value) => edit(() => setBranch(value))}
+              />
+            )}
+            {allClaims ? (
+              <Alert role="status">
+                <AlertDescription>
+                  Available: {formatTokenAmount(yes, decimals)} YES and{" "}
+                  {formatTokenAmount(no, decimals)} NO claims. Review will show the exact payout,
+                  quantities burned and any retained claim.
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <Field>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="claim-amount">Amount ({symbol})</Label>
+                  {kind !== "Split" && (
+                    <Button
+                      size="sm"
+                      variant="link"
+                      onClick={() => edit(() => setAmount(formatTokenAmount(available, decimals)))}
+                    >
+                      Max · {formatTokenAmount(available, decimals)}
+                    </Button>
+                  )}
+                </div>
+                <Input
+                  id="claim-amount"
+                  inputMode="decimal"
+                  value={amount}
+                  onChange={(e) => edit(() => setAmount(e.target.value))}
+                  placeholder="0.00"
+                />
+              </Field>
+            )}
+            {kind === "Redeem" && !redeemable && (
+              <p role="status" className="text-sm text-warning">
+                Redemption is not yet enabled for this market.
+              </p>
+            )}
+            {recovery ? (
+              <Alert role="status" aria-label="Exact redemption review">
+                <AlertDescription>
+                  <p>
+                    Merge {formatTokenAmount(recovery.merge, decimals)} complete sets; redeem{" "}
+                    {formatTokenAmount(recovery.redeemYes, decimals)} YES and{" "}
+                    {formatTokenAmount(recovery.redeemNo, decimals)} NO.
+                  </p>
+                  <p>
+                    Receive {formatTokenAmount(recovery.credit, decimals)} {symbol} credit (
+                    {recovery.credit.toString()} raw units).
+                  </p>
+                  <p>
+                    Burn {recovery.burnYes.toString()} YES / {recovery.burnNo.toString()} NO raw
+                    claims. Retain {recovery.retainedYes.toString()} YES /{" "}
+                    {recovery.retainedNo.toString()} NO raw claims.
+                  </p>
+                  {nothingToBurn && (
+                    <p role="status" className="text-warning">
+                      Nothing can be redeemed in whole raw units. Keep the claim or combine it with
+                      another claim. No tokens will be burned.
+                    </p>
+                  )}
+                  {zeroPayout && (
+                    <Alert>
+                      <AlertDescription>
+                        Zero payout: these losing claims will be permanently burned for no
+                        collateral.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  <p>
+                    Returned credit belongs to your connected wallet. Network gas applies; issuer
+                    fees may apply when you later withdraw.
+                  </p>
+                </AlertDescription>
+              </Alert>
+            ) : (
+              reviewed && (
+                <Alert role="status">
+                  <AlertDescription>
+                    Review: {kind} {formatTokenAmount(raw, decimals)} {symbol}
+                    {kind === "Redeem"
+                      ? `-${branch} claims`
+                      : kind === "Merge"
+                        ? " claim pairs"
+                        : ""}
+                    . Returned assets belong to your connected wallet. Network gas applies;
+                    confirmed transactions cannot be undone.
+                  </AlertDescription>
+                </Alert>
+              )
+            )}
+            <Button
+              variant="default"
+              className="w-full"
+              disabled={busy || !valid || nothingToBurn}
+              onClick={() => (reviewed ? execute() : prepareReview())}
             >
-              <p>
-                Merge {formatTokenAmount(recovery.merge, decimals)} complete sets; redeem{" "}
-                {formatTokenAmount(recovery.redeemYes, decimals)} YES and{" "}
-                {formatTokenAmount(recovery.redeemNo, decimals)} NO.
-              </p>
-              <p>
-                Receive {formatTokenAmount(recovery.credit, decimals)} {symbol} credit (
-                {recovery.credit.toString()} raw units).
-              </p>
-              <p>
-                Burn {recovery.burnYes.toString()} YES / {recovery.burnNo.toString()} NO raw claims.
-                Retain {recovery.retainedYes.toString()} YES / {recovery.retainedNo.toString()} NO
-                raw claims.
-              </p>
-              {nothingToBurn && (
-                <p role="status" className="text-warning">
-                  Nothing can be redeemed in whole raw units. Keep the claim or combine it with
-                  another claim. No tokens will be burned.
-                </p>
-              )}
-              {zeroPayout && (
-                <p role="alert" className="text-warning">
-                  Zero payout: these losing claims will be permanently burned for no collateral.
-                </p>
-              )}
-              <p>
-                Returned credit belongs to your connected wallet. Network gas applies; issuer fees
-                may apply when you later withdraw.
-              </p>
-            </div>
-          ) : (
-            reviewed && (
-              <div className="rounded-lg border bg-secondary p-4 text-sm leading-6">
-                Review: {kind} {formatTokenAmount(raw, decimals)} {symbol}
-                {kind === "Redeem" ? `-${branch} claims` : kind === "Merge" ? " claim pairs" : ""}.
-                Returned assets belong to your connected wallet. Network gas applies; confirmed
-                transactions cannot be undone.
-              </div>
-            )
-          )}
-          <Button
-            variant="brand"
-            className="w-full"
-            disabled={busy || !valid || nothingToBurn}
-            onClick={() => (reviewed ? execute() : prepareReview())}
-          >
-            {busy && <LoaderCircle className="animate-spin" />}
-            {reviewed
-              ? zeroPayout
-                ? "Confirm zero-payout burn"
-                : `Confirm ${kind.toLowerCase()}`
-              : `Review ${kind.toLowerCase()}`}
-          </Button>
-        </fieldset>
+              {busy && <Spinner data-icon="inline-start" />}
+              {reviewed
+                ? zeroPayout
+                  ? "Confirm zero-payout burn"
+                  : `Confirm ${kind.toLowerCase()}`
+                : `Review ${kind.toLowerCase()}`}
+            </Button>
+          </FieldGroup>
+        </FieldSet>
         <p className="text-xs leading-5 text-muted-foreground">
           Merge and redemption use the Solana program. Credited assets can be withdrawn from
           Portfolio. Only your wallet can withdraw your credited assets.

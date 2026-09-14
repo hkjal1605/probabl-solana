@@ -1,15 +1,30 @@
 "use client";
-import { Button } from "@conditional-stocks/ui-kit/button";
+
 import { useMemo, useState } from "react";
-import { EmptyState } from "@/components/ui/page";
-import { useTrades } from "@/hooks/useProtocolData";
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import { RefreshStatus } from "@/components/data/RefreshStatus";
-import type { MarketView, TradeView } from "@/types/api";
+import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import {
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@/components/ui/chart";
+import { EmptyState } from "@/components/ui/page";
+import { Segmented } from "@/components/ui/segmented";
+import { useTrades } from "@/hooks/useProtocolData";
 import { formatNumber } from "@/lib/format/display";
 import { executionImpact, executionPoints } from "@/lib/markets/history";
-import { cn } from "@/lib/utils";
+import type { MarketView, TradeView } from "@/types/api";
 
 const durations = { "1H": 3600, "1D": 86400, "1W": 604800, ALL: Infinity };
+const chartConfig = {
+  yes: { label: "YES", color: "var(--positive)" },
+  no: { label: "NO", color: "var(--danger)" },
+  impact: { label: "Last-execution impact", color: "var(--positive)" },
+};
+
 export function PriceChart({
   market,
   mini = false,
@@ -22,159 +37,129 @@ export function PriceChart({
   const query = useTrades(market?.id ?? "");
   const [range, setRange] = useState<keyof typeof durations>("1D");
   const [mode, setMode] = useState("YES vs NO");
-  const [hover, setHover] = useState<number | null>(null);
   const trades = query.data ? query.trades : query.trades.length ? query.trades : initialTrades;
   const since = Math.floor(Date.now() / 60000) * 60 - durations[range];
   const points = useMemo(() => {
     if (!market) return [];
-    const points = executionPoints(trades, market);
-    return (mode === "Impact %" ? executionImpact(points) : points).filter((p) => p.at >= since);
+    const executions = executionPoints(trades, market);
+    return (mode === "Impact %" ? executionImpact(executions) : executions).filter(
+      (p) => p.at >= since,
+    );
   }, [trades, market, since, mode]);
-  const values = points.map((p) => p.price),
-    min = Math.min(...values),
-    max = Math.max(...values),
-    padding = Math.max((max - min) * 0.15, 0.01);
-  const lo = min - padding,
-    hi = max + padding,
-    start = points[0]?.at ?? 0,
-    end = points.at(-1)?.at ?? start;
-  const x = (at: number) => 16 + (end === start ? 0.5 : (at - start) / (end - start)) * 570;
-  const y = (price: number) => 220 - ((price - lo) / (hi - lo)) * 200;
-  const selected = hover === null ? null : points[Math.min(hover, points.length - 1)];
-  return (
-    <section
-      className={cn("panel min-w-0 p-4", mini && "rounded-none border-0 bg-transparent p-0")}
-      aria-label="Conditional stock chart"
-    >
-      {!mini && (
-        <div className="mb-4 flex flex-wrap justify-between gap-2">
-          <fieldset className="flex gap-1" aria-label="Chart mode">
-            {["YES vs NO", "Impact %", "vs Spot"].map((value) => (
-              <Button
-                key={value}
-                variant={mode === value ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => setMode(value)}
-                aria-pressed={mode === value}
-              >
-                {value}
-              </Button>
-            ))}
-          </fieldset>
-          <fieldset className="flex" aria-label="Chart range">
-            {(Object.keys(durations) as Array<keyof typeof durations>).map((value) => (
-              <Button
-                key={value}
-                variant={range === value ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => setRange(value)}
-                aria-pressed={range === value}
-              >
-                {value}
-              </Button>
-            ))}
-          </fieldset>
-        </div>
-      )}
-      {!mini && <RefreshStatus active={query.isRefreshError} label="trade history" />}
-      <div
-        className="relative min-h-60"
-        onPointerMove={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
-          setHover(
-            Math.max(
-              0,
-              Math.round(((event.clientX - rect.left) / rect.width) * (points.length - 1)),
-            ),
-          );
-        }}
-        onPointerLeave={() => setHover(null)}
+  // Null means no execution for that branch, never a fabricated zero or spot price.
+  const data = points.map((p) => ({
+    at: p.at,
+    yes: p.branch === 0 ? p.price : null,
+    no: p.branch === 1 ? p.price : null,
+    impact: p.price,
+  }));
+  const chart =
+    mode === "vs Spot" ? (
+      <EmptyState>No verified historical spot feed is available.</EmptyState>
+    ) : !points.length ? (
+      <EmptyState>
+        {query.isError
+          ? "Price history is temporarily unavailable."
+          : mode === "Impact %"
+            ? "A settled trade in each branch is needed to compare execution prices."
+            : "No indexed fills in this range. Try ALL or wait for trades to settle."}
+      </EmptyState>
+    ) : (
+      <ChartContainer
+        config={chartConfig}
+        className="h-60 w-full"
+        aria-label={
+          mode === "Impact %"
+            ? "Relative impact of last executed branch prices"
+            : "Indexed YES and NO execution prices"
+        }
       >
-        {mode === "vs Spot" ? (
-          <EmptyState>No verified historical spot feed is available.</EmptyState>
-        ) : !points.length ? (
-          <EmptyState>
-            {query.isError
-              ? "Price history is temporarily unavailable."
-              : mode === "Impact %"
-                ? "A settled trade in each branch is needed to compare execution prices."
-                : "No indexed fills in this range. Try ALL or wait for trades to settle."}
-          </EmptyState>
-        ) : (
-          <>
-            {selected && (
-              <div className="pointer-events-none absolute top-2 left-2 z-10 rounded border bg-popover p-2 text-xs shadow-sm">
-                {new Date(selected.at * 1000).toLocaleString()}
-                <br />
-                {mode === "Impact %" ? "Execution impact" : selected.branch === 0 ? "YES" : "NO"}{" "}
-                {formatNumber(selected.price)}
-                {mode === "Impact %" ? "%" : " USDC"}
-              </div>
-            )}
-            <svg
-              viewBox="0 0 650 240"
-              className="h-60 w-full"
-              preserveAspectRatio="none"
-              role="img"
-              aria-label={
-                mode === "Impact %"
-                  ? "Relative impact of last executed branch prices"
-                  : "Indexed YES and NO execution prices"
-              }
-            >
-              <title>Canonical trade history</title>
-              {[0.2, 0.5, 0.8].map((p) => (
-                <g key={p}>
-                  <line
-                    x1="16"
-                    x2="590"
-                    y1={20 + p * 200}
-                    y2={20 + p * 200}
-                    stroke="var(--border)"
-                  />
-                  <text x="600" y={24 + p * 200} fill="var(--muted-foreground)" fontSize="10">
-                    {formatNumber(hi - p * (hi - lo), 0)}
-                  </text>
-                </g>
-              ))}
-              {[0, 1].map((branch) => {
-                const series = points.filter((p) => p.branch === branch);
-                return (
-                  <g key={branch}>
-                    <path
-                      d={series.map((p, i) => `${i ? "L" : "M"}${x(p.at)},${y(p.price)}`).join(" ")}
-                      fill="none"
-                      stroke={branch === 0 ? "var(--positive)" : "var(--danger)"}
-                      strokeWidth="2"
-                      vectorEffect="non-scaling-stroke"
-                    />
-                    {series.map((p) => (
-                      <circle
-                        key={p.id}
-                        cx={x(p.at)}
-                        cy={y(p.price)}
-                        r="2.5"
-                        fill={branch === 0 ? "var(--positive)" : "var(--danger)"}
-                      />
-                    ))}
-                  </g>
-                );
-              })}
-            </svg>
-          </>
-        )}
-      </div>
-      {!mini && (
-        <div className="mt-3 flex flex-wrap justify-between gap-2 text-xs font-medium text-muted-foreground">
-          <span>
-            <span className="text-positive">
-              {mode === "Impact %" ? "● Last-execution impact · not quote history" : "● YES"}
-            </span>
-            　{mode !== "Impact %" && <span className="text-danger">● NO</span>}
-          </span>
-          <span>Latest 100 canonical fills · not a price forecast</span>
-        </div>
-      )}
-    </section>
+        <LineChart accessibilityLayer data={data} margin={{ left: 0, right: 12, top: 12 }}>
+          <CartesianGrid vertical={false} />
+          <XAxis
+            dataKey="at"
+            type="number"
+            domain={["dataMin", "dataMax"]}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={(at: number) =>
+              new Date(at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            }
+          />
+          <YAxis
+            tickLine={false}
+            axisLine={false}
+            width={55}
+            domain={["auto", "auto"]}
+            tickFormatter={(value: number) => formatNumber(value)}
+          />
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                labelFormatter={(_, payload) =>
+                  payload[0]?.payload?.at
+                    ? new Date(Number(payload[0].payload.at) * 1000).toLocaleString()
+                    : ""
+                }
+                formatter={(value, name) => (
+                  <span>
+                    {chartConfig[name as keyof typeof chartConfig]?.label}:{" "}
+                    {formatNumber(Number(value))}
+                    {mode === "Impact %" ? "%" : " USDC"}
+                  </span>
+                )}
+              />
+            }
+          />
+          <ChartLegend content={<ChartLegendContent />} />
+          {(mode === "Impact %" ? ["impact"] : ["yes", "no"]).map((branch) => (
+            <Line
+              key={branch}
+              dataKey={branch}
+              type="linear"
+              stroke={`var(--color-${branch})`}
+              strokeWidth={2}
+              dot={{ r: 2 }}
+              activeDot={{ r: 4 }}
+              connectNulls
+              isAnimationActive={false}
+            />
+          ))}
+        </LineChart>
+      </ChartContainer>
+    );
+  if (mini)
+    return (
+      <figure className="min-w-0" aria-label="Conditional stock chart">
+        {chart}
+      </figure>
+    );
+  return (
+    <Card className="min-w-0" aria-label="Conditional stock chart">
+      <CardHeader className="flex flex-wrap justify-between gap-2">
+        <Segmented
+          label="Chart mode"
+          value={mode}
+          options={["YES vs NO", "Impact %", "vs Spot"]}
+          onChange={setMode}
+        />
+        <Segmented
+          label="Chart range"
+          value={range}
+          options={["1H", "1D", "1W", "ALL"]}
+          onChange={setRange}
+        />
+      </CardHeader>
+      <CardContent>
+        <RefreshStatus active={query.isRefreshError} label="trade history" />
+        {chart}
+      </CardContent>
+      <CardFooter className="flex-wrap justify-between gap-2">
+        {mode === "Impact %" && <span>Last-execution impact · not quote history</span>}
+        <span className="text-xs text-muted-foreground">
+          Latest 100 canonical fills · not a price forecast
+        </span>
+      </CardFooter>
+    </Card>
   );
 }

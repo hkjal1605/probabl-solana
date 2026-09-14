@@ -1,12 +1,13 @@
 "use client";
-import { Button } from "@conditional-stocks/ui-kit/button";
 import { ArrowUpRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { PriceChart } from "@/components/market/PriceChart";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataError } from "@/components/ui/page";
 import { useMarkets } from "@/hooks/useProtocolData";
-import type { MarketView } from "@/types/api";
 import { formatNumber } from "@/lib/format/display";
 import {
   compact,
@@ -15,6 +16,7 @@ import {
   midpoint,
   percent,
 } from "@/lib/markets/presentation";
+import type { MarketView } from "@/types/api";
 
 export function Landing({ initialMarkets }: { initialMarkets: MarketView[] }) {
   const query = useMarkets(initialMarkets),
@@ -37,13 +39,21 @@ export function Landing({ initialMarkets }: { initialMarkets: MarketView[] }) {
             doesn’t. Don't just bet, hedge the consequence
           </p>
           <div className="mt-8 flex flex-wrap gap-4">
-            <Button asChild variant="brand" size="lg">
-              <Link href="/markets">
-                Launch app <ArrowUpRight />
-              </Link>
+            <Button
+              variant="default"
+              size="lg"
+              render={<Link href="/markets" />}
+              nativeButton={false}
+            >
+              Launch app <ArrowUpRight />
             </Button>
-            <Button asChild variant="outline" size="lg">
-              <Link href="/learn">How it works</Link>
+            <Button
+              variant="outline"
+              size="lg"
+              render={<Link href="/learn" />}
+              nativeButton={false}
+            >
+              How it works
             </Button>
           </div>
           <div className="mt-10 flex gap-8">
@@ -79,46 +89,47 @@ export function Landing({ initialMarkets }: { initialMarkets: MarketView[] }) {
               className="h-auto w-[480px]"
             />
           </div>
-          <div className="panel relative w-full max-w-[560px] p-5 sm:p-6">
-            <div className="mb-4 flex flex-wrap justify-between gap-2 text-xs font-medium">
-              <span className="eyebrow text-positive">
-                {market ? `${market.lifecycle} · ${marketCategory(market)}` : "Impact markets"}
-              </span>
-              <span className="font-mono text-muted-foreground">
-                P(YES){" "}
-                {market?.probability.quality === "valid"
-                  ? `${formatNumber((market.probability.value ?? 0) * 100, 0)}%`
-                  : "—"}{" "}
-                · Polymarket
-              </span>
-            </div>
-            <h2 className="text-xl font-semibold leading-snug tracking-[-0.03em]">
-              {market?.question ?? "How does an event change a stock’s value?"}
-            </h2>
-            <div className="my-5">
+          <Card className="relative w-full max-w-[560px]">
+            <CardHeader>
+              <div className="mb-4 flex flex-wrap justify-between gap-2 text-xs font-medium">
+                <Badge variant="positive">
+                  {market ? `${market.lifecycle} · ${marketCategory(market)}` : "Impact markets"}
+                </Badge>
+                <span className="font-mono text-muted-foreground">
+                  P(YES){" "}
+                  {market?.probability.quality === "valid"
+                    ? `${formatNumber((market.probability.value ?? 0) * 100, 0)}%`
+                    : "—"}{" "}
+                  · Polymarket
+                </span>
+              </div>
+              <CardTitle role="heading" aria-level={2}>
+                {market?.question ?? "How does an event change a stock’s value?"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
               <PriceChart market={market} mini />
-            </div>
-            <div className="grid grid-cols-2 gap-2.5">
+            </CardContent>
+            <CardFooter className="grid grid-cols-2 gap-2.5">
               {(["YES", "NO"] as const).map((branch) => (
-                <div
-                  key={branch}
-                  className={`min-w-0 rounded-[10px] border p-3 ${branch === "YES" ? "border-positive bg-positive-soft text-positive" : "border-danger bg-danger-soft text-danger"}`}
-                >
-                  <div className="eyebrow flex flex-wrap justify-between gap-2">
-                    <span>IF {branch}</span>
+                <Card size="sm" key={branch} className="min-w-0">
+                  <CardHeader className="flex flex-wrap justify-between gap-2">
+                    <Badge variant={branch === "YES" ? "positive" : "destructive"}>
+                      IF {branch}
+                    </Badge>
                     <span className="font-mono">
                       {market ? percent(impactPercent(market, branch)) : "—"} impact
                     </span>
-                  </div>
-                  <div className="mt-2 font-mono text-[clamp(13px,4vw,26px)] font-semibold text-foreground">
+                  </CardHeader>
+                  <CardContent>
                     {formatNumber(
                       market ? midpoint(branch === "YES" ? market.yes : market.no) : null,
                     )}
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               ))}
-            </div>
-          </div>
+            </CardFooter>
+          </Card>
         </div>
       </section>
       <section className="overflow-hidden border-y py-4" aria-label="Market impact ticker">

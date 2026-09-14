@@ -1,25 +1,52 @@
 "use client";
+
 import { formatTokenAmount } from "@conditional-stocks/domain";
-import { Button } from "@conditional-stocks/ui-kit/button";
-import { Input } from "@conditional-stocks/ui-kit/input";
-import { Label } from "@conditional-stocks/ui-kit/label";
+import { useEffect, useState } from "react";
+import { useUiStore } from "@/components/providers/UiStateProvider";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Field, FieldGroup, FieldSet, FieldLabel as Label } from "@/components/ui/field";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from "@/components/ui/input-group";
+import { Item, ItemContent } from "@/components/ui/item";
+import { Segmented } from "@/components/ui/segmented";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@conditional-stocks/ui-kit/select";
-import { LoaderCircle } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useUiStore } from "@/components/providers/UiStateProvider";
-import { Segmented } from "@/components/ui/segmented";
+} from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useOrderTicket } from "@/hooks/useOrderTicket";
 import { usePositions } from "@/hooks/useProtocolData";
 import { useWalletAssets } from "@/hooks/useWalletAssets";
-import type { MarketView } from "@/types/api";
 import { formatNumber, formatUsd } from "@/lib/format/display";
 import { marketPriceBound, quantityForSpend } from "@/lib/trading/entry";
+import type { MarketView } from "@/types/api";
 
 export function OrderTicket({ market }: { market: MarketView }) {
   const t = useOrderTicket({ market });
@@ -132,341 +159,386 @@ export function OrderTicket({ market }: { market: MarketView }) {
       }
     });
   return (
-    <aside id="trade-ticket" className="panel p-5" aria-label="Trade conditional stock">
-      <div className="mb-5 flex items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">Trade conditional stock</h2>
-        <span className="text-xs text-muted-foreground">Self-custodied</span>
-      </div>
-      <fieldset disabled={t.busy} className="min-w-0 space-y-4">
-        <Segmented
-          label="Order side"
-          value={t.side === "buy" ? "Buy" : "Sell"}
-          options={["Buy", "Sell"]}
-          className="w-full"
-          onChange={(value) =>
-            edit(() => {
-              const side = value === "Buy" ? "buy" : "sell";
-              t.setSide(side);
-              t.setPrice(priceFor(t.branch, side));
-              setEntry("Quantity");
-            })
-          }
-        />
-        <div className="grid grid-cols-2 gap-2">
-          {(["YES", "NO"] as const).map((branch) => (
-            <Button
-              key={branch}
-              variant="ghost"
-              className={`h-auto flex-col items-start gap-1 rounded-lg border px-3 py-3 text-left ${t.branch === branch ? (branch === "YES" ? "border-positive bg-positive-soft text-positive hover:bg-positive-soft" : "border-danger bg-danger-soft text-danger hover:bg-danger-soft") : "border-border bg-secondary text-muted-foreground"}`}
-              aria-pressed={t.branch === branch}
-              onClick={() =>
+    <Card id="trade-ticket" aria-label="Trade conditional stock">
+      <CardHeader>
+        <CardTitle role="heading" aria-level={2}>
+          Trade conditional stock
+        </CardTitle>
+        <CardDescription>Self-custodied</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FieldSet disabled={t.busy} className="min-w-0 flex flex-col gap-4">
+          <FieldGroup>
+            <Segmented
+              disabled={t.busy}
+              label="Order side"
+              value={t.side === "buy" ? "Buy" : "Sell"}
+              options={["Buy", "Sell"]}
+              className="w-full"
+              onChange={(value) =>
+                edit(() => {
+                  const side = value === "Buy" ? "buy" : "sell";
+                  t.setSide(side);
+                  t.setPrice(priceFor(t.branch, side));
+                  setEntry("Quantity");
+                })
+              }
+            />
+            <ToggleGroup
+              aria-label="Conditional branch"
+              value={[t.branch]}
+              variant="outline"
+              disabled={t.busy}
+              className="grid w-full grid-cols-2"
+              onValueChange={(values) => {
+                const branch = values[0];
+                if (branch !== "YES" && branch !== "NO") return;
                 edit(() => {
                   t.setBranch(branch);
                   t.setPrice(priceFor(branch, t.side));
                   setEntry("Quantity");
-                })
-              }
+                });
+              }}
             >
-              <span className="eyebrow">IF {branch}</span>
-              <strong>
-                {market.ticker}-{branch}
-              </strong>
-              <span className="font-mono text-xs">
-                {formatNumber((branch === "YES" ? market.yes : market.no).bestAsk)}
-              </span>
-            </Button>
-          ))}
-        </div>
-        {!prepared ? (
-          <>
-            <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
-              <span
-                title={
-                  balanceError && available !== null
-                    ? "Last-known balance; refreshing before it can be used."
-                    : undefined
-                }
-              >
-                Available{" "}
-                {available === null
-                  ? "—"
-                  : formatTokenAmount(
-                      BigInt(available),
-                      t.side === "buy" ? market.quoteTokenDecimals : market.baseTokenDecimals,
-                    )}{" "}
-                {t.side === "buy" ? "USDC" : market.ticker}
-                {t.funding === "claim" ? `-${t.branch}` : ""}
-              </span>
-              <Button
-                size="sm"
-                variant="link"
-                disabled={available === null || balanceError}
-                onClick={maxQuantity}
-              >
-                Max
-              </Button>
-            </div>
-            <div>
-              <Label htmlFor="ticket-quantity" className="eyebrow">
-                {entry === "Spend" && t.side === "buy" ? "Spend" : "Quantity"}
-              </Label>
-              <div className="mt-2 flex items-center rounded-lg border bg-background pr-3">
-                <Input
-                  id="ticket-quantity"
-                  aria-label={entry === "Spend" && t.side === "buy" ? "Spend" : "Quantity"}
-                  className="h-12 border-0 bg-transparent font-mono text-lg shadow-none"
-                  inputMode="decimal"
-                  value={entry === "Spend" && t.side === "buy" ? spend : t.quantity}
-                  onChange={(event) =>
-                    edit(() => {
-                      if (entry === "Spend" && t.side === "buy") {
-                        setSpend(event.target.value);
-                        try {
-                          t.setQuantity(quantityForSpend(event.target.value, t.price, market));
-                        } catch (error) {
-                          t.setQuantity("");
-                          setEntryError(error instanceof Error ? error.message : "Invalid amount");
-                        }
-                      } else t.setQuantity(event.target.value);
-                    })
-                  }
-                />
-                <span className="text-xs font-medium text-muted-foreground">
-                  {entry === "Spend" && t.side === "buy" ? "USDC" : market.ticker}
-                </span>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Label htmlFor="ticket-price" className="eyebrow">
-                {kind === "Market" ? "Worst price · 1% bound" : "Limit price"}
-              </Label>
-              <Segmented
-                label="Order type"
-                value={kind}
-                options={["Limit", "Market"]}
-                onChange={(value) =>
-                  edit(() => {
-                    setKind(value);
-                    t.setTif(value === "Market" ? "ioc" : "gtc");
-                    t.setPrice(priceFor(t.branch, t.side, value));
-                    setEntry("Quantity");
-                  })
-                }
-              />
-            </div>
-            <div className="flex items-center rounded-lg border bg-background pr-3">
-              <Input
-                id="ticket-price"
-                aria-label={kind === "Market" ? "Worst price" : "Limit price"}
-                inputMode="decimal"
-                readOnly={kind === "Market"}
-                value={t.price}
-                className="h-12 border-0 bg-transparent font-mono text-lg shadow-none"
-                onChange={(event) =>
-                  edit(() => {
-                    t.setPrice(event.target.value);
-                    if (entry === "Spend") {
-                      try {
-                        t.setQuantity(quantityForSpend(spend, event.target.value, market));
-                      } catch {
-                        t.setQuantity("");
-                      }
-                    }
-                  })
-                }
-              />
-              <span className="text-xs text-muted-foreground">USDC</span>
-            </div>
-            <details className="rounded-lg border p-3 text-sm">
-              <summary className="cursor-pointer font-medium">Advanced order controls</summary>
-              <div className="mt-4 space-y-4">
-                {t.side === "buy" && (
-                  <Segmented
-                    label="Amount entry"
-                    value={entry}
-                    options={["Spend", "Quantity"]}
-                    onChange={(value) =>
-                      edit(() => {
-                        setEntry(value);
-                        if (value === "Spend") {
-                          setSpend("");
-                          t.setQuantity("");
-                        }
-                      })
-                    }
-                  />
-                )}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label htmlFor="ticket-tif">Time in force</Label>
-                    <Select
-                      disabled={kind === "Market"}
-                      value={t.tif}
-                      onValueChange={(value) => {
-                        if (value === "gtc" || value === "ioc") edit(() => t.setTif(value));
-                      }}
-                    >
-                      <SelectTrigger id="ticket-tif" className="mt-2 w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="gtc">GTC · rests</SelectItem>
-                        <SelectItem value="ioc">IOC · fill now</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label htmlFor="ticket-funding">Funding</Label>
-                    <Select
-                      value={t.funding}
-                      onValueChange={(value) => {
-                        if (value === "whole" || value === "claim") edit(() => t.setFunding(value));
-                      }}
-                    >
-                      <SelectTrigger id="ticket-funding" className="mt-2 w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="whole">Whole token</SelectItem>
-                        <SelectItem value="claim">Active claim</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                {
-                  <div>
-                    <Label htmlFor="max-fee-bps">Maximum trading fee (bps)</Label>
-                    <Input
-                      id="max-fee-bps"
-                      type="number"
-                      min="0"
-                      max="1000"
-                      step="1"
-                      value={t.maxFeeBps}
-                      onChange={(e) => edit(() => t.setMaxFeeBps(e.target.value))}
-                    />
-                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                      100 bps = 1%. Fees come from received active claims. A fill above your signed
-                      cap reverts; inactive claims are unaffected.
-                    </p>
-                  </div>
-                }
-                <p className="text-xs text-muted-foreground">
-                  Quantity step:{" "}
-                  {formatTokenAmount(BigInt(market.baseStep), market.baseTokenDecimals)}{" "}
-                  {market.ticker}. IOC releases any unfilled remainder.
-                </p>
-              </div>
-            </details>
-            {entryError && (
-              <p role="alert" className="text-sm text-danger">
-                {entryError}
-              </p>
-            )}
-            <p role="status" className="min-h-5 text-xs text-muted-foreground">
-              {!t.readiness.ready ? t.readiness.reason : null}
-            </p>
-            <Button
-              variant="brand"
-              className="w-full text-sm"
-              size="lg"
-              disabled={
-                t.busy ||
-                (Boolean(t.wallet.account) &&
-                  (!t.preview.valid || !t.readiness.ready || market.lifecycle !== "open"))
-              }
-              onClick={() =>
-                t.wallet.account ? t.prepare() : t.wallet.connect().catch(() => undefined)
-              }
-            >
-              {t.busy && <LoaderCircle className="animate-spin" />}
-              {t.wallet.account ? "Review Order" : "Connect wallet"}
-            </Button>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center justify-between">
-              <strong>Review order</strong>
-              <Button variant="link" size="sm" onClick={() => t.setPreparation(null)}>
-                Edit order
-              </Button>
-            </div>
-            <div className="space-y-3 rounded-lg border p-3">
-              <Row
-                label="Order"
-                value={`${t.side} ${quantityLabel} ${market.ticker}-${t.branch}`}
-              />
-              <Row label="Price · TIF" value={`${t.price} · ${t.tif.toUpperCase()}`} />
-              <Row label="Funding" value={t.funding === "whole" ? "Whole token" : "Active claim"} />
-              {prepared.plan && (
-                <>
-                  <Row
-                    label="Fill now"
-                    value={`${formatTokenAmount(BigInt(prepared.plan.filledQuantity), market.baseTokenDecimals)} ${market.ticker}`}
-                  />
-                  <Row
-                    label={t.tif === "gtc" ? "Rests" : "Released"}
-                    value={`${formatTokenAmount(BigInt(prepared.plan.remainingQuantity), market.baseTokenDecimals)} ${market.ticker}`}
-                  />
-                  <Row
-                    label="Execution before fees"
-                    value={`${formatTokenAmount(BigInt(prepared.plan.executionQuote), market.quoteTokenDecimals)} USDC`}
-                  />
-                  <Row
-                    label="Maker / taker fee"
-                    value={`${prepared.plan.guard.makerFeeBps} / ${prepared.plan.guard.takerFeeBps} bps`}
-                  />
-                </>
-              )}
-            </div>
-            {!prepared.funding.balanceSufficient && (
-              <p role="alert" className="text-sm text-danger">
-                Insufficient canonical funding for this reservation.
-              </p>
-            )}
-            {BigInt(prepared.funding.transferFee ?? "0") > 0n && (
-              <p className="text-sm text-warning">
-                Issuer transfer fee: {prepared.funding.transferFee} raw funding-token units. Your
-                wallet deposit is {prepared.funding.depositAmount} raw units, including this fee.
-                Vault credit excludes the fee; withdrawal may incur another issuer fee.
-              </p>
-            )}
-            {t.quoteExpired && (
-              <p role="alert" className="text-sm text-warning">
-                Quote expired. Refresh before signing.
-              </p>
-            )}
-            {prepared.plan && (
+              {(["YES", "NO"] as const).map((branch) => (
+                <ToggleGroupItem
+                  key={branch}
+                  value={branch}
+                  className="h-auto flex-col items-start gap-1 px-3 py-3"
+                >
+                  <span className="eyebrow">IF {branch}</span>
+                  <strong>
+                    {market.ticker}-{branch}
+                  </strong>
+                  <span className="font-mono text-xs">
+                    {formatNumber((branch === "YES" ? market.yes : market.no).bestAsk)}
+                  </span>
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            {!prepared ? (
               <>
-                <p className="text-xs leading-5 text-muted-foreground">
-                  All reviewed fills execute together or revert. You pay gas, including for a
-                  reverted transaction. Received assets and refunds are credited to you and can be
-                  withdrawn from Portfolio.
+                <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
+                  <InfoTooltip
+                    content={
+                      balanceError && available !== null
+                        ? "Last-known balance; refreshing before it can be used."
+                        : undefined
+                    }
+                  >
+                    <span>
+                      Available{" "}
+                      {available === null
+                        ? "—"
+                        : formatTokenAmount(
+                            BigInt(available),
+                            t.side === "buy" ? market.quoteTokenDecimals : market.baseTokenDecimals,
+                          )}{" "}
+                      {t.side === "buy" ? "USDC" : market.ticker}
+                      {t.funding === "claim" ? `-${t.branch}` : ""}
+                    </span>
+                  </InfoTooltip>
+                  <Button
+                    size="sm"
+                    variant="link"
+                    disabled={available === null || balanceError}
+                    onClick={maxQuantity}
+                  >
+                    Max
+                  </Button>
+                </div>
+                <Field data-invalid={Boolean(entryError)}>
+                  <Label htmlFor="ticket-quantity">
+                    {entry === "Spend" && t.side === "buy" ? "Spend" : "Quantity"}
+                  </Label>
+                  <InputGroup>
+                    <InputGroupInput
+                      id="ticket-quantity"
+                      aria-invalid={Boolean(entryError)}
+                      aria-label={entry === "Spend" && t.side === "buy" ? "Spend" : "Quantity"}
+                      inputMode="decimal"
+                      value={entry === "Spend" && t.side === "buy" ? spend : t.quantity}
+                      onChange={(event) =>
+                        edit(() => {
+                          if (entry === "Spend" && t.side === "buy") {
+                            setSpend(event.target.value);
+                            try {
+                              t.setQuantity(quantityForSpend(event.target.value, t.price, market));
+                            } catch (error) {
+                              t.setQuantity("");
+                              setEntryError(
+                                error instanceof Error ? error.message : "Invalid amount",
+                              );
+                            }
+                          } else t.setQuantity(event.target.value);
+                        })
+                      }
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupText>
+                        {entry === "Spend" && t.side === "buy" ? "USDC" : market.ticker}
+                      </InputGroupText>
+                    </InputGroupAddon>
+                  </InputGroup>
+                </Field>
+                <Field>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Label htmlFor="ticket-price">
+                      {kind === "Market" ? "Worst price · 1% bound" : "Limit price"}
+                    </Label>
+                    <Segmented
+                      disabled={t.busy}
+                      label="Order type"
+                      value={kind}
+                      options={["Limit", "Market"]}
+                      onChange={(value) =>
+                        edit(() => {
+                          setKind(value);
+                          t.setTif(value === "Market" ? "ioc" : "gtc");
+                          t.setPrice(priceFor(t.branch, t.side, value));
+                          setEntry("Quantity");
+                        })
+                      }
+                    />
+                  </div>
+                  <InputGroup>
+                    <InputGroupInput
+                      id="ticket-price"
+                      aria-label={kind === "Market" ? "Worst price" : "Limit price"}
+                      inputMode="decimal"
+                      readOnly={kind === "Market"}
+                      value={t.price}
+                      onChange={(event) =>
+                        edit(() => {
+                          t.setPrice(event.target.value);
+                          if (entry === "Spend") {
+                            try {
+                              t.setQuantity(quantityForSpend(spend, event.target.value, market));
+                            } catch {
+                              t.setQuantity("");
+                            }
+                          }
+                        })
+                      }
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupText>USDC</InputGroupText>
+                    </InputGroupAddon>
+                  </InputGroup>
+                </Field>
+                <Accordion>
+                  <AccordionItem value="details">
+                    <AccordionTrigger>Advanced order controls</AccordionTrigger>
+                    <AccordionContent>
+                      <div className="mt-4 flex flex-col gap-4">
+                        {t.side === "buy" && (
+                          <Segmented
+                            disabled={t.busy}
+                            label="Amount entry"
+                            value={entry}
+                            options={["Spend", "Quantity"]}
+                            onChange={(value) =>
+                              edit(() => {
+                                setEntry(value);
+                                if (value === "Spend") {
+                                  setSpend("");
+                                  t.setQuantity("");
+                                }
+                              })
+                            }
+                          />
+                        )}
+                        <div className="grid grid-cols-2 gap-3">
+                          <Field>
+                            <Label htmlFor="ticket-tif">Time in force</Label>
+                            <Select
+                              disabled={t.busy || kind === "Market"}
+                              value={t.tif}
+                              items={{ gtc: "GTC · rests", ioc: "IOC · fill now" }}
+                              onValueChange={(value) => {
+                                if (value === "gtc" || value === "ioc") edit(() => t.setTif(value));
+                              }}
+                            >
+                              <SelectTrigger id="ticket-tif" className="mt-2 w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectGroup>
+                                  <SelectItem value="gtc">GTC · rests</SelectItem>
+                                  <SelectItem value="ioc">IOC · fill now</SelectItem>
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                          <Field>
+                            <Label htmlFor="ticket-funding">Funding</Label>
+                            <Select
+                              disabled={t.busy}
+                              value={t.funding}
+                              items={{ whole: "Whole token", claim: "Active claim" }}
+                              onValueChange={(value) => {
+                                if (value === "whole" || value === "claim")
+                                  edit(() => t.setFunding(value));
+                              }}
+                            >
+                              <SelectTrigger id="ticket-funding" className="mt-2 w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectGroup>
+                                  <SelectItem value="whole">Whole token</SelectItem>
+                                  <SelectItem value="claim">Active claim</SelectItem>
+                                </SelectGroup>
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                        </div>
+                        {
+                          <Field>
+                            <Label htmlFor="max-fee-bps">Maximum trading fee (bps)</Label>
+                            <Input
+                              id="max-fee-bps"
+                              type="number"
+                              min="0"
+                              max="1000"
+                              step="1"
+                              value={t.maxFeeBps}
+                              onChange={(e) => edit(() => t.setMaxFeeBps(e.target.value))}
+                            />
+                            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                              100 bps = 1%. Fees come from received active claims. A fill above your
+                              signed cap reverts; inactive claims are unaffected.
+                            </p>
+                          </Field>
+                        }
+                        <p className="text-xs text-muted-foreground">
+                          Quantity step:{" "}
+                          {formatTokenAmount(BigInt(market.baseStep), market.baseTokenDecimals)}{" "}
+                          {market.ticker}. IOC releases any unfilled remainder.
+                        </p>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+                {entryError && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{entryError}</AlertDescription>
+                  </Alert>
+                )}
+                <p role="status" className="min-h-5 text-xs text-muted-foreground">
+                  {!t.readiness.ready ? t.readiness.reason : null}
                 </p>
-                <Button variant="outline" size="sm" onClick={t.prepare}>
-                  Refresh quote
+                <Button
+                  variant="default"
+                  className="w-full text-sm"
+                  size="lg"
+                  disabled={
+                    t.busy ||
+                    (Boolean(t.wallet.account) &&
+                      (!t.preview.valid || !t.readiness.ready || market.lifecycle !== "open"))
+                  }
+                  onClick={() =>
+                    t.wallet.account ? t.prepare() : t.wallet.connect().catch(() => undefined)
+                  }
+                >
+                  {t.busy && <Spinner data-icon="inline-start" />}
+                  {t.wallet.account ? "Review Order" : "Connect wallet"}
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <strong>Review order</strong>
+                  <Button variant="link" size="sm" onClick={() => t.setPreparation(null)}>
+                    Edit order
+                  </Button>
+                </div>
+                <Item variant="outline">
+                  <ItemContent>
+                    <Row
+                      label="Order"
+                      value={`${t.side} ${quantityLabel} ${market.ticker}-${t.branch}`}
+                    />
+                    <Row label="Price · TIF" value={`${t.price} · ${t.tif.toUpperCase()}`} />
+                    <Row
+                      label="Funding"
+                      value={t.funding === "whole" ? "Whole token" : "Active claim"}
+                    />
+                    {prepared.plan && (
+                      <>
+                        <Row
+                          label="Fill now"
+                          value={`${formatTokenAmount(BigInt(prepared.plan.filledQuantity), market.baseTokenDecimals)} ${market.ticker}`}
+                        />
+                        <Row
+                          label={t.tif === "gtc" ? "Rests" : "Released"}
+                          value={`${formatTokenAmount(BigInt(prepared.plan.remainingQuantity), market.baseTokenDecimals)} ${market.ticker}`}
+                        />
+                        <Row
+                          label="Execution before fees"
+                          value={`${formatTokenAmount(BigInt(prepared.plan.executionQuote), market.quoteTokenDecimals)} USDC`}
+                        />
+                        <Row
+                          label="Maker / taker fee"
+                          value={`${prepared.plan.guard.makerFeeBps} / ${prepared.plan.guard.takerFeeBps} bps`}
+                        />
+                      </>
+                    )}
+                  </ItemContent>
+                </Item>
+                {!prepared.funding.balanceSufficient && (
+                  <Alert variant="destructive">
+                    <AlertDescription>
+                      Insufficient canonical funding for this reservation.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {BigInt(prepared.funding.transferFee ?? "0") > 0n && (
+                  <p className="text-sm text-warning">
+                    Issuer transfer fee: {prepared.funding.transferFee} raw funding-token units.
+                    Your wallet deposit is {prepared.funding.depositAmount} raw units, including
+                    this fee. Vault credit excludes the fee; withdrawal may incur another issuer
+                    fee.
+                  </p>
+                )}
+                {t.quoteExpired && (
+                  <Alert>
+                    <AlertDescription>Quote expired. Refresh before signing.</AlertDescription>
+                  </Alert>
+                )}
+                {prepared.plan && (
+                  <>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      All reviewed fills execute together or revert. You pay gas, including for a
+                      reverted transaction. Received assets and refunds are credited to you and can
+                      be withdrawn from Portfolio.
+                    </p>
+                    <Button variant="outline" size="sm" onClick={t.prepare}>
+                      Refresh quote
+                    </Button>
+                  </>
+                )}
+                <Button
+                  className="w-full"
+                  variant="default"
+                  size="lg"
+                  onClick={prepared.funding.approvalCall ? t.approve : t.submit}
+                  disabled={
+                    t.busy ||
+                    !t.readiness.ready ||
+                    !prepared.funding.balanceSufficient ||
+                    (!prepared.funding.approvalCall && Boolean(t.quoteExpired))
+                  }
+                >
+                  {t.busy && <Spinner data-icon="inline-start" />}
+                  {prepared.funding.approvalCall ? "Fund order vault" : "Sign and place atomically"}
                 </Button>
               </>
             )}
-            <Button
-              className="w-full"
-              variant="brand"
-              size="lg"
-              onClick={prepared.funding.approvalCall ? t.approve : t.submit}
-              disabled={
-                t.busy ||
-                !t.readiness.ready ||
-                !prepared.funding.balanceSufficient ||
-                (!prepared.funding.approvalCall && Boolean(t.quoteExpired))
-              }
-            >
-              {t.busy && <LoaderCircle className="animate-spin" />}
-              {prepared.funding.approvalCall ? "Fund order vault" : "Sign and place atomically"}
-            </Button>
-          </>
-        )}
-      </fieldset>
-      <div className="mt-5 space-y-3 border-t pt-4">
+          </FieldGroup>
+        </FieldSet>
+      </CardContent>
+      <CardFooter className="flex-col items-stretch gap-3">
         <Row
           label="Full fill at limit · before fees"
           value={
@@ -480,14 +552,18 @@ export function OrderTicket({ market }: { market: MarketView }) {
           value={t.side === "buy" ? formatUsd(t.preview.cost) : `${quantityLabel} ${market.ticker}`}
         />
         <div className="grid grid-cols-2 gap-2 text-xs leading-5">
-          <div className="rounded-lg border border-positive/30 bg-positive-soft p-3">
-            <b className="text-positive">IF YES</b>
-            <p>{outcome(t.branch === "YES")}</p>
-          </div>
-          <div className="rounded-lg border border-danger/30 bg-danger-soft p-3">
-            <b className="text-danger">IF NO</b>
-            <p>{outcome(t.branch === "NO")}</p>
-          </div>
+          <Item variant="outline">
+            <ItemContent>
+              <Badge variant="positive">IF YES</Badge>
+              <p>{outcome(t.branch === "YES")}</p>
+            </ItemContent>
+          </Item>
+          <Item variant="outline">
+            <ItemContent>
+              <Badge variant="destructive">IF NO</Badge>
+              <p>{outcome(t.branch === "NO")}</p>
+            </ItemContent>
+          </Item>
         </div>
         <p className="text-xs leading-5 text-muted-foreground">
           Outcomes illustrate a full fill at your limit before fees. Partial fills, price
@@ -497,8 +573,8 @@ export function OrderTicket({ market }: { market: MarketView }) {
           One user transaction places and matches your order. Exact vault funding, if needed, is
           separate. Balances update after indexing.
         </p>
-      </div>
-    </aside>
+      </CardFooter>
+    </Card>
   );
 }
 function Row({ label, value }: { label: string; value: string }) {

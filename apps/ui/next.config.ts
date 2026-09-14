@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   // OpenNext expects .next; Next 16 preserves the separate .next/dev directory.
   distDir: process.env.PROBABL_REHEARSAL_BUILD === "1" ? ".next-rehearsal" : ".next",
   reactStrictMode: true,
-  transpilePackages: ["@conditional-stocks/domain", "@conditional-stocks/ui-kit"],
+  transpilePackages: ["@conditional-stocks/domain"],
   poweredByHeader: false,
   async headers() {
     return [

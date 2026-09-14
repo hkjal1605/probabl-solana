@@ -131,7 +131,9 @@ test("three assets retain their shared event and exact trading fields, with dist
     )
     .join("");
   for (const symbol of ["SPY", "BTC", "ETH"]) {
-    expect(html).toContain(`/tokens/devnet/${symbol.toLowerCase()}.svg`);
+    expect(markets.find((m) => m.ticker === symbol)?.baseTokenMetadata?.image).toBe(
+      `/tokens/devnet/${symbol.toLowerCase()}.svg`,
+    );
     expect(html).toContain(`>${symbol}</strong>`);
   }
   for (const name of ["SPDR S&amp;P 500 ETF Trust", "Bitcoin", "Ethereum"])
@@ -152,7 +154,9 @@ test("unmapped token rendering remains usable without an image; compact mode ret
       showName: false,
     }),
   );
-  expect(compact).toContain('title="Bitcoin (BTC) · Devnet test asset"');
-  expect(compact).toContain('alt=""');
+  expect(compact).toContain('aria-description="Bitcoin (BTC) · Devnet test asset"');
+  // Base Avatar shows its fallback until the image has loaded in the browser.
+  expect(compact).toContain('data-slot="avatar-fallback"');
+  expect(compact).toContain(">BT</span>");
   expect(compact).not.toContain(">Bitcoin</span>");
 });

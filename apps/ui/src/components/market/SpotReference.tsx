@@ -1,4 +1,5 @@
 import type { SpotPrice } from "@conditional-stocks/shared/spot-prices";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 
 export function formatSpotUsd(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -19,23 +20,25 @@ export function SpotReference({ price }: { price: SpotPrice | undefined }) {
           ? "Price age unverified"
           : "Price unavailable";
   return (
-    <div
-      title={
+    <InfoTooltip
+      content={
         price?.testAsset
           ? "Mainnet USD reference for a devnet test token. Not an executable quote or a settlement input."
           : "Token market reference in USD. Not an executable quote or a settlement input."
       }
     >
-      <div className="font-mono text-xl font-medium leading-tight">
-        {price?.priceUsd ? formatSpotUsd(price.priceUsd) : "—"}
+      <div>
+        <div className="font-mono text-xl font-medium leading-tight">
+          {price?.priceUsd ? formatSpotUsd(price.priceUsd) : "—"}
+        </div>
+        <div className="mt-2 text-xs font-medium text-muted-foreground">Spot reference · USD</div>
+        <div className="mt-1 min-h-4 text-[11px] text-muted-foreground">
+          {label}
+          {price?.priceUsd && ["stale", "unavailable", "restricted"].includes(status ?? "")
+            ? " · last known"
+            : ""}
+        </div>
       </div>
-      <div className="mt-2 text-xs font-medium text-muted-foreground">Spot reference · USD</div>
-      <div className="mt-1 min-h-4 text-[11px] text-muted-foreground">
-        {label}
-        {price?.priceUsd && ["stale", "unavailable", "restricted"].includes(status ?? "")
-          ? " · last known"
-          : ""}
-      </div>
-    </div>
+    </InfoTooltip>
   );
 }

@@ -1,22 +1,24 @@
 "use client";
 
-import { Toaster } from "@conditional-stocks/ui-kit/sonner";
-import { ThemeProvider } from "@conditional-stocks/ui-kit/theme";
-import { TooltipProvider } from "@conditional-stocks/ui-kit/tooltip";
-import { type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { Toaster } from "@/components/ui/toast";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { IndexStreamProvider } from "./IndexStreamProvider";
+import { ThemeProvider } from "./ThemeProvider";
 import { UiStateProvider } from "./UiStateProvider";
 import { WalletProvider } from "./WalletProvider";
-import { IndexStreamProvider } from "./IndexStreamProvider";
 
 export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
-        <WalletProvider>
-          <TooltipProvider delayDuration={250}>
-            <IndexStreamProvider><UiStateProvider>{children}</UiStateProvider></IndexStreamProvider>
-            <Toaster richColors position="bottom-right" />
-          </TooltipProvider>
-        </WalletProvider>
+      <WalletProvider>
+        <TooltipProvider delay={250}>
+          <IndexStreamProvider>
+            <UiStateProvider>{children}</UiStateProvider>
+          </IndexStreamProvider>
+          <Toaster />
+        </TooltipProvider>
+      </WalletProvider>
     </ThemeProvider>
   );
 }

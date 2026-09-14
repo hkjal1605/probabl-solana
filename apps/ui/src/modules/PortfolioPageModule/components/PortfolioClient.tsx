@@ -1,28 +1,31 @@
 "use client";
-import { Button } from "@conditional-stocks/ui-kit/button";
-import { Tabs, TabsContent } from "@conditional-stocks/ui-kit/tabs";
 import { ArrowDownToLine, ArrowUpRight, Download } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { RefreshStatus } from "@/components/data/RefreshStatus";
 import { LifecycleBadge } from "@/components/data/StatusBadge";
 import { ClaimTable } from "@/components/portfolio/ClaimTable";
 import { PositionTable } from "@/components/portfolio/PositionTable";
 import { useUiStore } from "@/components/providers/UiStateProvider";
 import { useWallet } from "@/components/providers/WalletProvider";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import {
   LineTabsList as TabsList,
   LineTabsTrigger as TabsTrigger,
 } from "@/components/ui/line-tabs";
 import { DataError, EmptyState, Page, PageHeading } from "@/components/ui/page";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useMarkets, useOrders, usePositions } from "@/hooks/useProtocolData";
 import { useWalletAssets } from "@/hooks/useWalletAssets";
-import type { IndexedOrder, MarketView } from "@/types/api";
 import { formatNumber, shortAddress, tokenAmount } from "@/lib/format/display";
 import { groupMarkets } from "@/lib/markets/presentation";
 import { orderHistoryCsv, wholeReserved } from "@/lib/portfolio/presentation";
 import { OrdersClient } from "@/modules/OrdersPageModule/components/OrdersClient";
+import type { IndexedOrder, MarketView } from "@/types/api";
 import { PendingPayouts } from "./PendingPayouts";
-import { RefreshStatus } from "@/components/data/RefreshStatus";
 
 export function PortfolioClient({ markets: initial }: { markets: MarketView[] }) {
   const wallet = useWallet(),
@@ -88,7 +91,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
               <ArrowUpRight />
               Withdraw
             </Button>
-            <Button variant="brand" onClick={() => setFunds("Deposit")}>
+            <Button variant="default" onClick={() => setFunds("Deposit")}>
               <ArrowDownToLine />
               Deposit
             </Button>
@@ -96,14 +99,14 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
         )}
       </PageHeading>
       {!wallet.account ? (
-        <section className="panel">
+        <Card className="">
           <EmptyState>
             <p>Connect your wallet to see positions.</p>
-            <Button variant="brand" onClick={() => wallet.connect().catch(() => undefined)}>
+            <Button variant="default" onClick={() => wallet.connect().catch(() => undefined)}>
               Connect wallet
             </Button>
           </EmptyState>
-        </section>
+        </Card>
       ) : (
         <>
           <RefreshStatus
@@ -132,8 +135,8 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
               }}
             />
           )}
-          <section
-            className="panel mb-6 flex flex-col divide-y lg:flex-row lg:divide-x lg:divide-y-0"
+          <Card
+            className="mb-6 flex flex-col divide-y lg:flex-row lg:divide-x lg:divide-y-0"
             aria-label="Wallet balances"
           >
             <div className="flex shrink-0 flex-col gap-2 p-6 lg:min-w-64">
@@ -152,7 +155,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
             </div>
             <div className="flex flex-1 flex-wrap gap-x-10 gap-y-5 p-6">
               {balances.map((a) => (
-                <div className="min-w-28 space-y-2" key={a.token}>
+                <div className="min-w-28 flex flex-col gap-2" key={a.token}>
                   <div className="eyebrow">{a.symbol}</div>
                   <div className="font-mono text-xl">
                     {known
@@ -194,16 +197,16 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                 </span>
               )}
             </div>
-          </section>
+          </Card>
           <div className="grid items-start gap-6 min-[1101px]:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="min-w-0 space-y-5">
+            <div className="min-w-0 flex flex-col gap-5">
               {groups.map((assets) => (
                 <MarketHoldings key={assets[0]?.id} markets={assets} orders={activeOrders} />
               ))}
               {!groups.length && (
-                <section className="panel">
+                <Card className="">
                   <EmptyState>No markets are indexed yet.</EmptyState>
-                </section>
+                </Card>
               )}
               <p className="text-xs font-medium leading-6 text-muted-foreground">
                 Entry and mark-to-entry require a complete cost basis and are unavailable where it
@@ -229,11 +232,13 @@ function MarketHoldings({ markets, orders }: { markets: MarketView[]; orders: In
   if (!m) return null;
   const openCount = orders.filter((o) => markets.some((asset) => asset.id === o.marketId)).length;
   return (
-    <article className="panel overflow-hidden">
-      <div className="flex items-center justify-between gap-4 p-5">
+    <Card className="overflow-hidden">
+      <CardHeader className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-semibold leading-6">{m.question}</h2>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+          <CardTitle role="heading" aria-level={2}>
+            {m.question}
+          </CardTitle>
+          <CardDescription className="mt-3 flex flex-wrap items-center gap-2">
             <span>{markets.map((a) => a.ticker).join(" / ")}</span> ·{" "}
             <LifecycleBadge state={m.lifecycle} /> ·{" "}
             <span>
@@ -243,19 +248,22 @@ function MarketHoldings({ markets, orders }: { markets: MarketView[]; orders: In
                 : `${formatNumber(m.probability.value * 100, 0)}%`}{" "}
               · Polymarket
             </span>
-          </div>
+          </CardDescription>
         </div>
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/markets/${m.id}`}>
-            Trade <ArrowUpRight />
-          </Link>
+        <Button
+          variant="outline"
+          size="sm"
+          render={<Link href={`/markets/${m.id}`} />}
+          nativeButton={false}
+        >
+          Trade <ArrowUpRight />
         </Button>
-      </div>
+      </CardHeader>
       <Tabs defaultValue="positions">
         <TabsList aria-label={`${m.ticker} holdings`}>
           <TabsTrigger value="positions">Positions</TabsTrigger>
           <TabsTrigger value="orders">
-            Open orders <span className="font-mono text-muted-foreground">{openCount}</span>
+            Open orders <Badge variant="secondary">{openCount}</Badge>
           </TabsTrigger>
           <TabsTrigger value="claims">Claims</TabsTrigger>
         </TabsList>
@@ -269,7 +277,7 @@ function MarketHoldings({ markets, orders }: { markets: MarketView[]; orders: In
           <ClaimTable markets={markets} />
         </TabsContent>
       </Tabs>
-    </article>
+    </Card>
   );
 }
 function OrderHistory({
@@ -303,14 +311,16 @@ function OrderHistory({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   return (
-    <section className="panel overflow-hidden" aria-label="Order history">
-      <div className="panel-heading">
-        <h2 className="font-semibold">History</h2>
+    <Card className="overflow-hidden" aria-label="Order history">
+      <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+        <CardTitle role="heading" aria-level={2}>
+          History
+        </CardTitle>
         <Button size="sm" variant="ghost" onClick={download} disabled={error || !rows.length}>
           <Download />
           CSV
         </Button>
-      </div>
+      </CardHeader>
       <p className="border-b px-5 py-3 text-xs font-medium text-muted-foreground">
         Canonical order updates · not a complete wallet ledger
         {truncated && " · latest 1,000 orders"}
@@ -337,9 +347,11 @@ function OrderHistory({
                   : "—"}{" "}
                 filled · block {order.updatedBlock}
               </p>
-              <code className="mt-1 block text-xs text-muted-foreground" title={order.id}>
-                {shortAddress(order.id, 8)}
-              </code>
+              <InfoTooltip content={order.id}>
+                <code className="mt-1 block text-xs text-muted-foreground">
+                  {shortAddress(order.id, 8)}
+                </code>
+              </InfoTooltip>
             </div>
           );
         })
@@ -351,6 +363,6 @@ function OrderHistory({
           </Button>
         </div>
       )}
-    </section>
+    </Card>
   );
 }

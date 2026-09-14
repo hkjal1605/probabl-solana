@@ -1,5 +1,5 @@
-import { Badge } from "@conditional-stocks/ui-kit/badge";
 import { CircleAlert, CircleCheck, CircleDashed, LockKeyhole, Radio } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import type { DataQuality, MarketLifecycle } from "@/types/api";
 
 export function LifecycleBadge({ state }: { state: MarketLifecycle }) {
@@ -12,7 +12,7 @@ export function LifecycleBadge({ state }: { state: MarketLifecycle }) {
     );
   if (state === "redeemable")
     return (
-      <Badge variant="brand">
+      <Badge variant="default">
         <CircleCheck aria-hidden="true" />
         Redeemable
       </Badge>

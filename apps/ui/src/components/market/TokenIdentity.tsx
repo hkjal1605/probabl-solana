@@ -1,4 +1,5 @@
-import Image from "next/image";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import type { TokenDisplayMetadata } from "@/lib/tokens/devnet";
 
 export function TokenIdentity({
@@ -11,28 +12,25 @@ export function TokenIdentity({
   showName?: boolean;
 }) {
   return (
-    <span
-      className="inline-flex min-w-0 max-w-full items-center gap-2 align-middle"
-      title={metadata ? `${metadata.name} (${metadata.symbol}) · Devnet test asset` : symbol}
+    <InfoTooltip
+      content={metadata ? `${metadata.name} (${metadata.symbol}) · Devnet test asset` : symbol}
     >
-      {metadata && (
-        <Image
-          src={metadata.image}
-          alt=""
-          width={24}
-          height={24}
-          unoptimized
-          className="size-6 shrink-0 rounded-full"
-        />
-      )}
-      <span className="min-w-0">
-        <strong className="block truncate">{symbol}</strong>
-        {metadata && showName && (
-          <span className="block truncate text-[10px] font-normal leading-4 text-muted-foreground">
-            {metadata.name}
-          </span>
+      <span className="inline-flex min-w-0 max-w-full items-center gap-2 align-middle">
+        {metadata && (
+          <Avatar size="sm">
+            <AvatarImage src={metadata.image} alt="" />
+            <AvatarFallback>{symbol.slice(0, 2)}</AvatarFallback>
+          </Avatar>
         )}
+        <span className="min-w-0">
+          <strong className="block truncate">{symbol}</strong>
+          {metadata && showName && (
+            <span className="block truncate text-[10px] font-normal leading-4 text-muted-foreground">
+              {metadata.name}
+            </span>
+          )}
+        </span>
       </span>
-    </span>
+    </InfoTooltip>
   );
 }
