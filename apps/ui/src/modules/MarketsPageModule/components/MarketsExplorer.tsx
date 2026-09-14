@@ -7,8 +7,7 @@ import { useUiStore } from "@/components/providers/UiStateProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { DataError, EmptyState, LoadingState, Page, PageHeading, Stat } from "@/components/ui/page";
+import { DataError, EmptyState, LoadingState, Page } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/segmented";
 import {
   Select,
@@ -29,7 +28,6 @@ import {
 import { useMarkets } from "@/hooks/useProtocolData";
 import { formatNumber } from "@/lib/format/display";
 import {
-  compact,
   eventKey,
   groupMarkets,
   impactPercent,
@@ -57,9 +55,6 @@ export function MarketsExplorer({
     .filter((assets) =>
       assets.some(
         (m) =>
-          `${m.question} ${m.ticker} ${m.baseTokenMetadata?.name ?? ""}`
-            .toLowerCase()
-            .includes(filters.query.toLowerCase()) &&
           (filters.category === "All" || marketCategory(m) === filters.category) &&
           (filters.lifecycle === "all" ||
             (filters.lifecycle === "active" ? m.lifecycle === "open" : m.lifecycle !== "open")),
@@ -78,83 +73,72 @@ export function MarketsExplorer({
     a.ticker.localeCompare(b.ticker),
   );
   return (
-    <Page>
-      <PageHeading
-        title="Markets"
-        description={
-          <>
-            Asset prices in the world where an event happens, and the world where it doesn’t.
-            <br />
-            The gap is the impact.
-          </>
-        }
-      >
-        <div className="flex flex-wrap gap-8">
-          <Stat label="visible depth" value={`$${compact(depth(markets))}`} />
-          <Stat label="open markets" value={markets.filter((m) => m.lifecycle === "open").length} />
-          <Stat label="events" value={groups.length} />
-        </div>
-      </PageHeading>
-      <div className="mb-5 flex flex-wrap items-center gap-3">
+    <Page variant="terminal" className="pt-5">
+      <div className="mb-4 overflow-x-auto">
         <Segmented
           label="Market category"
+          variant="category"
           value={filters.category}
           options={["All", "Macro", "Earnings", "Policy", "Other"]}
           onChange={(category) => setFilters({ category })}
         />
-        <Input
-          className="w-full sm:w-56"
-          aria-label="Search markets"
-          placeholder="Search event, token or ticker"
-          value={filters.query}
-          onChange={(e) => setFilters({ query: e.target.value })}
-        />
-        <div className="hidden flex-1 xl:block" />
-        <Select
-          value={filters.lifecycle}
-          items={{ active: "Active markets", resolving: "Resolution", all: "All lifecycle states" }}
-          onValueChange={(value) => {
-            if (value === "active" || value === "resolving" || value === "all")
-              setFilters({ lifecycle: value });
-          }}
-        >
-          <SelectTrigger aria-label="Lifecycle" className="w-auto">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value="active">Active markets</SelectItem>
-              <SelectItem value="resolving">Resolution</SelectItem>
-              <SelectItem value="all">All lifecycle states</SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-        <Select
-          value={filters.sort}
-          items={{ depth: "Depth ↓", impact: "Impact ↓", cutoff: "Cutoff ↑" }}
-          onValueChange={(value) => {
-            if (value === "depth" || value === "impact" || value === "cutoff")
-              setFilters({ sort: value });
-          }}
-        >
-          <SelectTrigger aria-label="Sort markets" className="w-auto">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value="depth">Depth ↓</SelectItem>
-              <SelectItem value="impact">Impact ↓</SelectItem>
-              <SelectItem value="cutoff">Cutoff ↑</SelectItem>
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+      </div>
+      <section
+        aria-label="Market filters"
+        className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2"
+      >
+        <div className="flex flex-wrap items-center gap-1">
+          <Select
+            value={filters.lifecycle}
+            items={{
+              active: "Active markets",
+              resolving: "Resolution",
+              all: "All lifecycle states",
+            }}
+            onValueChange={(value) => {
+              if (value === "active" || value === "resolving" || value === "all")
+                setFilters({ lifecycle: value });
+            }}
+          >
+            <SelectTrigger aria-label="Lifecycle" size="xs" variant="filter-chip">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="active">Active markets</SelectItem>
+                <SelectItem value="resolving">Resolution</SelectItem>
+                <SelectItem value="all">All lifecycle states</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <Select
+            value={filters.sort}
+            items={{ depth: "Depth ↓", impact: "Impact ↓", cutoff: "Cutoff ↑" }}
+            onValueChange={(value) => {
+              if (value === "depth" || value === "impact" || value === "cutoff")
+                setFilters({ sort: value });
+            }}
+          >
+            <SelectTrigger aria-label="Sort markets" size="xs" variant="filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="depth">Depth ↓</SelectItem>
+                <SelectItem value="impact">Impact ↓</SelectItem>
+                <SelectItem value="cutoff">Cutoff ↑</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
         <Segmented
           label="Market view"
+          variant="compact"
           value={filters.view}
           options={["Feed", "Matrix"]}
           onChange={(view) => setFilters({ view })}
         />
-      </div>
+      </section>
       <RefreshStatus active={query.isRefreshError} label="markets" />
       {query.isInitialError && (
         <DataError
@@ -168,13 +152,13 @@ export function MarketsExplorer({
       ) : !visible.length ? (
         <EmptyState>No markets match this view. Try another filter.</EmptyState>
       ) : filters.view === "Feed" ? (
-        <div className="grid gap-[18px] min-[1101px]:grid-cols-2">
+        <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {visible.map((assets) => (
             <EventCard key={assets[0] ? eventKey(assets[0]) : "empty"} markets={assets} />
           ))}
         </div>
       ) : (
-        <Card className="">
+        <Card variant="panel">
           <Table>
             <TableHeader>
               <TableRow>
@@ -231,7 +215,7 @@ export function MarketsExplorer({
                         </TableCell>
                       );
                     })}
-                    <TableCell className="font-mono">
+                    <TableCell className="tabular-nums">
                       {market.probability.quality === "valid" && market.probability.value !== null
                         ? `${formatNumber(market.probability.value * 100, 0)}%`
                         : "—"}

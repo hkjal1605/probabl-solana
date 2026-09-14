@@ -1,12 +1,11 @@
 "use client";
-import { ArrowDownToLine, ArrowUpRight, Download } from "lucide-react";
+import { ArrowUpRight, Download } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { RefreshStatus } from "@/components/data/RefreshStatus";
 import { LifecycleBadge } from "@/components/data/StatusBadge";
 import { ClaimTable } from "@/components/portfolio/ClaimTable";
 import { PositionTable } from "@/components/portfolio/PositionTable";
-import { useUiStore } from "@/components/providers/UiStateProvider";
 import { useWallet } from "@/components/providers/WalletProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,7 +33,6 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
     ordersQuery = useOrders(),
     positionsQuery = usePositions(),
     assetQuery = useWalletAssets(markets);
-  const setFunds = useUiStore((s) => s.setFunds);
   const groups = groupMarkets(markets),
     activeOrders = ordersQuery.orders.filter((o) => o.status === "open");
   const exposures = groups.filter((assets) =>
@@ -84,22 +82,9 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
             ? `${exposures} events with claims · ${activeOrders.length} open orders`
             : "Your positions, orders, and claims in one place."
         }
-      >
-        {wallet.account && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setFunds("Withdraw")}>
-              <ArrowUpRight />
-              Withdraw
-            </Button>
-            <Button variant="default" onClick={() => setFunds("Deposit")}>
-              <ArrowDownToLine />
-              Deposit
-            </Button>
-          </div>
-        )}
-      </PageHeading>
+      />
       {!wallet.account ? (
-        <Card className="">
+        <Card variant="panel">
           <EmptyState>
             <p>Connect your wallet to see positions.</p>
             <Button variant="default" onClick={() => wallet.connect().catch(() => undefined)}>
@@ -136,12 +121,13 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
             />
           )}
           <Card
-            className="mb-6 flex flex-col divide-y lg:flex-row lg:divide-x lg:divide-y-0"
+            variant="panel"
+            className="mb-6 flex flex-col divide-y sm:flex-row sm:divide-x sm:divide-y-0"
             aria-label="Wallet balances"
           >
-            <div className="flex shrink-0 flex-col gap-2 p-6 lg:min-w-64">
+            <div className="flex shrink-0 flex-col gap-2 py-3 sm:min-w-56 sm:pr-6">
               <span className="eyebrow">Total balance</span>
-              <strong className="font-mono text-3xl tracking-tight">
+              <strong className="text-3xl font-normal leading-9 tabular-nums">
                 {total === null ? "—" : `$${formatNumber(total)}`}
               </strong>
               <span className="text-xs font-medium text-muted-foreground">
@@ -153,11 +139,11 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                 </span>
               )}
             </div>
-            <div className="flex flex-1 flex-wrap gap-x-10 gap-y-5 p-6">
+            <div className="flex min-w-0 flex-1 flex-wrap gap-x-6 gap-y-4 py-3 sm:pl-6">
               {balances.map((a) => (
                 <div className="min-w-28 flex flex-col gap-2" key={a.token}>
                   <div className="eyebrow">{a.symbol}</div>
-                  <div className="font-mono text-xl">
+                  <div className="tabular-nums text-xl">
                     {known
                       ? formatNumber(
                           tokenAmount(
@@ -198,13 +184,13 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
               )}
             </div>
           </Card>
-          <div className="grid items-start gap-6 min-[1101px]:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="min-w-0 flex flex-col gap-5">
+          <div className="flex flex-col gap-6">
+            <div className="flex w-full min-w-0 flex-col gap-3">
               {groups.map((assets) => (
                 <MarketHoldings key={assets[0]?.id} markets={assets} orders={activeOrders} />
               ))}
               {!groups.length && (
-                <Card className="">
+                <Card variant="panel">
                   <EmptyState>No markets are indexed yet.</EmptyState>
                 </Card>
               )}
@@ -232,13 +218,13 @@ function MarketHoldings({ markets, orders }: { markets: MarketView[]; orders: In
   if (!m) return null;
   const openCount = orders.filter((o) => markets.some((asset) => asset.id === o.marketId)).length;
   return (
-    <Card className="overflow-hidden">
+    <Card variant="panel" className="w-full overflow-hidden border">
       <CardHeader className="flex items-center justify-between gap-4">
         <div>
           <CardTitle role="heading" aria-level={2}>
             {m.question}
           </CardTitle>
-          <CardDescription className="mt-3 flex flex-wrap items-center gap-2">
+          <CardDescription className="mt-2 flex flex-wrap items-center gap-2">
             <span>{markets.map((a) => a.ticker).join(" / ")}</span> ·{" "}
             <LifecycleBadge state={m.lifecycle} /> ·{" "}
             <span>
@@ -311,7 +297,7 @@ function OrderHistory({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   return (
-    <Card className="overflow-hidden" aria-label="Order history">
+    <Card variant="panel" className="w-full overflow-hidden border" aria-label="Order history">
       <CardHeader className="flex flex-wrap items-center justify-between gap-3">
         <CardTitle role="heading" aria-level={2}>
           History
@@ -321,7 +307,7 @@ function OrderHistory({
           CSV
         </Button>
       </CardHeader>
-      <p className="border-b px-5 py-3 text-xs font-medium text-muted-foreground">
+      <p className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">
         Canonical order updates · not a complete wallet ledger
         {truncated && " · latest 1,000 orders"}
       </p>
@@ -333,7 +319,7 @@ function OrderHistory({
         rows.slice(0, limit).map((order) => {
           const market = markets.find((m) => m.id === order.marketId);
           return (
-            <div className="border-b px-5 py-4 last:border-0" key={order.id}>
+            <div className="border-b px-3 py-3 last:border-0" key={order.id}>
               <div className="flex justify-between gap-3 text-sm font-semibold">
                 <Link href={`/markets/${order.marketId}`}>
                   {order.side === 0 ? "Buy" : "Sell"} {market?.ticker ?? "Stock"}-

@@ -334,7 +334,7 @@ app.post("/v1/payouts/withdraw/prepare", async (c) => {
     ),
   });
 });
-await mountSolanaAdmin(app, db, client, domain, authenticate);
+const closeAdmin = await mountSolanaAdmin(app, db, client, domain, authenticate);
 const server = Bun.serve({
   idleTimeout: 60,
   hostname: process.env.API_HOST ?? "127.0.0.1",
@@ -344,5 +344,6 @@ const server = Bun.serve({
 console.info(`Solana API listening on ${server.url}`);
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.on(signal, () => {
+    closeAdmin();
     void server.stop().then(() => db.end());
   });

@@ -8,6 +8,7 @@ export function Segmented<T extends string>({
   onChange,
   className,
   disabled = false,
+  variant = "default",
 }: {
   label: string;
   value: T;
@@ -15,13 +16,19 @@ export function Segmented<T extends string>({
   onChange: (value: T) => void;
   className?: string;
   disabled?: boolean;
+  variant?: "default" | "category" | "compact";
 }) {
   return (
     <ToggleGroup
       aria-label={label}
       disabled={disabled}
-      variant="outline"
-      className={cn(className)}
+      variant={variant === "category" ? "category" : "default"}
+      size={variant === "default" ? "default" : variant}
+      spacing={variant === "category" ? 4 : 1}
+      className={cn(
+        variant === "default" ? "rounded-md border border-border p-0.5" : "border-0 p-0",
+        className,
+      )}
       value={[value]}
       onValueChange={(next) => {
         const option = options.find((item) => item === next[0]);
@@ -29,7 +36,11 @@ export function Segmented<T extends string>({
       }}
     >
       {options.map((option) => (
-        <ToggleGroupItem key={option} value={option}>
+        <ToggleGroupItem
+          key={option}
+          value={option}
+          className={cn("min-w-0", variant === "default" && "flex-1")}
+        >
           {option}
         </ToggleGroupItem>
       ))}

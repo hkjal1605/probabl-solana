@@ -48,9 +48,53 @@ const { Accordion, AccordionItem, AccordionTrigger, AccordionContent } = await i
   "../../src/components/ui/accordion"
 );
 const { Avatar, AvatarImage, AvatarFallback } = await import("../../src/components/ui/avatar");
+const { MarketSearchResults } = await import(
+  "../../src/modules/MarketSearchModule/components/MarketSearchResults"
+);
+const { shouldOpenMarketSearch } = await import(
+  "../../src/modules/MarketSearchModule/utils/searchMarkets"
+);
+const { fixtureMarkets } = await import("./protocol");
+const { useSearchMarkets } = await import(
+  "../../src/modules/MarketSearchModule/hooks/useSearchMarkets"
+);
+const { marketsStore } = await import("../../src/stores/useMarketsStore");
+const { marketsApi } = await import("../../src/services/markets-api-service");
 const host = document.createElement("div");
 document.body.appendChild(host);
 let root = createRoot(host);
+
+test("search reuses a loaded catalogue and deduplicates cold loads without fetching spot prices", async () => {
+  const original = marketsApi.liveMarkets;
+  let reads = 0;
+  marketsApi.liveMarkets = async () => {
+    reads++;
+    return fixtureMarkets;
+  };
+  function Reader() {
+    const data = useSearchMarkets();
+    return <span>{data.markets.length}</span>;
+  }
+  try {
+    marketsStore.setData("all", { markets: fixtureMarkets }, Date.now() - 60_000);
+    await render(<Reader />);
+    expect(reads).toBe(0);
+    await render(null);
+    marketsStore.reset();
+    await render(
+      <>
+        <Reader />
+        <Reader />
+      </>,
+    );
+    expect(reads).toBe(1);
+    expect(marketsStore.get("all").data?.markets).toHaveLength(fixtureMarkets.length);
+  } finally {
+    await render(null);
+    marketsApi.liveMarkets = original;
+    marketsStore.reset();
+  }
+});
 async function render(node: React.ReactNode) {
   await act(async () => {
     root.render(node);
@@ -68,6 +112,99 @@ async function click(element: Element | null) {
 }
 const button = (text: string) =>
   [...document.querySelectorAll("button")].find((b) => b.textContent?.includes(text)) ?? null;
+
+test("search debounces input, clears obsolete options, and supports keyboard selection", async () => {
+  const seed = fixtureMarkets[0];
+  if (!seed) throw new Error("Missing fixture");
+  const markets = [
+    { ...seed, id: "BTC-market", ticker: "BTC" },
+    { ...seed, id: "ETH-market", ticker: "ETH" },
+  ];
+  let selected = "";
+  await render(
+    <MarketSearchResults
+      markets={markets}
+      loading={false}
+      error={false}
+      retry={() => {}}
+      onSelect={(market) => {
+        selected = market.id;
+      }}
+    />,
+  );
+  const input = document.querySelector<HTMLInputElement>('input[role="combobox"]');
+  if (!input) throw new Error("Search input missing");
+  expect(document.querySelectorAll('[role="option"]')).toHaveLength(2);
+  await act(async () => {
+    input.focus();
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "btc");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
+  expect(document.body.textContent).toContain("Searching…");
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  expect(document.querySelectorAll('[role="option"]')).toHaveLength(1);
+  expect(document.querySelector('[role="option"]')?.textContent).toContain("BTC");
+  await act(async () => {
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  });
+  await act(async () => {
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  expect(selected).toBe("BTC-market");
+});
+
+test("slash shortcuts never steal typing, modifiers, repeats, composition or another dialog", async () => {
+  await render(
+    <>
+      <input aria-label="Other input" />
+      <div contentEditable suppressContentEditableWarning>
+        Editor
+      </div>
+    </>,
+  );
+  let opened = 0;
+  const handle = (event: KeyboardEvent) => {
+    if (shouldOpenMarketSearch(event)) opened++;
+  };
+  document.addEventListener("keydown", handle);
+  try {
+    const press = (target: Element, extra: KeyboardEventInit = {}) =>
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "/", bubbles: true, composed: true, ...extra }),
+      );
+    press(document.body);
+    expect(opened).toBe(1);
+    for (const extra of [
+      { ctrlKey: true },
+      { metaKey: true },
+      { altKey: true },
+      { repeat: true },
+      { isComposing: true },
+    ])
+      press(document.body, extra);
+    const input = host.querySelector("input"),
+      editor = host.querySelector("[contenteditable]");
+    if (!input || !editor) throw new Error("Missing editable targets");
+    press(input);
+    press(editor);
+    expect(opened).toBe(1);
+    await render(
+      <Dialog open>
+        <DialogContent>
+          <DialogTitle>Another modal</DialogTitle>
+          <DialogDescription>Do not interrupt.</DialogDescription>
+        </DialogContent>
+      </Dialog>,
+    );
+    press(document.body);
+    expect(opened).toBe(1);
+  } finally {
+    document.removeEventListener("keydown", handle);
+  }
+});
 afterEach(async () => {
   await act(async () => root.unmount());
   root = createRoot(host);
@@ -101,6 +238,30 @@ test("single-choice toggles cannot deselect, switch correctly, and honor disable
   await render(<Controls disabled />);
   await click(button("Buy"));
   expect(button("Sell")?.getAttribute("aria-pressed")).toBe("true");
+});
+
+test("category and compact groups preserve single selection without changing default controls", async () => {
+  function Categories({ variant }: { variant: "category" | "compact" }) {
+    const [value, setValue] = useState("All");
+    return (
+      <Segmented
+        label="Categories"
+        options={["All", "Macro"]}
+        value={value}
+        onChange={setValue}
+        variant={variant}
+      />
+    );
+  }
+  for (const variant of ["category", "compact"] as const) {
+    await render(<Categories key={variant} variant={variant} />);
+    expect(button("All")?.getAttribute("aria-pressed")).toBe("true");
+    await click(button("All"));
+    expect(button("All")?.getAttribute("aria-pressed")).toBe("true");
+    await click(button("Macro"));
+    expect(button("Macro")?.getAttribute("aria-pressed")).toBe("true");
+    expect(button("All")?.getAttribute("aria-pressed")).toBe("false");
+  }
 });
 
 test("select renders labels before opening and updates the selected value", async () => {

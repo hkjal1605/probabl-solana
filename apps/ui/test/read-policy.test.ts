@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { RefreshStatus } from "../src/components/data/RefreshStatus";
+import { retainBookDisplays } from "../src/lib/markets/refresh";
+import { marketPriceBound } from "../src/lib/trading/entry";
+import {
+  localTradingStatus,
+  readinessMessage,
+  requireTradingReady,
+} from "../src/lib/trading/readiness";
 import { ApiError } from "../src/services/protocol-api-service";
 import {
   readFreshness,
@@ -9,14 +17,6 @@ import {
   retryAfterMs,
   retryRead,
 } from "../src/services/read-policy";
-import {
-  localTradingStatus,
-  readinessMessage,
-  requireTradingReady,
-} from "../src/lib/trading/readiness";
-import { retainBookDisplays } from "../src/lib/markets/refresh";
-import { marketPriceBound } from "../src/lib/trading/entry";
-import { RefreshStatus } from "../src/components/data/RefreshStatus";
 import { fixtureMarkets } from "./fixtures/protocol";
 
 test("read retries are bounded, honor Retry-After, and never retry auth, schema or abort errors", () => {
@@ -132,7 +132,8 @@ test("partial book refresh retains rows only for identical assets, without makin
 test("refresh notices reserve layout space and do not become error alerts or toast messages", () => {
   const render = (active: boolean) =>
     renderToStaticMarkup(createElement(RefreshStatus, { active, label: "positions" }));
-  expect(render(false)).toContain("min-h-6");
+  expect(render(false)).toContain("min-h-4");
+  expect(render(true)).toContain("min-h-4");
   expect(render(false)).not.toContain("Reconnecting");
   expect(render(true)).toContain("last-known positions");
   expect(render(true)).toContain('role="status"');

@@ -59,6 +59,7 @@ export interface MarketView extends MarketUnits {
   quoteSpotReference?: SpotPrice;
   probability: ProbabilityView;
   question: string;
+  imageUrl?: string | null;
   quoteToken: string;
   residual: number | null;
   ticker: string;

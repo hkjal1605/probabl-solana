@@ -51,8 +51,8 @@ export function OrdersClient({
       (view === "All" || (view === "Open orders" ? o.status === "open" : o.status !== "open")),
   );
   return (
-    <Card className={embedded ? "min-w-0 ring-0 p-0" : ""} aria-label="Orders">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3">
+    <Card variant="panel" className={embedded ? "min-w-0" : "border"} aria-label="Orders">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-3 py-2">
         <span className="text-xs font-medium text-muted-foreground">
           {orders.length} {view.toLowerCase()}
         </span>
@@ -64,7 +64,7 @@ export function OrdersClient({
         />
       </div>
       {(query.data?.truncated || query.data?.openTruncated) && (
-        <p role="status" className="border-b px-5 py-3 text-xs font-medium text-warning">
+        <p role="status" className="border-b px-3 py-2 text-xs font-medium text-warning">
           {query.data.openTruncated
             ? "The open-order limit was reached. This list and reservation totals may be incomplete."
             : "Showing the most recent order history plus older open orders. Earlier closed orders are not included."}
@@ -133,10 +133,10 @@ export function OrdersClient({
                       {order.side === 0 ? "Buy" : "Sell"}
                     </p>
                   </TableCell>
-                  <TableCell className="font-mono">
+                  <TableCell className="tabular-nums">
                     {market ? formatNumber(displayPrice(order.limitPriceRawX18, market)) : "—"}
                   </TableCell>
-                  <TableCell className="font-mono">
+                  <TableCell className="tabular-nums">
                     {market
                       ? `${formatNumber(tokenAmount(order.filled, market.baseTokenDecimals), 3)} / ${formatNumber(tokenAmount(order.quantity, market.baseTokenDecimals), 3)}`
                       : "—"}
@@ -161,7 +161,7 @@ export function OrdersClient({
                     {order.tif === 0 ? "GTC" : "IOC"} ·{" "}
                     {order.fundingKind === 0 ? "Whole" : "Active claim"}
                   </TableCell>
-                  <TableCell className="font-mono text-xs">
+                  <TableCell className="tabular-nums text-xs">
                     {market
                       ? `${formatNumber(tokenAmount(order.reserved, order.side === 0 ? market.quoteTokenDecimals : market.baseTokenDecimals), 4)} ${order.side === 0 ? "USDC" : market.ticker}`
                       : "—"}

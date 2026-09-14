@@ -34,6 +34,9 @@ import {
 } from "@conditional-stocks/market-data";
 import { PolymarketIngestorClient } from "./polymarket-client.ts";
 import { ReadCache } from "@conditional-stocks/shared/read-cache";
+import { RedisCache } from "@conditional-stocks/shared/redis-cache";
+import { CachedProbability, mountProbabilityStream } from "./probability-cache.ts";
+import { logger } from "./logger.ts";
 
 const creationChecks = [
   "stock-and-quote",
@@ -100,6 +103,21 @@ export async function mountSolanaAdmin(
     if (!url || !token) throw invalid("Polymarket ingestor is not configured", 503);
     return new PolymarketIngestorClient(url, token);
   };
+  let lastCacheWarning = 0;
+  const probabilityCache = new RedisCache(
+    process.env.REDIS_URL ?? "redis://127.0.0.1:6379",
+    `probabl:probability:v1:${domain}`,
+    () => {
+      if (Date.now() - lastCacheWarning > 30_000) {
+        lastCacheWarning = Date.now();
+        logger.warn("probability.cache.unavailable");
+      }
+    },
+  );
+  const probabilities = new CachedProbability(probabilityCache, (condition) =>
+    polymarket().probability(condition),
+  );
+  mountProbabilityStream(app, probabilities);
   const read = async (hash: string, query: Pool | PoolClient = db): Promise<View> => {
     bytes32(hash);
     const rows = await query.query(
@@ -449,7 +467,7 @@ export async function mountSolanaAdmin(
       informationalOnly: true,
       localMarketId: c.req.param("id"),
       metadata,
-      probability: await source.probability(hex(m.terms.condition)).catch(() => null),
+      probability: await probabilities.get(hex(m.terms.condition)).catch(() => null),
       settlementAuthority: "manual-admin-only",
     });
   });
@@ -457,7 +475,7 @@ export async function mountSolanaAdmin(
     const m = await publicMarket(c.req.param("id"));
     return c.json({
       informationalOnly: true,
-      probability: await polymarket().probability(hex(m.terms.condition)),
+      probability: await probabilities.get(hex(m.terms.condition)),
       settlementAuthority: "manual-admin-only",
     });
   });
@@ -491,4 +509,5 @@ export async function mountSolanaAdmin(
       },
     });
   });
+  return () => probabilityCache.close();
 }

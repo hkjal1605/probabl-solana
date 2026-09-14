@@ -24,6 +24,7 @@
     "@conditional-stocks/contract-bindings": "workspace:*",
     "@conditional-stocks/domain": "workspace:*",
     "@conditional-stocks/gateway": "workspace:*",
+    "@conditional-stocks/market-data": "workspace:*",
     "@conditional-stocks/orderbook": "workspace:*",
     "@conditional-stocks/shared": "workspace:*",
     "@conditional-stocks/solana-client": "workspace:*",

@@ -1,15 +1,6 @@
 import Link from "next/link";
-import { LifecycleBadge } from "@/components/data/StatusBadge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -18,20 +9,30 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatNumber, formatTime } from "@/lib/format/display";
-import { compact, impactPercent, marketCategory, midpoint } from "@/lib/markets/presentation";
+import { currentSpotUsd, marketCategory } from "@/lib/markets/presentation";
 import type { MarketView } from "@/types/api";
-import { ImpactBar } from "./ImpactBar";
+import { OutcomePrice } from "./OutcomePrice";
+import { ProbabilityGauge } from "./ProbabilityGauge";
+import { formatSpotUsd } from "./SpotReference";
 import { TokenIdentity } from "./TokenIdentity";
 
 export function EventCard({ markets }: { markets: MarketView[] }) {
   const market = markets[0];
   if (!market) return null;
   return (
-    <Card className="min-w-0">
-      <CardHeader className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
-        <Avatar size="lg">
-          <AvatarFallback>
+    <Card variant="market" className="min-w-0">
+      <CardHeader className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+        <Avatar className="aspect-square h-full min-h-12 w-auto self-stretch rounded-xl after:rounded-xl">
+          {market.imageUrl && (
+            <AvatarImage
+              src={market.imageUrl}
+              alt=""
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="absolute inset-0 rounded-lg"
+            />
+          )}
+          <AvatarFallback className="absolute inset-0 rounded-xl">
             {marketCategory(market) === "Macro"
               ? "FED"
               : marketCategory(market) === "Policy"
@@ -43,67 +44,52 @@ export function EventCard({ markets }: { markets: MarketView[] }) {
           <CardTitle role="heading" aria-level={2}>
             <Link href={`/markets/${market.id}`}>{market.question}</Link>
           </CardTitle>
-          <CardDescription className="mt-1 flex flex-wrap items-center gap-1">
-            {marketCategory(market)} · Cutoff {formatTime(market.cutoff)} ·{" "}
-            <LifecycleBadge state={market.lifecycle} />
-          </CardDescription>
         </div>
-        <div className="ml-auto text-right">
-          <b className="font-mono text-xl font-medium">
-            {market.probability.quality === "valid" && market.probability.value !== null
-              ? `${formatNumber(market.probability.value * 100, 0)}%`
-              : "—"}
-          </b>
-          <InfoTooltip content={`Source quality: ${market.probability.quality}`}>
-            <p className="text-xs font-medium text-muted-foreground">P(YES) · Polymarket</p>
-          </InfoTooltip>
-        </div>
+        <ProbabilityGauge probability={market.probability} conditionId={market.mapping.conditionId} />
       </CardHeader>
       <CardContent className="px-0">
         <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Asset</TableHead>
-              <TableHead>If YES</TableHead>
-              <TableHead>Impact</TableHead>
-              <TableHead>If NO</TableHead>
+          <TableHeader className="[&_tr]:border-0">
+            <TableRow className="border-0 bg-accent">
+              <TableHead className="px-2">Asset</TableHead>
+              <TableHead className="px-2">If YES</TableHead>
+              <TableHead className="px-2 text-center">Spot</TableHead>
+              <TableHead className="text-right">If NO</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {markets.map((asset) => (
-              <TableRow key={asset.id}>
-                <TableCell>
-                  <Link href={`/markets/${asset.id}`}>
-                    <TokenIdentity symbol={asset.ticker} metadata={asset.baseTokenMetadata} />
-                  </Link>
-                </TableCell>
-                <TableCell className="font-mono">
-                  <Link href={`/markets/${asset.id}`}>{formatNumber(midpoint(asset.yes))}</Link>
-                </TableCell>
-                <TableCell>
-                  <Link href={`/markets/${asset.id}`}>
-                    <ImpactBar value={impactPercent(asset)} />
-                  </Link>
-                </TableCell>
-                <TableCell className="font-mono">
-                  <Link href={`/markets/${asset.id}`}>{formatNumber(midpoint(asset.no))}</Link>
-                </TableCell>
-              </TableRow>
-            ))}
+            {markets.map((asset) => {
+              const spot = currentSpotUsd(asset);
+              return (
+                <TableRow key={asset.id} className="relative border-0">
+                  <TableCell className="w-px px-2">
+                    <Link
+                      href={`/markets/${asset.id}`}
+                      className="after:absolute after:inset-0"
+                      aria-label={`Open ${asset.ticker} market: ${asset.question}`}
+                    >
+                      <TokenIdentity
+                        symbol={asset.ticker}
+                        metadata={asset.baseTokenMetadata}
+                        showName={false}
+                      />
+                    </Link>
+                  </TableCell>
+                  <TableCell className="w-1/3 px-0">
+                    <OutcomePrice market={asset} branch="YES" />
+                  </TableCell>
+                  <TableCell className="w-px px-2 text-center text-xs font-medium tabular-nums">
+                    {spot === null ? "—" : formatSpotUsd(spot)}
+                  </TableCell>
+                  <TableCell className="w-1/3 pl-0 pr-2">
+                    <OutcomePrice market={asset} branch="NO" />
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </CardContent>
-      <CardFooter className="justify-between gap-3">
-        <span>
-          {markets.length} {markets.length === 1 ? "market" : "markets"} ·{" "}
-          {markets.some((m) => m.bookQuality && m.bookQuality !== "available")
-            ? "depth unavailable"
-            : `$${compact(markets.reduce((sum, asset) => sum + asset.yes.depthUsd + asset.no.depthUsd, 0))} visible depth`}
-        </span>
-        <Link href={`/markets/${market.id}`} className="font-semibold text-foreground">
-          Trade →
-        </Link>
-      </CardFooter>
     </Card>
   );
 }

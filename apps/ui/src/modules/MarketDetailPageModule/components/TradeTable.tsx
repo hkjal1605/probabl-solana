@@ -35,10 +35,10 @@ export function TradeTable({ market, trades }: { market: MarketView; trades: Tra
             <TableCell className={trade.branch === 0 ? "text-positive" : "text-danger"}>
               {trade.branch === 0 ? "YES" : "NO"}
             </TableCell>
-            <TableCell className="font-mono">
+            <TableCell className="tabular-nums">
               {formatNumber(displayPrice(trade.executionPriceRawX18, market))}
             </TableCell>
-            <TableCell className="font-mono">
+            <TableCell className="tabular-nums">
               {formatNumber(tokenAmount(trade.fillQuantity, market.baseTokenDecimals), 4)}
             </TableCell>
             <TableCell className="text-xs font-medium text-muted-foreground">

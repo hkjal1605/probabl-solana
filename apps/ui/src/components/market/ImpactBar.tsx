@@ -9,7 +9,7 @@ export function ImpactBar({ value }: { value: number | null }) {
       />
       <span className="absolute -top-1 left-1/2 h-[13px] w-px bg-foreground" />
       <span
-        className={`absolute -top-[21px] left-[calc(50%+8px)] whitespace-nowrap font-mono text-xs font-medium ${(value ?? 0) < 0 ? "text-danger" : "text-positive"}`}
+        className={`absolute -top-[21px] left-[calc(50%+8px)] whitespace-nowrap tabular-nums text-xs font-medium ${(value ?? 0) < 0 ? "text-danger" : "text-positive"}`}
       >
         {percent(value)}
       </span>

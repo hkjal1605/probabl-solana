@@ -55,7 +55,7 @@ export function ResolutionClient({
           </>
         }
       >
-        <div className="flex gap-8">
+        <div className="flex gap-6">
           <Stat label="open" value={markets.filter((m) => m.lifecycle === "open").length} />
           <Stat
             label="in review"
@@ -74,13 +74,13 @@ export function ResolutionClient({
           }}
         />
       )}
-      <div className="grid items-start gap-5 lg:grid-cols-2">
+      <div className="flex flex-col gap-3">
         {markets.map((market) => (
           <ResolutionCard key={market.id} market={market} selected={selected === market.id} />
         ))}
       </div>
       {!markets.length && !query.isError && (
-        <Card className="">
+        <Card variant="panel">
           {query.isFetching ? (
             <LoadingState>Reading markets…</LoadingState>
           ) : (
@@ -107,7 +107,7 @@ function ResolutionCard({ market, selected }: { market: MarketView; selected: bo
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <strong className="font-mono text-xs">{market.ticker}</strong>
+            <strong className="tabular-nums text-xs">{market.ticker}</strong>
             <LifecycleBadge state={market.lifecycle} />
           </div>
           <span className="text-xs font-medium text-muted-foreground">
@@ -122,7 +122,10 @@ function ResolutionCard({ market, selected }: { market: MarketView; selected: bo
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <Progress value={Math.min(100, Math.max(0, index) * 25)} aria-label="Resolution lifecycle" />
+        <Progress
+          value={Math.min(100, Math.max(0, index) * 25)}
+          aria-label="Resolution lifecycle"
+        />
         <ol className="grid grid-cols-5 gap-2" aria-label="Resolution lifecycle steps">
           {labels.map((label, i) => (
             <li
@@ -157,13 +160,13 @@ function ResolutionCard({ market, selected }: { market: MarketView; selected: bo
             <ItemContent>
               <span>
                 YES payout{" "}
-                <b className="font-mono">
+                <b className="tabular-nums">
                   {resolution.yesPayout}/{resolution.payoutDenominator}
                 </b>
               </span>
               <span>
                 NO payout{" "}
-                <b className="font-mono">
+                <b className="tabular-nums">
                   {resolution.noPayout}/{resolution.payoutDenominator}
                 </b>
               </span>

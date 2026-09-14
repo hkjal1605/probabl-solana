@@ -104,7 +104,7 @@ export function PositionTable({
               >
                 {market.ticker}-{branch === 0 ? "YES" : "NO"}
               </TableCell>
-              <TableCell className="font-mono">
+              <TableCell className="tabular-nums">
                 {formatNumber(tokenAmount(total.toString(), market.baseTokenDecimals), 4)}
                 {reserved > 0n && (
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -112,15 +112,15 @@ export function PositionTable({
                   </p>
                 )}
               </TableCell>
-              <TableCell className="font-mono text-muted-foreground">
+              <TableCell className="tabular-nums text-muted-foreground">
                 <InfoTooltip content="Complete execution basis is not available from the canonical indexer.">
                   <span>—</span>
                 </InfoTooltip>
               </TableCell>
-              <TableCell className="font-mono">
+              <TableCell className="tabular-nums">
                 {formatNumber(midpoint(branch === 0 ? market.yes : market.no))}
               </TableCell>
-              <TableCell className="font-mono text-muted-foreground">
+              <TableCell className="tabular-nums text-muted-foreground">
                 <InfoTooltip content="An unknown cost basis cannot be treated as zero.">
                   <span>—</span>
                 </InfoTooltip>

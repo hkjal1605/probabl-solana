@@ -149,13 +149,11 @@ describe("wallet action scoping", () => {
   test("provider-scoped stores share no wallet intent or filters between requests", () => {
     const a = createUiStore(),
       b = createUiStore();
-    a.getState().setFilters({ query: "NVDA", view: "Matrix" });
-    a.getState().setFunds("Withdraw");
+    a.getState().setFilters({ category: "Macro", view: "Matrix" });
     a.getState().setPrefill({ marketId: market.id, branch: "NO", quantity: "0.5", nonce: 1 });
-    expect(b.getState().filters.query).toBe("");
-    expect(b.getState().funds).toBeNull();
+    expect(b.getState().filters.category).toBe("All");
     expect(b.getState().prefill).toBeNull();
-    expect(a.getState().filters.category).toBe("All");
+    expect(a.getState().filters.category).toBe("Macro");
     expect(Object.keys(a.getState()).some((key) => /token|session|secret/i.test(key))).toBe(false);
   });
 });

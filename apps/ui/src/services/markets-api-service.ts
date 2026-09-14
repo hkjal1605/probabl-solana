@@ -5,8 +5,9 @@ import {
   type MarketUnits,
 } from "@conditional-stocks/domain";
 import { marketTokenDisplay } from "../lib/tokens/devnet";
+import { polymarketImageUrl } from "@conditional-stocks/market-data";
 
-import { expireProbability, parseProbabilityMessage } from "./probability";
+import { expireCachedProbability, parseProbabilityMessage } from "./probability";
 import type { BranchBook, MarketLifecycle, MarketView } from "../types/api";
 import { API_URL } from "./constants";
 import { requestJson } from "./api";
@@ -107,7 +108,7 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
         value: null,
       };
       try {
-        probabilityView = expireProbability(
+        probabilityView = expireCachedProbability(
           parseProbabilityMessage(
             { topic: `probability.${text(market.polymarketConditionId)}`, value: probability },
             text(market.polymarketConditionId),
@@ -155,6 +156,9 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
         ordinaryReference: null,
         probability: probabilityView,
         question: text(metadata.question, `Conditional market ${id.slice(0, 8)}`),
+        imageUrl:
+          polymarketImageUrl(metadata) ??
+          polymarketImageUrl(record(attachedRecord.metadata).rawPayload),
         quoteToken: text(market.quoteToken),
         residual: null,
         ...marketTokenDisplay(

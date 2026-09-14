@@ -2,7 +2,6 @@
 import { key } from "@conditional-stocks/solana-client";
 import { ShieldOff } from "lucide-react";
 import { useState } from "react";
-import { useUiStore } from "@/components/providers/UiStateProvider";
 import { useWallet } from "@/components/providers/WalletProvider";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -32,20 +31,13 @@ import { useWalletAssets } from "@/hooks/useWalletAssets";
 import { shortAddress, tokenAmount } from "@/lib/format/display";
 import { walletTransfer } from "@/lib/trading/funds";
 import { solana } from "@/lib/trading/rpc";
-import type { FundsTab } from "@/stores/ui-store";
 import type { MarketView } from "@/types/api";
 
-export function FundsClient({
-  markets,
-  embedded = false,
-}: {
-  markets: MarketView[];
-  embedded?: boolean;
-}) {
+type FundsTab = "Deposit" | "Withdraw" | "Permissions";
+
+export function FundsClient({ markets }: { markets: MarketView[] }) {
   const wallet = useWallet(),
     data = useWalletAssets(markets);
-  const modalTab = useUiStore((s) => s.funds),
-    setFunds = useUiStore((s) => s.setFunds);
   const [tab, setTab] = useState<FundsTab>("Deposit"),
     [token, setToken] = useState(""),
     [recipient, setRecipient] = useState(""),
@@ -55,7 +47,6 @@ export function FundsClient({
   const { confirm, confirmation } = useConfirmation(
     [wallet.account, token, recipient, amount].join(":"),
   );
-  const currentTab = embedded ? (modalTab ?? "Deposit") : tab;
   const transfer = () =>
     run(async (assertCurrent) => {
       if (!asset || !wallet.account) return;
@@ -108,14 +99,13 @@ export function FundsClient({
       </EmptyState>
     );
   return (
-    <Card className={embedded ? "min-w-0 ring-0 p-0" : "mx-auto max-w-2xl p-5"}>
+    <Card variant="panel" className="mx-auto max-w-[400px] border p-3">
       {confirmation}
       <Tabs
-        value={currentTab}
+        value={tab}
         onValueChange={(value) => {
           if (value === "Deposit" || value === "Withdraw" || value === "Permissions") {
-            if (embedded) setFunds(value);
-            else setTab(value);
+            setTab(value);
           }
         }}
       >
@@ -126,14 +116,14 @@ export function FundsClient({
             </TabsTrigger>
           ))}
         </TabsList>
-        <TabsContent value="Deposit" className="flex flex-col gap-5 pt-4">
+        <TabsContent value="Deposit" className="flex flex-col gap-3 pt-3">
           <p className="text-sm leading-6 text-muted-foreground">
             {`Send supported tokens on ${protocolConfig.chainName} directly to your wallet. Order funding is held in program vaults; available credits can be withdrawn from Portfolio.`}
           </p>
           <Item variant="outline">
             <ItemContent>
               <p className="eyebrow text-muted-foreground">Receiving address</p>
-              <code className="mt-3 block break-all text-xs">{wallet.account}</code>
+              <code className="block break-all text-xs leading-5">{wallet.account}</code>
             </ItemContent>
           </Item>
           <Button
@@ -152,7 +142,7 @@ export function FundsClient({
               <Item key={token} variant="outline">
                 <ItemContent>
                   <p className="eyebrow text-muted-foreground">{symbol}</p>
-                  <p className="mt-2 font-mono">
+                  <p className="tabular-nums">
                     {tokenAmount(balance.canonicalBalance, balance.decimals).toLocaleString(
                       "en-US",
                       {
@@ -173,7 +163,7 @@ export function FundsClient({
             />
           )}
         </TabsContent>
-        <TabsContent value="Withdraw" className="flex flex-col gap-4 pt-4">
+        <TabsContent value="Withdraw" className="flex flex-col gap-3 pt-3">
           <FieldSet disabled={busy} className="flex flex-col gap-4">
             <FieldGroup>
               <Field>
@@ -186,7 +176,7 @@ export function FundsClient({
                     if (value !== null) setToken(value);
                   }}
                 >
-                  <SelectTrigger id="funds-token" className="mt-2 w-full">
+                  <SelectTrigger id="funds-token" className="w-full">
                     <SelectValue placeholder="Choose a supported asset" />
                   </SelectTrigger>
                   <SelectContent>
@@ -204,7 +194,7 @@ export function FundsClient({
                 <Label htmlFor="funds-recipient">Receiving address</Label>
                 <Input
                   id="funds-recipient"
-                  className="mt-2 font-mono"
+                  className="font-mono"
                   value={recipient}
                   onChange={(e) => setRecipient(e.target.value)}
                   placeholder="Solana address"
@@ -214,7 +204,7 @@ export function FundsClient({
                 <Label htmlFor="funds-amount">Amount ({asset?.symbol ?? "tokens"})</Label>
                 <Input
                   id="funds-amount"
-                  className="mt-2 font-mono"
+                  className="tabular-nums"
                   inputMode="decimal"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
@@ -237,7 +227,7 @@ export function FundsClient({
             </FieldGroup>
           </FieldSet>
         </TabsContent>
-        <TabsContent value="Permissions" className="flex flex-col gap-4 pt-4">
+        <TabsContent value="Permissions" className="flex flex-col gap-3 pt-3">
           <Select
             value={asset?.token ?? ""}
             items={data.assets.map((a) => ({ value: a.token, label: a.symbol }))}

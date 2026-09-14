@@ -27,17 +27,19 @@ export function SpotReference({ price }: { price: SpotPrice | undefined }) {
           : "Token market reference in USD. Not an executable quote or a settlement input."
       }
     >
-      <div>
-        <div className="font-mono text-xl font-medium leading-tight">
+      <div className="flex flex-col gap-1">
+        <div className="text-lg font-normal leading-5 tabular-nums">
           {price?.priceUsd ? formatSpotUsd(price.priceUsd) : "—"}
         </div>
-        <div className="mt-2 text-xs font-medium text-muted-foreground">Spot reference · USD</div>
-        <div className="mt-1 min-h-4 text-[11px] text-muted-foreground">
-          {label}
-          {price?.priceUsd && ["stale", "unavailable", "restricted"].includes(status ?? "")
-            ? " · last known"
-            : ""}
-        </div>
+        <div className="text-xs text-muted-foreground">Spot reference · USD</div>
+        {label && (
+          <div className="text-xs text-muted-foreground">
+            {label}
+            {price?.priceUsd && ["stale", "unavailable", "restricted"].includes(status ?? "")
+              ? " · last known"
+              : ""}
+          </div>
+        )}
       </div>
     </InfoTooltip>
   );

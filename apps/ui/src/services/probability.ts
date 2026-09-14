@@ -1,25 +1,9 @@
 import type { ProbabilityView } from "../types/api";
-import { SOLANA_STREAM_ORIGIN } from "@conditional-stocks/shared/endpoints";
+import { apiUrl } from "./constants";
 
-export function probabilityStreamUrl(conditionId: string, base = SOLANA_STREAM_ORIGIN): string {
-  let url: URL;
-  try {
-    url = new URL(base);
-  } catch {
-    throw new Error("Probability stream must be a WebSocket origin");
-  }
-  if (
-    !conditionId ||
-    !["ws:", "wss:"].includes(url.protocol) ||
-    url.username ||
-    url.password ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash
-  )
-    throw new Error("Probability stream must be a WebSocket origin without credentials");
-  url.pathname = `/v1/polymarket/conditions/${encodeURIComponent(conditionId)}/stream`;
-  return url.toString();
+export function probabilityStreamUrl(conditionId: string): string {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(conditionId)) throw new Error("Invalid condition ID");
+  return apiUrl(`/v1/probabilities/${conditionId.toLowerCase()}/stream`);
 }
 
 const qualities = new Set([
@@ -85,4 +69,11 @@ export function expireProbability(
   return !Number.isFinite(at) || now - at > maxAgeMs || at > now + 5000
     ? { ...value, quality: "stale", value: null }
     : value;
+}
+
+/** Display-only tolerance: source's 30s freshness plus API's 60s cache TTL.
+ * Never refresh observedAt or promote a non-valid source quality.
+ */
+export function expireCachedProbability(value: ProbabilityView, now = Date.now()): ProbabilityView {
+  return expireProbability(value, now, 90_000);
 }

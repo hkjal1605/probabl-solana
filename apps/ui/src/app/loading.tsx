@@ -4,13 +4,13 @@ export default function Loading() {
     <main
       aria-label="Loading page"
       aria-busy="true"
-      className="mx-auto w-full max-w-[1440px] flex-1 px-5 py-8 sm:px-8 lg:py-10"
+      className="mx-auto flex w-full flex-1 flex-col gap-3 px-3 py-3"
     >
       <Skeleton className="h-5 w-28" />
-      <Skeleton className="mt-6 h-10 max-w-3xl" />
-      <div className="mt-10 grid gap-4 lg:grid-cols-3">
+      <Skeleton className="h-9 w-full max-w-xl" />
+      <div className="flex flex-col gap-1">
         {[0, 1, 2].map((item) => (
-          <Skeleton key={item} className="h-64 rounded-lg" />
+          <Skeleton key={item} className="h-14 w-full rounded-sm" />
         ))}
       </div>
     </main>

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import useProbabilityStore, { probabilityStore } from "@/stores/useProbabilityStore";
-import { expireProbability } from "@/services/probability";
+import { expireCachedProbability } from "@/services/probability";
 import { connectProbability } from "@/modules/MarketDetailPageModule/utils/subscribeProbability";
 import type { ProbabilityView } from "@/types/api";
 
@@ -15,7 +15,7 @@ export function useProbabilityStream(conditionId: string, initial: ProbabilityVi
       if (current)
         probabilityStore.setData(conditionId, {
           ...current,
-          probability: expireProbability(current.probability),
+          probability: expireCachedProbability(current.probability),
         });
     }, 1000);
     return () => {
@@ -23,5 +23,5 @@ export function useProbabilityStream(conditionId: string, initial: ProbabilityVi
       stop();
     };
   }, [conditionId]);
-  return entry ?? { probability: expireProbability(initial), connection: "disabled" as const };
+  return entry ?? { probability: expireCachedProbability(initial), connection: "disabled" as const };
 }

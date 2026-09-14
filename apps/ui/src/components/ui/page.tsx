@@ -5,10 +5,23 @@ import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
-export function Page({ children, className }: { children: ReactNode; className?: string }) {
+export function Page({
+  children,
+  className,
+  variant = "content",
+}: {
+  children: ReactNode;
+  className?: string;
+  variant?: "content" | "terminal";
+}) {
   return (
     <main
-      className={cn("mx-auto w-full max-w-[1440px] flex-1 px-5 py-8 sm:px-8 lg:py-10", className)}
+      data-layout={variant}
+      className={cn(
+        "mx-auto w-full min-w-0 flex-1",
+        variant === "terminal" ? "px-3 py-3" : "max-w-[1056px] px-4 py-6",
+        className,
+      )}
     >
       {children}
     </main>
@@ -24,13 +37,11 @@ export function PageHeading({
   children?: ReactNode;
 }) {
   return (
-    <div className="mb-8 flex flex-wrap items-start justify-between gap-6">
-      <div>
-        <h1 className="scroll-m-20 text-3xl font-semibold tracking-tight">{title}</h1>
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div className="flex min-w-0 flex-col gap-2">
+        <h1 className="scroll-m-20 text-2xl font-medium leading-7">{title}</h1>
         {description && (
-          <div className="mt-3 max-w-3xl text-sm font-medium leading-6 text-muted-foreground">
-            {description}
-          </div>
+          <div className="max-w-2xl text-sm leading-5 text-muted-foreground">{description}</div>
         )}
       </div>
       {children}
@@ -47,9 +58,9 @@ export function Stat({
   className?: string;
 }) {
   return (
-    <div className="min-w-0">
-      <div className={cn("font-mono text-xl font-medium leading-tight", className)}>{value}</div>
-      <div className="mt-2 text-xs font-medium text-muted-foreground">{label}</div>
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className={cn("text-lg font-normal leading-5 tabular-nums", className)}>{value}</div>
+      <div className="text-xs text-muted-foreground">{label}</div>
     </div>
   );
 }

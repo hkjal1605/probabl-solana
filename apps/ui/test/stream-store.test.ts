@@ -58,13 +58,13 @@ test("an aborted initial stream wait never starts a background HTTP request", as
   }
 });
 
-test("a probability socket construction failure becomes reconnecting state, not a page exception", () => {
-  const original = globalThis.WebSocket;
-  globalThis.WebSocket = class {
+test("a probability SSE construction failure becomes reconnecting state, not a page exception", () => {
+  const original = globalThis.EventSource;
+  globalThis.EventSource = class {
     constructor() {
       throw new Error("offline");
     }
-  } as unknown as typeof WebSocket;
+  } as unknown as typeof EventSource;
   const states: string[] = [];
   try {
     const close = subscribeProbability(
@@ -75,6 +75,6 @@ test("a probability socket construction failure becomes reconnecting state, not 
     expect(states).toEqual(["connecting", "reconnecting"]);
     close();
   } finally {
-    globalThis.WebSocket = original;
+    globalThis.EventSource = original;
   }
 });

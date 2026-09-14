@@ -1,56 +1,75 @@
-import { SOLANA_STREAM_ORIGIN } from "@conditional-stocks/shared/endpoints";
-import { parseProbabilityMessage, probabilityStreamUrl, expireProbability } from "./probability";
 import type { ProbabilityView } from "@/types/api";
+import {
+  expireCachedProbability,
+  parseProbabilityMessage,
+  probabilityStreamUrl,
+} from "./probability";
+
+type Status = "connecting" | "live" | "reconnecting";
+const subscriptions = new Map<
+  string,
+  {
+    source: EventSource;
+    listeners: Set<(value: ProbabilityView) => void>;
+    statuses: Set<(value: Status) => void>;
+    latest?: ProbabilityView;
+    status: Status;
+  }
+>();
+
+/** One API-owned SSE connection per condition, shared by all subscribers. */
 export function subscribeProbability(
   condition: string,
   update: (value: ProbabilityView) => void,
-  status: (value: "connecting" | "live" | "reconnecting") => void,
+  status: (value: Status) => void,
 ) {
-  let socket: WebSocket | undefined,
-    timer: ReturnType<typeof setTimeout> | undefined,
-    stopped = false,
-    attempt = 0;
-  const reconnect = () => {
-    if (stopped) return;
+  const canonical = condition.toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(canonical)) {
     status("reconnecting");
-    attempt++;
-    timer = setTimeout(connect, Math.min(1000 * 2 ** attempt, 30_000));
-  };
-  const connect = () => {
-    if (stopped) return;
-    status(attempt ? "reconnecting" : "connecting");
+    return () => {};
+  }
+  let entry = subscriptions.get(canonical);
+  if (!entry) {
+    let source: EventSource;
     try {
-      socket = new WebSocket(
-        probabilityStreamUrl(
-          condition,
-          process.env.NEXT_PUBLIC_POLYMARKET_STREAM_URL ?? SOLANA_STREAM_ORIGIN,
-        ),
-      );
+      source = new EventSource(probabilityStreamUrl(canonical));
     } catch {
-      reconnect();
-      return;
+      status("connecting");
+      status("reconnecting");
+      return () => {};
     }
-    socket.onopen = () => {
-      attempt = 0;
-      status("live");
+    entry = { source, listeners: new Set(), statuses: new Set(), status: "connecting" };
+    const shared = entry;
+    const state = (value: Status) => {
+      shared.status = value;
+      for (const listener of shared.statuses) listener(value);
     };
-    socket.onmessage = (event) => {
-      if (stopped) return;
+    source.addEventListener("probability", (event) => {
       try {
-        update(
-          expireProbability(parseProbabilityMessage(JSON.parse(String(event.data)), condition)),
+        const value = expireCachedProbability(
+          parseProbabilityMessage(JSON.parse((event as MessageEvent).data), canonical),
         );
+        shared.latest = value;
+        state("live");
+        for (const listener of shared.listeners) listener(value);
       } catch {
-        socket?.close();
+        state("reconnecting");
       }
-    };
-    socket.onerror = () => socket?.close();
-    socket.onclose = reconnect;
-  };
-  connect();
+    });
+    source.addEventListener("unavailable", () => state("reconnecting"));
+    source.onerror = () => state("reconnecting");
+    subscriptions.set(canonical, entry);
+  }
+  entry.listeners.add(update);
+  entry.statuses.add(status);
+  status(entry.status);
+  if (entry.latest && entry.status === "live") update(expireCachedProbability(entry.latest));
   return () => {
-    stopped = true;
-    clearTimeout(timer);
-    socket?.close();
+    entry.listeners.delete(update);
+    entry.statuses.delete(status);
+    if (!entry.listeners.size) {
+      entry.source.close();
+      subscriptions.delete(canonical);
+    }
   };
 }

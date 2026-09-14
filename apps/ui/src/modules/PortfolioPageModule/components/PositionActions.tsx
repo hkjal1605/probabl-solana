@@ -193,7 +193,7 @@ export function PositionActions({
       </DialogTrigger>
       <DialogContent
         showCloseButton={!busy}
-        className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[400px]"
       >
         <DialogHeader>
           <DialogTitle>Manage conditional claims</DialogTitle>
@@ -201,7 +201,7 @@ export function PositionActions({
             {market.ticker} · {market.question}
           </DialogDescription>
         </DialogHeader>
-        <FieldSet disabled={busy} className="flex flex-col gap-5">
+        <FieldSet disabled={busy} className="flex flex-col gap-3">
           <FieldGroup>
             <Segmented
               disabled={busy}

@@ -159,12 +159,12 @@ export function OrderTicket({ market }: { market: MarketView }) {
       }
     });
   return (
-    <Card id="trade-ticket" aria-label="Trade conditional stock">
+    <Card variant="sidebar" id="trade-ticket" aria-label="Trade conditional stock">
       <CardHeader>
         <CardTitle role="heading" aria-level={2}>
           Trade conditional stock
         </CardTitle>
-        <CardDescription>Self-custodied</CardDescription>
+        <CardDescription>Self-custodied · {market.ticker}</CardDescription>
       </CardHeader>
       <CardContent>
         <FieldSet disabled={t.busy} className="min-w-0 flex flex-col gap-4">
@@ -188,6 +188,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
               aria-label="Conditional branch"
               value={[t.branch]}
               variant="outline"
+              spacing={2}
               disabled={t.busy}
               className="grid w-full grid-cols-2"
               onValueChange={(values) => {
@@ -204,13 +205,13 @@ export function OrderTicket({ market }: { market: MarketView }) {
                 <ToggleGroupItem
                   key={branch}
                   value={branch}
-                  className="h-auto flex-col items-start gap-1 px-3 py-3"
+                  className="h-auto min-w-0 flex-col items-start gap-1 px-2 py-2"
                 >
                   <span className="eyebrow">IF {branch}</span>
                   <strong>
                     {market.ticker}-{branch}
                   </strong>
-                  <span className="font-mono text-xs">
+                  <span className="tabular-nums text-xs">
                     {formatNumber((branch === "YES" ? market.yes : market.no).bestAsk)}
                   </span>
                 </ToggleGroupItem>
@@ -330,7 +331,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                   <AccordionItem value="details">
                     <AccordionTrigger>Advanced order controls</AccordionTrigger>
                     <AccordionContent>
-                      <div className="mt-4 flex flex-col gap-4">
+                      <div className="flex flex-col gap-3">
                         {t.side === "buy" && (
                           <Segmented
                             disabled={t.busy}
@@ -359,7 +360,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                                 if (value === "gtc" || value === "ioc") edit(() => t.setTif(value));
                               }}
                             >
-                              <SelectTrigger id="ticket-tif" className="mt-2 w-full">
+                              <SelectTrigger id="ticket-tif" className="w-full">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -381,7 +382,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                                   edit(() => t.setFunding(value));
                               }}
                             >
-                              <SelectTrigger id="ticket-funding" className="mt-2 w-full">
+                              <SelectTrigger id="ticket-funding" className="w-full">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -425,12 +426,14 @@ export function OrderTicket({ market }: { market: MarketView }) {
                     <AlertDescription>{entryError}</AlertDescription>
                   </Alert>
                 )}
-                <p role="status" className="min-h-5 text-xs text-muted-foreground">
-                  {!t.readiness.ready ? t.readiness.reason : null}
-                </p>
+                {!t.readiness.ready && (
+                  <p role="status" className="text-xs leading-4 text-muted-foreground">
+                    {t.readiness.reason}
+                  </p>
+                )}
                 <Button
-                  variant="default"
-                  className="w-full text-sm"
+                  variant={t.side === "buy" ? "buy" : "sell"}
+                  className="w-full"
                   size="lg"
                   disabled={
                     t.busy ||
@@ -520,7 +523,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                 )}
                 <Button
                   className="w-full"
-                  variant="default"
+                  variant={t.side === "buy" ? "buy" : "sell"}
                   size="lg"
                   onClick={prepared.funding.approvalCall ? t.approve : t.submit}
                   disabled={
@@ -552,13 +555,13 @@ export function OrderTicket({ market }: { market: MarketView }) {
           value={t.side === "buy" ? formatUsd(t.preview.cost) : `${quantityLabel} ${market.ticker}`}
         />
         <div className="grid grid-cols-2 gap-2 text-xs leading-5">
-          <Item variant="outline">
+          <Item variant="outline" size="sm">
             <ItemContent>
               <Badge variant="positive">IF YES</Badge>
               <p>{outcome(t.branch === "YES")}</p>
             </ItemContent>
           </Item>
-          <Item variant="outline">
+          <Item variant="outline" size="sm">
             <ItemContent>
               <Badge variant="destructive">IF NO</Badge>
               <p>{outcome(t.branch === "NO")}</p>
@@ -581,7 +584,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-3 text-xs font-medium">
       <span className="text-muted-foreground">{label}</span>
-      <span className="text-right font-mono">{value}</span>
+      <span className="text-right tabular-nums">{value}</span>
     </div>
   );
 }

@@ -1,6 +1,5 @@
 "use client";
 import { ArrowUpRight } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 import { PriceChart } from "@/components/market/PriceChart";
 import { Badge } from "@/components/ui/badge";
@@ -24,21 +23,21 @@ export function Landing({ initialMarkets }: { initialMarkets: MarketView[] }) {
   const market = markets.find((m) => m.lifecycle === "open") ?? markets[0] ?? null;
   return (
     <main className="flex flex-1 flex-col">
-      <section className="grid flex-1 md:grid-cols-[1.05fr_1fr]">
-        <div className="flex flex-col justify-center px-6 py-14 md:py-24 md:pr-10 md:pl-[max(40px,calc((100vw_-_1336px)/2))]">
+      <section className="mx-auto grid w-full max-w-[1440px] flex-1 items-center gap-8 px-4 py-12 lg:grid-cols-2 lg:gap-12 lg:px-6">
+        <div className="flex min-w-0 flex-col justify-center gap-6">
           <p className="eyebrow text-muted-foreground">Impact markets · Conditional stocks</p>
-          <h1 className="mt-6 text-5xl leading-[1.06] font-semibold tracking-[-0.065em] lg:text-[64px]">
+          <h1 className="text-4xl font-normal leading-[1.12] tracking-tight sm:text-5xl lg:text-[56px]">
             Prediction markets
             <br />
             price the odds.
             <br />
-            <span className="text-positive">We price the impact.</span>
+            <span className="text-primary">We price the impact.</span>
           </h1>
-          <p className="mt-6 max-w-[480px] text-base leading-7 text-muted-foreground">
+          <p className="max-w-[480px] text-base leading-6 text-muted-foreground">
             Trade NVDA, SPY or BTC inside the world where an event happens, and the world where it
             doesn’t. Don't just bet, hedge the consequence
           </p>
-          <div className="mt-8 flex flex-wrap gap-4">
+          <div className="flex flex-wrap gap-2">
             <Button
               variant="default"
               size="lg"
@@ -56,7 +55,7 @@ export function Landing({ initialMarkets }: { initialMarkets: MarketView[] }) {
               How it works
             </Button>
           </div>
-          <div className="mt-10 flex gap-8">
+          <div className="flex flex-wrap gap-6">
             <Metric
               label="visible depth"
               value={`$${compact(markets.reduce((sum, m) => sum + m.yes.depthUsd + m.no.depthUsd, 0))}`}
@@ -75,27 +74,14 @@ export function Landing({ initialMarkets }: { initialMarkets: MarketView[] }) {
             />
           )}
         </div>
-        <div className="relative flex min-w-0 items-center justify-center overflow-hidden bg-secondary px-6 py-12 md:px-10 lg:px-16">
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -right-12 -bottom-12 rotate-[-20deg] opacity-5"
-          >
-            <Image
-              src="/brand/logo.svg"
-              alt=""
-              width={480}
-              height={480}
-              unoptimized
-              className="h-auto w-[480px]"
-            />
-          </div>
-          <Card className="relative w-full max-w-[560px]">
+        <div className="flex min-w-0 items-center justify-center">
+          <Card variant="panel" className="w-full border">
             <CardHeader>
-              <div className="mb-4 flex flex-wrap justify-between gap-2 text-xs font-medium">
+              <div className="mb-2 flex flex-wrap justify-between gap-2 text-xs font-medium">
                 <Badge variant="positive">
                   {market ? `${market.lifecycle} · ${marketCategory(market)}` : "Impact markets"}
                 </Badge>
-                <span className="font-mono text-muted-foreground">
+                <span className="tabular-nums text-muted-foreground">
                   P(YES){" "}
                   {market?.probability.quality === "valid"
                     ? `${formatNumber((market.probability.value ?? 0) * 100, 0)}%`
@@ -117,7 +103,7 @@ export function Landing({ initialMarkets }: { initialMarkets: MarketView[] }) {
                     <Badge variant={branch === "YES" ? "positive" : "destructive"}>
                       IF {branch}
                     </Badge>
-                    <span className="font-mono">
+                    <span className="tabular-nums">
                       {market ? percent(impactPercent(market, branch)) : "—"} impact
                     </span>
                   </CardHeader>
@@ -132,14 +118,14 @@ export function Landing({ initialMarkets }: { initialMarkets: MarketView[] }) {
           </Card>
         </div>
       </section>
-      <section className="overflow-hidden border-y py-4" aria-label="Market impact ticker">
+      <section className="overflow-hidden border-y py-2" aria-label="Market impact ticker">
         <div className="market-ticker flex w-max">
           {[0, 1].map((repeat) => (
             <div key={repeat} className="flex shrink-0" aria-hidden={repeat === 1}>
               {markets
                 .filter((m) => m.lifecycle === "open")
                 .map((m) => (
-                  <span key={m.id} className="flex items-center gap-4 border-r px-8 text-xs">
+                  <span key={m.id} className="flex items-center gap-3 border-r px-4 text-xs">
                     <b>{m.ticker}</b>
                     <span className="text-muted-foreground">if {m.question}</span>
                     <b className={(impactPercent(m) ?? 0) >= 0 ? "text-positive" : "text-danger"}>
@@ -162,7 +148,7 @@ export function Landing({ initialMarkets }: { initialMarkets: MarketView[] }) {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <strong className="font-mono text-base font-medium">{value}</strong>
+      <strong className="tabular-nums text-base font-medium">{value}</strong>
       <div className="mt-2 text-xs text-muted-foreground">{label}</div>
     </div>
   );

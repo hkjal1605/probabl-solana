@@ -17,15 +17,15 @@ export function TokenIdentity({
     >
       <span className="inline-flex min-w-0 max-w-full items-center gap-2 align-middle">
         {metadata && (
-          <Avatar size="sm">
+          <Avatar>
             <AvatarImage src={metadata.image} alt="" />
             <AvatarFallback>{symbol.slice(0, 2)}</AvatarFallback>
           </Avatar>
         )}
-        <span className="min-w-0">
-          <strong className="block truncate">{symbol}</strong>
+        <span className="flex min-w-0 flex-col gap-1">
+          <strong className="block truncate font-medium">{symbol}</strong>
           {metadata && showName && (
-            <span className="block truncate text-[10px] font-normal leading-4 text-muted-foreground">
+            <span className="block truncate text-xs font-normal text-muted-foreground">
               {metadata.name}
             </span>
           )}

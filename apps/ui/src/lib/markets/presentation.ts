@@ -1,4 +1,35 @@
+import { expireSpotPrice } from "@conditional-stocks/shared/spot-prices";
 import type { BranchBook, MarketView } from "@/types/api";
+
+export function currentSpotUsd(market: MarketView, nowMs = Date.now()): number | null {
+  const spot = market.spotReference && expireSpotPrice(market.spotReference, nowMs);
+  return spot?.status === "available" &&
+    spot.mint === market.baseToken &&
+    spot.priceUsd !== null &&
+    Number.isFinite(spot.priceUsd) &&
+    spot.priceUsd > 0
+    ? spot.priceUsd
+    : null;
+}
+
+/** Display only: intentionally assume one quote token is $1, regardless of mint. */
+export function spotImpactPercent(
+  market: MarketView,
+  branch: "YES" | "NO",
+  nowMs = Date.now(),
+): number | null {
+  const spot = currentSpotUsd(market, nowMs);
+  const price = midpoint(branch === "YES" ? market.yes : market.no);
+  if (
+    (market.bookQuality && market.bookQuality !== "available") ||
+    spot === null ||
+    price === null ||
+    !Number.isFinite(price)
+  )
+    return null;
+  const impact = ((price - spot) / spot) * 100;
+  return Number.isFinite(impact) ? impact : null;
+}
 
 export function midpoint(book: BranchBook): number | null {
   const { bestBid, bestAsk } = book;

@@ -69,6 +69,7 @@ Object.assign(files["api.env"]!, {
     "http://localhost:3001,http://localhost:3002,http://127.0.0.1:3001,http://127.0.0.1:3002",
   POLYMARKET_INGESTOR_URL: "http://127.0.0.1:42073",
   POLYMARKET_INTERNAL_TOKEN: internalToken,
+  REDIS_URL: source.REDIS_URL ?? "redis://127.0.0.1:6379",
   // Pricing provider credentials belong only to the API, never UI/indexer/ingestor.
   ...(source.JUPITER_API_KEY ? { JUPITER_API_KEY: source.JUPITER_API_KEY } : {}),
   ...(source.JUPITER_PRICE_RPC_URL ? { JUPITER_PRICE_RPC_URL: source.JUPITER_PRICE_RPC_URL } : {}),

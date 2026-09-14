@@ -4,19 +4,13 @@ import { useState } from "react";
 import { RefreshStatus } from "@/components/data/RefreshStatus";
 import { LifecycleBadge } from "@/components/data/StatusBadge";
 import { PriceChart } from "@/components/market/PriceChart";
+import { ProbabilityGauge } from "@/components/market/ProbabilityGauge";
 import { SpotReference } from "@/components/market/SpotReference";
 import { TokenIdentity } from "@/components/market/TokenIdentity";
 import { ClaimTable } from "@/components/portfolio/ClaimTable";
 import { PositionTable } from "@/components/portfolio/PositionTable";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import {
@@ -37,14 +31,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useProbabilityStream } from "@/hooks/useProbabilityStream";
 import { useMarkets, useTrades } from "@/hooks/useProtocolData";
 import { formatNumber, formatTime } from "@/lib/format/display";
-import {
-  compact,
-  eventKey,
-  impactPercent,
-  marketCategory,
-  midpoint,
-  percent,
-} from "@/lib/markets/presentation";
+import { compact, eventKey, impactPercent, midpoint, percent } from "@/lib/markets/presentation";
 import { cn } from "@/lib/utils";
 import { OrdersClient } from "@/modules/OrdersPageModule/components/OrdersClient";
 import type { BranchBook, MarketView, TradeView } from "@/types/api";
@@ -109,35 +96,25 @@ export function MarketWorkspace({
       ? tradeQuery.trades
       : initialTrades;
   return (
-    <Page className="pt-6 lg:pt-6">
-      <Breadcrumb className="mb-4">
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink render={<Link href="/markets" />}>Markets</BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>{marketCategory(market)}</BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{market.ticker}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
-      <div className="flex flex-wrap items-start justify-between gap-5">
+    <Page variant="terminal" className="px-0 py-0">
+      <div className="flex flex-wrap items-start justify-between gap-3 px-3 pt-4 pb-2">
         <div className="max-w-4xl">
-          <h1 className="text-2xl font-semibold leading-tight tracking-[-0.04em] sm:text-[28px]">
-            {market.ticker} · {market.question}
-          </h1>
-          <div className="mt-3 flex flex-wrap items-center gap-4 text-xs font-medium text-muted-foreground">
-            <span>
-              P(YES){" "}
-              <b className="font-mono text-foreground">
-                {market.probability.quality === "valid" && market.probability.value !== null
-                  ? `${formatNumber(market.probability.value * 100, 0)}%`
-                  : "—"}
-              </b>{" "}
-              · Polymarket
-            </span>
+          <div className="flex items-center gap-3">
+            <Avatar size="lg" className="rounded-xl after:rounded-xl">
+              {market.imageUrl && (
+                <AvatarImage
+                  src={market.imageUrl}
+                  alt=""
+                  className="rounded-xl"
+                  referrerPolicy="no-referrer"
+                />
+              )}
+              <AvatarFallback className="rounded-xl">{market.question.slice(0, 1)}</AvatarFallback>
+            </Avatar>
+            <h1 className="text-lg font-medium leading-6">{market.question}</h1>
+            <ProbabilityGauge probability={market.probability} />
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-medium text-muted-foreground">
             <span>Cutoff {formatTime(market.cutoff)}</span>
             <LifecycleBadge state={market.lifecycle} />
             <Button variant="link" size="sm" onClick={() => setTab("rules")}>
@@ -167,7 +144,7 @@ export function MarketWorkspace({
             ))}
         </nav>
       </div>
-      <div className="my-5 flex flex-wrap gap-8 border-y py-4">
+      <div className="flex flex-wrap items-start gap-x-6 gap-y-3 border-y px-3 py-3">
         <Stat
           label={`${market.ticker}-YES`}
           value={formatNumber(midpoint(market.yes))}
@@ -202,9 +179,12 @@ export function MarketWorkspace({
           }
         />
       )}
-      <div className="grid items-start gap-4 min-[761px]:grid-cols-[minmax(0,1fr)_300px] min-[1101px]:grid-cols-[minmax(0,1fr)_clamp(320px,27vw,380px)_clamp(360px,30vw,420px)]">
+      <div className="grid items-start gap-px bg-border min-[900px]:grid-cols-[minmax(0,1fr)_320px] min-[1280px]:grid-cols-[minmax(0,1fr)_280px_320px]">
         <PriceChart market={market} initialTrades={trades} />
-        <Card className="min-w-0 min-[761px]:col-start-1 min-[761px]:row-start-2 min-[1101px]:col-start-2 min-[1101px]:row-start-1">
+        <Card
+          variant="panel"
+          className="h-full min-w-0 min-[900px]:col-start-1 min-[900px]:row-start-2 min-[1280px]:col-start-2 min-[1280px]:row-start-1"
+        >
           <CardHeader className="flex flex-wrap items-center justify-between gap-3">
             <Segmented
               label="Book panel"
@@ -237,10 +217,13 @@ export function MarketWorkspace({
             Books are independent — a YES quote says nothing about NO liquidity.
           </p>
         </Card>
-        <div className="min-[761px]:col-start-2 min-[761px]:row-span-2 min-[761px]:row-start-1 min-[1101px]:col-start-3">
+        <div className="h-full min-w-0 bg-card min-[900px]:col-start-2 min-[900px]:row-span-3 min-[900px]:row-start-1 min-[1280px]:col-start-3 min-[1280px]:row-span-2">
           <OrderTicket key={market.id} market={market} />
         </div>
-        <Card className="min-w-0 min-[761px]:col-span-2 min-[761px]:row-start-3 min-[1101px]:row-start-2">
+        <Card
+          variant="panel"
+          className="h-full min-w-0 min-[900px]:col-start-1 min-[900px]:row-start-3 min-[1280px]:col-span-2 min-[1280px]:row-start-2"
+        >
           <Tabs value={tab} onValueChange={setTab} className="gap-0">
             <TabsList aria-label="Market information">
               {[
@@ -265,7 +248,7 @@ export function MarketWorkspace({
               <OrdersClient markets={query.markets} marketIds={[market.id]} embedded />
             </TabsContent>
             <TabsContent value="claims">
-              <div className="eyebrow px-5 pt-5 text-muted-foreground">
+              <div className="eyebrow px-3 pt-3 text-muted-foreground">
                 Available conditional claims
               </div>
               <ClaimTable markets={[market]} />
@@ -300,7 +283,7 @@ function BranchDepth({
   const row = (level: BranchBook["asks"][number], ask: boolean) => (
     <TableRow
       key={level.priceExact}
-      className={cn("font-mono", ask ? "text-danger" : "text-positive")}
+      className={cn("tabular-nums", ask ? "text-danger" : "text-positive")}
       style={{
         backgroundImage: `linear-gradient(to left, var(--${ask ? "danger" : "positive"}-soft) ${(level.quantity / max) * 100}%, transparent ${(level.quantity / max) * 100}%)`,
       }}
@@ -311,10 +294,10 @@ function BranchDepth({
   );
   return (
     <div className="min-w-0 pb-3">
-      <h3 className="px-3 pb-3">
+      <h3 className="px-2 py-2">
         <Badge variant={label.endsWith("YES") ? "positive" : "destructive"}>{label}</Badge>
       </h3>
-      <Table aria-label={label}>
+      <Table aria-label={label} density="compact">
         <TableHeader>
           <TableRow>
             <TableHead>Price</TableHead>
@@ -330,7 +313,7 @@ function BranchDepth({
           )}
           <TableRow>
             <TableCell colSpan={2}>
-              <strong className="font-mono">{formatNumber(midpoint(book))}</strong>
+              <strong className="tabular-nums">{formatNumber(midpoint(book))}</strong>
               <span className="ml-2 text-xs text-muted-foreground">
                 spr {formatNumber(book.spread)}
               </span>

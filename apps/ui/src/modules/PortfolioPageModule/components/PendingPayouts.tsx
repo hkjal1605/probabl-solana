@@ -42,11 +42,11 @@ export function PendingPayouts({ markets }: { markets: MarketView[] }) {
   );
   const rows = credits.data?.payouts ?? [];
   return (
-    <Card>
+    <Card variant="panel" className="border">
       <CardHeader>
         <CardTitle>Available vault credits</CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      <CardContent className="flex flex-col gap-3 py-3">
         <p className="text-sm text-muted-foreground">
           Settlement proceeds, refunds and deposited assets remain yours in the vault. They can fund
           another order in this market or be withdrawn. Withdraw to this wallet or another receiving
@@ -162,7 +162,10 @@ function WithdrawPayout({ credit, symbol }: { credit: PayoutCreditView; symbol: 
     >
       {confirmation}
       <DialogTrigger render={<Button variant="outline" size="sm" />}>Claim payout</DialogTrigger>
-      <DialogContent showCloseButton={!busy} className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+      <DialogContent
+        showCloseButton={!busy}
+        className="max-h-[90dvh] overflow-y-auto sm:max-w-[400px]"
+      >
         <DialogHeader>
           <DialogTitle>Claim pending payout</DialogTitle>
           <DialogDescription>

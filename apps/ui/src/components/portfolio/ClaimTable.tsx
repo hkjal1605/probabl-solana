@@ -61,7 +61,7 @@ export function ClaimTable({ markets }: { markets: MarketView[] }) {
               <TableRow key={position.marketId}>
                 <TableCell className="font-semibold">{market.ticker}</TableCell>
                 {(["stockYes", "stockNo", "quoteYes", "quoteNo"] as const).map((key, index) => (
-                  <TableCell key={key} className="font-mono text-sm">
+                  <TableCell key={key} className="tabular-nums text-sm">
                     {formatNumber(
                       tokenAmount(
                         position[key],

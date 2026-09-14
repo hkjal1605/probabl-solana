@@ -67,7 +67,7 @@ export function PriceChart({
     ) : (
       <ChartContainer
         config={chartConfig}
-        className="h-60 w-full"
+        className="h-[360px] w-full"
         aria-label={
           mode === "Impact %"
             ? "Relative impact of last executed branch prices"
@@ -135,7 +135,7 @@ export function PriceChart({
       </figure>
     );
   return (
-    <Card className="min-w-0" aria-label="Conditional stock chart">
+    <Card variant="panel" className="h-full min-w-0" aria-label="Conditional stock chart">
       <CardHeader className="flex flex-wrap justify-between gap-2">
         <Segmented
           label="Chart mode"
@@ -150,7 +150,7 @@ export function PriceChart({
           onChange={setRange}
         />
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex min-h-[360px] flex-col justify-center px-0">
         <RefreshStatus active={query.isRefreshError} label="trade history" />
         {chart}
       </CardContent>

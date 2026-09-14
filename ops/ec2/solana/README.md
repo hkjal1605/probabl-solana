@@ -16,9 +16,11 @@ assets in that directory are deliberately reused.
 | `probabl-sol-indexer`    | 42069         | Finalized account/history indexing, orderbook projections, vault reconciliation |
 | `probabl-sol-polymarket` | 42073         | Reference metadata and probability ingestion, authenticated internal API        |
 
-All three run as `ubuntu`, using Bun in single-instance PM2 fork mode. No Redis,
-EVM indexer, matching daemon, settlement relayer, frontend, or wallet signer is
-needed. The API and indexer share the public HTTPS origin: Nginx routes `/v1/*`
+All three run as `ubuntu`, using Bun in single-instance PM2 fork mode. Redis runs
+as a private system service for the API's 60-second probability cache; see
+[probability caching](../../../docs/runbooks/probability-cache.md). No EVM indexer,
+matching daemon, settlement relayer, frontend, or wallet signer is needed.
+The API and indexer share the public HTTPS origin: Nginx routes `/v1/*`
 to the API and explicit read-only projection paths to the indexer. Public health
 paths are `/health`, `/ready`, `/indexer-health`, `/polymarket-health`.
 Internal endpoints and arbitrary files are not exposed. Backend ports bind only

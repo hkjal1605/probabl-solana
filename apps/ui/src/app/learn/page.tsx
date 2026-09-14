@@ -3,18 +3,18 @@ import { Button } from "@/components/ui/button";
 import { Page } from "@/components/ui/page";
 export default function LearnPage() {
   return (
-    <Page className="max-w-[840px] py-14">
-      <div className="eyebrow text-positive">A DIFFERENT WAY TO LOOK AT EVENTS</div>
-      <h1 className="mt-5 text-4xl font-semibold leading-tight tracking-[-0.055em] sm:text-[56px]">
+    <Page className="max-w-[800px] py-8">
+      <div className="eyebrow text-primary">A different way to look at events</div>
+      <h1 className="mt-4 text-3xl font-normal leading-tight sm:text-4xl">
         Price the impact.
         <br />
         Trade the outcome.
       </h1>
-      <p className="mt-6 text-base leading-8 text-muted-foreground">
+      <p className="mt-4 text-base leading-6 text-muted-foreground">
         Explore conditional stock markets funded with USDC and tokenized stocks. Each branch
         represents a different outcome.
       </p>
-      <div className="my-12 flex flex-col gap-10 text-sm font-medium leading-7 text-muted-foreground">
+      <div className="my-6 flex flex-col gap-6 text-base leading-6 text-muted-foreground">
         <section>
           <h2 className="mb-3 text-xl font-semibold text-foreground">
             01 / Two worlds. Two order books.
