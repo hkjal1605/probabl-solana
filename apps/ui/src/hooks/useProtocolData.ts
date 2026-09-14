@@ -12,10 +12,10 @@ import { retainBookDisplays } from "@/lib/markets/refresh";
 
 const deployment = [protocolConfig.genesisHash, protocolConfig.programId, protocolConfig.config];
 
-export function useMarkets(initial: MarketView[] = []) {
+export function useMarkets(initial: MarketView[] = [], marketId?: string) {
   const query = useQuery({
-    queryKey: ["markets", ...deployment],
-    queryFn: ({ signal }) => api.markets(signal),
+    queryKey: ["markets", ...deployment, marketId ?? "all"],
+    queryFn: ({ signal }) => api.markets(signal, marketId),
     ...(initial.length ? { initialData: { markets: initial } } : {}),
     refetchInterval: readPollInterval,
     structuralSharing: (previous, next) =>

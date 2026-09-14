@@ -17,6 +17,7 @@ import {
 } from "@conditional-stocks/solana-client";
 
 export interface Snapshot {
+  rawAccounts?: { address: string; data: string }[];
   program: PublicKey;
   slot: number;
   observedAt: number;
@@ -26,17 +27,35 @@ export interface Snapshot {
   wallets: Map<string, WalletAccount>;
   traders: Map<string, TraderAccount>;
 }
-export async function snapshot(client: SolanaClient): Promise<Snapshot> {
+export async function snapshot(
+  client: SolanaClient,
+  commitment: "confirmed" | "finalized" = "finalized",
+): Promise<Snapshot> {
   await client.assertNetwork();
   const response = await client.connection.getProgramAccounts(client.program, {
-    commitment: "finalized",
+    commitment,
     withContext: true,
   });
+  return decodeSnapshot(client, response.context.slot,
+    response.value.map((a) => ({ address: a.pubkey.toBase58(), data: a.account.data.toString("base64") })).sort((a, b) => a.address.localeCompare(b.address)),
+  );
+}
+
+/** Decode the same committed account image for API planning; never fetch RPC here. */
+export function decodeSnapshot(
+  client: Pick<SolanaClient, "program" | "config">,
+  slot: number,
+  rawAccounts: { address: string; data: string }[],
+): Snapshot {
+  const response = { context: { slot }, value: rawAccounts.map((a) => ({
+    pubkey: new PublicKey(a.address), account: { data: Buffer.from(a.data, "base64") },
+  })) };
   const byKey = new Map(response.value.map((a) => [a.pubkey.toBase58(), a.account]));
   const configInfo = byKey.get(client.config.toBase58());
   if (!configInfo) throw new Error("Deployment config is missing");
   const config = coder.accounts.decode("Config", configInfo.data) as ConfigAccount;
   const result: Snapshot = {
+    rawAccounts,
     program: client.program,
     slot: response.context.slot,
     observedAt: Date.now(),

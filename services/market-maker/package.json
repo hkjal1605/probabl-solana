@@ -1,0 +1,19 @@
+{
+  "name": "@conditional-stocks/market-maker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun src/main.ts",
+    "test": "bun test test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@conditional-stocks/solana-client": "workspace:*",
+    "@conditional-stocks/solana-indexer": "workspace:*",
+    "@conditional-stocks/shared": "workspace:*",
+    "@solana/web3.js": "1.98.4",
+    "@solana/spl-token": "0.4.14",
+    "bs58": "6.0.0"
+  }
+}

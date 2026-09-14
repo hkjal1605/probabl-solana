@@ -50,7 +50,7 @@ export function MarketWorkspace({
   initialMarkets?: MarketView[];
   initialTrades?: TradeView[];
 }) {
-  const query = useMarkets(initialMarkets),
+  const query = useMarkets(initialMarkets.filter((m) => m.id === marketId), marketId),
     tradeQuery = useTrades(marketId);
   const indexedMarket = query.markets.find((m) => m.id === marketId);
   const stream = useProbabilityStream(

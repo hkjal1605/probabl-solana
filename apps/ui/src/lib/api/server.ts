@@ -92,8 +92,10 @@ function aggregateBook(
   };
 }
 
-async function liveMarkets(): Promise<MarketView[]> {
-  const marketResponse = await json<{ markets: Record<string, unknown>[] }>(
+async function liveMarkets(marketId?: string): Promise<MarketView[]> {
+  const marketResponse = marketId ? { markets: [await json<Record<string, unknown>>(
+    `${upstreamUrl("indexer")}/markets/${encodeURIComponent(marketId)}`,
+  )] } : await json<{ markets: Record<string, unknown>[] }>(
     `${upstreamUrl("indexer")}/markets`,
   );
   return Promise.all(
@@ -192,8 +194,10 @@ export const serverApi = {
       return [];
     }
   },
-  market: async (marketId: string): Promise<MarketView | null> =>
-    (await serverApi.markets()).find((market) => market.id === marketId) ?? null,
+  market: async (marketId: string): Promise<MarketView | null> => {
+    try { return (await liveMarkets(marketId))[0] ?? null; }
+    catch { return null; }
+  },
   positions: async (account: string): Promise<PositionView[]> => {
     try {
       return (

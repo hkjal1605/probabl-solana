@@ -1,10 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
 import {
+  ComputeBudgetInstruction,
+  ComputeBudgetProgram,
   PublicKey,
   SystemProgram,
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
+import { envelope, SolanaClient, wireInstruction } from "@conditional-stocks/solana-client";
 import { requestJson } from "../src/lib/api/client";
 import { createWalletController } from "../src/lib/wallet/controller";
 import type { SolanaWallet, WalletSources } from "../src/lib/wallet/injected";
@@ -419,6 +422,54 @@ test("transaction review remains exact: mutated messages, wallet changes, and ex
   expect(await f.controller.sendTransaction({ to: deployment.programId, data: "test" })).toBe(
     "signature",
   );
+  expect(f.calls.broadcasts).toBe(1);
+});
+
+test("main UI pins wallet fees before signing and preserves the reviewed funding instructions", async () => {
+  const f = setup(true);
+  const client = new SolanaClient({ ...deployment, rpcUrl: "http://127.0.0.1:8899" });
+  client.assertNetwork = async () => {};
+  client.connection.getLatestBlockhash = async () => ({ blockhash: other.toBase58(), lastValidBlockHeight: 100 });
+  client.connection.sendRawTransaction = f.client.connection.sendRawTransaction;
+  client.connection.confirmTransaction = f.client.connection.confirmTransaction;
+  f.deps.client = () => client;
+  // Account initialization plus deposit: two protocol instructions in one funding envelope.
+  const instructions = [
+    client.initializeWallet(other, owner),
+    client.deposit(other, owner, PublicKey.unique(), 1, 1_000_000n),
+  ];
+  const funding = envelope(instructions, client.program);
+  let rewrites = 0;
+  f.p.signTransaction = async (tx) => {
+    const message = TransactionMessage.decompile(tx.message);
+    if (!message.instructions.some((ix) => ix.programId.equals(ComputeBudgetProgram.programId))) {
+      rewrites++;
+      message.instructions.unshift(
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000n }),
+      );
+    }
+    return new VersionedTransaction(message.compileToV0Message());
+  };
+  const old = await client.prepareTransaction(owner, funding);
+  const changed = await f.p.signTransaction(old.transaction);
+  expect(Buffer.from(changed.message.serialize()).equals(Buffer.from(old.transaction.message.serialize()))).toBe(false);
+  expect(rewrites).toBe(1);
+  f.controller.start(f.events);
+  await tick();
+  const autoFeeSign = f.p.signTransaction;
+  f.p.signTransaction = async (tx) => {
+    const message = TransactionMessage.decompile(tx.message);
+    expect(ComputeBudgetInstruction.decodeSetComputeUnitLimit(message.instructions[0]!).units).toBe(400_000);
+    expect(ComputeBudgetInstruction.decodeSetComputeUnitPrice(message.instructions[1]!).microLamports).toBe(0n);
+    // Compilation unions account privileges across instructions and the fee payer.
+    expect(message.instructions.slice(2).map(wireInstruction)).toEqual(
+      TransactionMessage.decompile(old.transaction.message).instructions.map(wireInstruction),
+    );
+    return autoFeeSign(tx);
+  };
+  expect(await f.controller.sendTransaction(funding)).toBe("signature");
+  expect(rewrites).toBe(1);
   expect(f.calls.broadcasts).toBe(1);
 });
 

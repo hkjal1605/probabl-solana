@@ -91,7 +91,7 @@ export function createWalletController(deps: Dependencies) {
         : undefined,
     );
     clearTimeout(expiryTimer);
-    if (value) expiryTimer = setTimeout(expireIfNeeded, Math.max(0, value.expiresAt - Date.now()));
+    scheduleExpiry();
     publish({ sessionToken: value?.token ?? null, sessionExpiresAt: value?.expiresAt ?? null });
   };
   const clearSession = (forgetSaved = true) => {
@@ -107,6 +107,14 @@ export function createWalletController(deps: Dependencies) {
   function expireIfNeeded() {
     if (session && (Date.now() < session.issuedAt || Date.now() >= session.expiresAt))
       invalidateSession(session.token);
+  }
+  function scheduleExpiry() {
+    if (!session) return;
+    // Browser timers overflow beyond ~24.8 days. Re-arm until the absolute expiry.
+    expiryTimer = setTimeout(() => {
+      expireIfNeeded();
+      scheduleExpiry();
+    }, Math.min(2_147_483_647, Math.max(0, session.expiresAt - Date.now())));
   }
   const dropConnection = (forgetSaved = true) => {
     generation++;
@@ -326,13 +334,20 @@ export function createWalletController(deps: Dependencies) {
     publish({ status: "signing" });
     try {
       const client = deps.client();
-      const built = await client.prepareTransaction(owner, { ...value, value: "0" });
+      const built = await client.prepareTransaction(
+        owner,
+        { ...value, value: "0" },
+        { pinWalletFees: true },
+      );
       check();
       const original = Buffer.from(built.transaction.message.serialize());
       const signed = await currentWallet().signTransaction(built.transaction);
       check();
       if (!Buffer.from(signed.message.serialize()).equals(original))
-        throw new Error("Wallet changed the reviewed transaction.");
+        throw new Error(
+          "Wallet changed the reviewed transaction. No transaction was sent. " +
+            "Keep the app-provided network fee settings, then review and sign again.",
+        );
       const signature = await client.connection.sendRawTransaction(signed.serialize(), {
         skipPreflight: false,
         maxRetries: 2,

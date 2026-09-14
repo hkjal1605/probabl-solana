@@ -1,5 +1,5 @@
 "use client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { SOLANA_API_ORIGIN } from "@conditional-stocks/shared/endpoints";
 import {
@@ -11,9 +11,13 @@ import {
 } from "@conditional-stocks/shared/spot-prices";
 import type { MarketView } from "@/lib/api/types";
 import { protocolConfig } from "@/config/protocol";
-import { fetchSpotPrices } from "@/lib/api/spot-prices";
+import { fetchSpotPrices, parseSpotPricesResponse, spotPricesUrl } from "@/lib/api/spot-prices";
+import { subscribeSpot } from "@/lib/api/spot-stream";
 
 export function useSpotPrices(markets: MarketView[]) {
+  const cache = useQueryClient();
+  const [streamAt, setStreamAt] = useState(0);
+  const [streamFallback, setStreamFallback] = useState(false);
   const base = process.env.NEXT_PUBLIC_API_URL ?? SOLANA_API_ORIGIN;
   const mints = [...new Set(markets.flatMap((m) => [m.baseToken, m.quoteToken]))]
     .filter(isSolanaMint)
@@ -42,12 +46,36 @@ export function useSpotPrices(markets: MarketView[]) {
         prices,
       };
     },
-    enabled: Boolean(protocolConfig.genesisHash && mints.length),
+    enabled: Boolean(protocolConfig.genesisHash && mints.length && (mints.length > SPOT_BATCH_SIZE || streamFallback)),
     staleTime: SPOT_POLL_MS,
-    refetchInterval: SPOT_POLL_MS,
+    refetchInterval: () => Date.now() - streamAt < 30_000 ? false : SPOT_POLL_MS,
     retry: false,
   });
   const [now, setNow] = useState(() => Date.now());
+  const mintKey = mints.join(",");
+  useEffect(() => {
+    if (!mintKey || mints.length > SPOT_BATCH_SIZE) return;
+    setStreamFallback(false);
+    let received = false;
+    const timer = setTimeout(() => { if (!received) setStreamFallback(true); }, 5000);
+    const url = new URL(spotPricesUrl(mints, base));
+    url.pathname += "/stream";
+    const unsubscribe = subscribeSpot(url.toString(), (value) => {
+      try {
+        const prices = parseSpotPricesResponse(value, protocolConfig.genesisHash, mints);
+        cache.setQueryData(["spot-prices", base, protocolConfig.genesisHash, mints], prices);
+        setStreamAt(Date.now());
+        received = true;
+        setStreamFallback(false);
+      } catch { setStreamAt(0); setStreamFallback(true); }
+    }, () => { setStreamAt(0); setStreamFallback(true); });
+    return () => { clearTimeout(timer); unsubscribe(); };
+  }, [mintKey, base, cache]);
+  useEffect(() => {
+    if (!streamAt) return;
+    const timer = setTimeout(() => setStreamFallback(true), 30_000);
+    return () => clearTimeout(timer);
+  }, [streamAt]);
   useEffect(() => {
     const tick = () => setNow(Date.now());
     const timer = setInterval(tick, 1000);

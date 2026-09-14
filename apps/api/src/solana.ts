@@ -20,13 +20,16 @@ import {
   envelope,
   type OrderWire,
 } from "@conditional-stocks/solana-client";
-import { snapshot, liveOrder } from "@conditional-stocks/solana-indexer/projection";
+import { liveOrder } from "@conditional-stocks/solana-indexer/projection";
 import { logger } from "./logger.ts";
 import { requestLogging } from "@conditional-stocks/shared/http";
 import { mountSolanaAdmin } from "./solana-admin.ts";
 import { JupiterSpotPrices, jupiterEnvironment } from "./jupiter.ts";
 import { mountSpotPrices } from "./spot-prices.ts";
 import { mountTradingReadiness } from "./readiness.ts";
+import { mountOrderReview } from "./order-review.ts";
+import { indexedSnapshot } from "./indexed-snapshot.ts";
+import { ReadCache } from "@conditional-stocks/shared/read-cache";
 
 const required = (name: string) => {
   const v = process.env[name];
@@ -100,7 +103,17 @@ app.get("/ready", async (c) => {
     return c.json({ healthy: false, chain: "solana" }, 503);
   }
 });
-mountTradingReadiness(app, client);
+const indexedReads = new ReadCache(1000);
+const readIndex = () => indexedReads.get("snapshot", () => indexedSnapshot(db, client, domain));
+mountTradingReadiness(app, {
+  assertNetwork: async () => {}, // Domain-bound snapshots were verified by the indexer.
+  configAccount: async () => (await readIndex()).config,
+  market: async (address) => {
+    const market = (await readIndex()).markets.get(address.toBase58());
+    if (!market) throw new Error("Unknown indexed market");
+    return market;
+  },
+});
 app.post("/v1/auth/challenge", async (c) => {
   const body = await c.req.json(),
     owner = address(body.address),
@@ -179,13 +192,12 @@ app.post("/v1/auth/verify", async (c) => {
       [body.challengeId, domain, owner],
     );
     if (consumed.rowCount !== 1) throw new Error("Challenge already consumed");
-    await tx.query("INSERT INTO solana_sessions VALUES($1,$2,$3,now()+interval '8 hours')", [
-      hash(token),
-      domain,
-      owner,
-    ]);
+    const issued = await tx.query<{ expires_at_ms: string }>(
+      "INSERT INTO solana_sessions VALUES($1,$2,$3,now()+interval '30 days') RETURNING (extract(epoch from expires_at)*1000)::bigint::text AS expires_at_ms",
+      [hash(token), domain, owner],
+    );
     await tx.query("COMMIT");
-    return c.json({ token });
+    return c.json({ token, expiresAtMs: Number(issued.rows[0]!.expires_at_ms) });
   } catch (e) {
     await tx.query("ROLLBACK");
     throw e;
@@ -195,7 +207,7 @@ app.post("/v1/auth/verify", async (c) => {
 });
 
 async function prepare(order: OrderWire) {
-  const s = await snapshot(client),
+  const s = await indexedSnapshot(db, client, domain),
     m = s.markets.get(order.marketId);
   if (!m) throw new Error("Unknown market");
   const now = BigInt(Math.floor(Date.now() / 1000)),
@@ -251,17 +263,12 @@ async function prepare(order: OrderWire) {
     order,
     notional: notional.toString(),
     plan,
-    funding: await client.funding(order),
+    snapshotSlot: s.slot,
     atomicRouter: client.program.toBase58(),
     executionVersion: 1,
   };
 }
-app.post("/v1/orders/prepare", async (c) => {
-  const owner = await authenticate(c.req.header("authorization")),
-    order = parseOrder((await c.req.json()).order);
-  if (order.maker !== owner) throw new Error("Order signer differs from session wallet");
-  return c.json(await prepare(order));
-});
+mountOrderReview(app, prepare);
 app.post("/v1/orders/transaction", async (c) => {
   const owner = await authenticate(c.req.header("authorization")),
     body = await c.req.json(),
@@ -327,6 +334,7 @@ app.post("/v1/payouts/withdraw/prepare", async (c) => {
 });
 await mountSolanaAdmin(app, db, client, domain, authenticate);
 const server = Bun.serve({
+  idleTimeout: 60,
   hostname: process.env.API_HOST ?? "127.0.0.1",
   port: Number(process.env.API_PORT ?? 3000),
   fetch: app.fetch,

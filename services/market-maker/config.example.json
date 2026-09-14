@@ -1,0 +1,20 @@
+{
+  "markets": [],
+  "halfSpreadBps": 60,
+  "adverseSelectionBps": 25,
+  "maxHalfSpreadBps": 1500,
+  "repriceBps": 20,
+  "ttlSeconds": 120,
+  "pollMs": 15000,
+  "cutoffBufferSeconds": 300,
+  "maxFeedAgeMs": 30000,
+  "maxProbabilitySpreadX6": 50000,
+  "probabilityFloorX6": 20000,
+  "jumpBps": 500,
+  "probabilityJumpX6": 100000,
+  "cooldownMs": 60000,
+  "maxDrawdownBps": 1000,
+  "maxTransferFeeBps": 100,
+  "minSolLamports": "100000000",
+  "dailySolBudgetLamports": "100000000"
+}

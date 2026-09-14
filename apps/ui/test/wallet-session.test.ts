@@ -56,10 +56,10 @@ test("wallet preference has no expiry and remembers the selected wallet; explici
   expect(() => rememberWallet(s, "phantom", "bad-address")).toThrow();
 });
 
-test("refresh reuses the issued token without re-signing or extending the absolute four-hour expiry", () => {
+test("refresh reuses the issued token without re-signing or extending the absolute 30-day expiry", () => {
   const s = storage(),
     value = saved();
-  expect(value.expiresAt - value.issuedAt).toBe(4 * 60 * 60 * 1000);
+  expect(value.expiresAt - value.issuedAt).toBe(30 * 24 * 60 * 60 * 1000);
   expect(persistWalletSession(s, value)).toBe(true);
   for (const elapsed of [0, 1, 60_000, WALLET_SESSION_MS - 1]) {
     expect(savedWalletSession(s, binding, owner.toBase58(), now + elapsed)).toEqual(value);
@@ -116,7 +116,7 @@ test("invalid, malformed, future-issued, overlong and tampered lifetimes fail cl
     expect(savedWalletSession(s, binding, owner.toBase58(), at)).toBeNull();
 });
 
-test("a shorter upstream expiry is respected; an upstream eight-hour session cannot extend UI reuse", () => {
+test("a shorter upstream expiry is respected; longer upstream sessions cannot extend UI reuse", () => {
   expect(createWalletSession(binding, owner.toBase58(), token, now, now + 1000).expiresAt).toBe(
     now + 1000,
   );

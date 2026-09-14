@@ -1,4 +1,6 @@
-/** Display-only token prices. Never use for order pricing, funding or settlement. */
+/** Product reference prices, never execution guarantees or contract funding/settlement
+ * authority. The opt-in market maker separately reviews units and risk before using
+ * these indicative observations to choose its own quotes. */
 export const SOLANA_DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 export const SOLANA_MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 export const SPOT_MAX_AGE_SECONDS = 120;

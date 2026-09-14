@@ -8,6 +8,7 @@ import { type ReactNode, useState } from "react";
 import { UiStateProvider } from "./UiStateProvider";
 import { WalletProvider } from "./WalletProvider";
 import { readQueryDefaults } from "@/lib/api/read-policy";
+import { IndexStreamProvider } from "./IndexStreamProvider";
 
 export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -21,7 +22,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <WalletProvider>
           <TooltipProvider delayDuration={250}>
-            <UiStateProvider>{children}</UiStateProvider>
+            <IndexStreamProvider><UiStateProvider>{children}</UiStateProvider></IndexStreamProvider>
             <Toaster richColors position="bottom-right" />
           </TooltipProvider>
         </WalletProvider>

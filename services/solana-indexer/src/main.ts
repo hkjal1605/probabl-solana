@@ -7,12 +7,10 @@ import {
   hex,
   walletAddress,
   type MarketAccount,
-  supportedMint,
 } from "@conditional-stocks/solana-client";
-import { getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token";
 import { snapshot, marketView, indexedOrder, liveOrder, type Snapshot } from "./projection.ts";
-import { ReadCache } from "@conditional-stocks/shared/read-cache";
-import { readPositions } from "./positions.ts";
+import { createIndexStream, changedTopics } from "./stream";
+import { WalletIndex } from "./wallet-index";
 import { initializeHistory, replayHistory } from "./history.ts";
 import { reconcileVaults } from "./reconcile.ts";
 
@@ -40,30 +38,42 @@ await initializeHistory(db);
 let current: Snapshot | undefined,
   lastError: string | null = null;
 let reconciliation: Awaited<ReturnType<typeof reconcileVaults>> | undefined;
+let lastAudit = 0;
+const indexStream = createIndexStream();
 async function refresh() {
   try {
     const next = await snapshot(client);
-    await replayHistory(db, client, domain, next.slot);
-    reconciliation = await reconcileVaults(client, [...next.markets.keys()], next.slot);
+    const changed = JSON.stringify(next.rawAccounts) !== JSON.stringify(current?.rawAccounts);
+    if (changed || Date.now() - lastAudit >= 30_000) {
+      await replayHistory(db, client, domain, next.slot);
+      reconciliation = await reconcileVaults(client, [...next.markets.keys()], next.slot);
+      lastAudit = Date.now();
+    }
     // A single atomic upsert prevents concurrent/restarted indexers publishing an older slot.
     await db.query(
-      `INSERT INTO solana_snapshots VALUES ($1,$2,now(),$3::jsonb)
+      `INSERT INTO solana_snapshots VALUES ($1,$2,to_timestamp($4::double precision/1000),$3::jsonb)
       ON CONFLICT (domain) DO UPDATE SET slot=EXCLUDED.slot,observed_at=EXCLUDED.observed_at,accounts=EXCLUDED.accounts
       WHERE solana_snapshots.slot <= EXCLUDED.slot`,
       [
         domain,
         next.slot,
         JSON.stringify({
+          healthy: true,
+          rawAccounts: next.rawAccounts,
           markets: [...next.markets].map(([id, m]) => marketView(id, m)),
           orders: [...next.orders].map(([id, o]) => indexedOrder(id, o, next.slot)),
         }),
+        next.observedAt,
       ],
     );
+    const update = changedTopics(current, next);
     current = next;
     lastError = null;
+    indexStream.publish(update);
   } catch (error) {
     lastError = error instanceof Error ? error.message : "Indexer refresh failed";
     console.error(lastError);
+    await db.query("UPDATE solana_snapshots SET accounts=jsonb_set(accounts,'{healthy}','false') WHERE domain=$1", [domain]).catch(() => {});
   }
 }
 await refresh();
@@ -71,7 +81,7 @@ let stopped = false;
 let refreshFailures = 0;
 const loop = async () => {
   while (!stopped) {
-    await Bun.sleep(Math.min(15_000, 1500 * 2 ** Math.min(refreshFailures, 4)));
+    await Bun.sleep(Math.min(15_000, 5000 * 2 ** Math.min(refreshFailures, 4)));
     if (!stopped) {
       await refresh();
       refreshFailures = lastError ? refreshFailures + 1 : 0;
@@ -80,7 +90,6 @@ const loop = async () => {
 };
 const running = loop();
 const app = new Hono();
-const walletReads = new ReadCache(3000, 256, 2000);
 const state = () => {
   if (!current || lastError || Date.now() - current.observedAt > 15_000)
     throw new Error("Finalized indexer snapshot unavailable");
@@ -97,6 +106,15 @@ app.onError(
       },
     }),
 );
+const walletIndex = new WalletIndex(client, db, domain, state);
+await walletIndex.initialize();
+let walletRefreshing = false;
+const walletTimer = setInterval(() => {
+  if (walletRefreshing) return;
+  walletRefreshing = true;
+  void walletIndex.refresh().finally(() => { walletRefreshing = false; });
+}, 10_000);
+indexStream.mount(app, state, walletIndex);
 app.get("/health", (c) => {
   const s = state();
   return c.json({
@@ -143,12 +161,10 @@ app.get("/orderbook/:id", (c) => {
   });
 });
 app.get("/positions/:owner", async (c) => {
-  const s = state(),
-    owner = key(c.req.param("owner"));
+  state();
+  const owner = key(c.req.param("owner")).toBase58();
   c.header("Cache-Control", "no-store");
-  const response = await walletReads.get(`positions:${owner}`, () =>
-    readPositions(client, s, owner),
-  );
+  const response = await walletIndex.get(owner);
   state(); // Don't publish cached wallet reads after indexer integrity/readiness failed.
   return c.json(response);
 });
@@ -157,33 +173,9 @@ app.get("/balances/:owner", async (c) => {
     mint = key(c.req.query("token") ?? "");
   state();
   c.header("Cache-Control", "no-store");
-  const response = await walletReads.get(`balance:${owner}:${mint}`, async () => {
-    const metadata = await supportedMint(client.connection, mint);
-    let amount = 0n;
-    const ata = getAssociatedTokenAddressSync(mint, owner, true, metadata.program),
-      info = await client.connection.getAccountInfo(ata);
-    if (info) amount = unpackAccount(ata, info, metadata.program).amount;
-    const s = state(),
-      creditBalances: Record<string, string> = {};
-    for (const [id, m] of s.markets) {
-      const asset = m.mints.findIndex((k) => k.equals(mint)),
-        w = s.wallets.get(walletAddress(key(id), owner, client.program).toBase58());
-      if (asset >= 0 && w) creditBalances[id] = w.balances[asset]!.toString();
-    }
-    return {
-      account: owner.toBase58(),
-      token: mint.toBase58(),
-      decimals: metadata.decimals,
-      tokenProgram: metadata.program.toBase58(),
-      extensions: metadata.extensions,
-      issuerCanFreeze: metadata.freezeAuthority !== null,
-      amountFormat: "raw-units-decimal-formatted",
-      canonicalBalance: amount.toString(),
-      creditBalances,
-      blockNumber: String(s.slot),
-      observedAt: Date.now(),
-    };
-  });
+  const image = await walletIndex.get(owner.toBase58());
+  const response = image.balances[mint.toBase58()];
+  if (!response) return c.json({ error: "Mint is not indexed for this deployment" }, 404);
   state();
   return c.json(response);
 });
@@ -266,6 +258,7 @@ app.get("/trades", async (c) => {
   });
 });
 const server = Bun.serve({
+  idleTimeout: 60,
   hostname: process.env.INDEXER_HOST ?? "127.0.0.1",
   port: Number(process.env.INDEXER_PORT ?? 42069),
   fetch: app.fetch,
@@ -277,6 +270,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     if (shutdown) return;
     shutdown = true;
     stopped = true;
+    clearInterval(walletTimer);
     void server
       .stop()
       .then(() => running)

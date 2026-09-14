@@ -1,4 +1,5 @@
 /** GET refresh policy. Mutation requests are never automatically retried. */
+import { indexStreamHealthy } from "./index-stream";
 type HttpFailure = { status?: number; retryAfterMs?: number; name?: string };
 export function retryRead(failures: number, error: unknown) {
   if (failures >= 2) return false;
@@ -24,7 +25,8 @@ export const readQueryDefaults = {
   retryDelay: readRetryDelay,
   staleTime: 10_000,
 };
-export function readPollInterval(query: { state: { status: string; fetchFailureCount: number } }) {
+export function readPollInterval(query: { queryKey?: readonly unknown[]; state: { status: string; fetchFailureCount: number } }) {
+  if (query.state.status === "success" && indexStreamHealthy() && ["markets", "wallet-orders", "trades", "positions", "whole-balances", "trading-readiness"].includes(String(query.queryKey?.[0]))) return false;
   return query.state.status === "error" ? 30_000 : 10_000;
 }
 export interface ReadState {

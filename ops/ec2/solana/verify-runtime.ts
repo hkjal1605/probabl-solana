@@ -41,8 +41,9 @@ for (const service of ["api", "indexer", "polymarket"]) {
       assert.equal(row[key], false, `${service} ${key}`);
     assert.equal(row.ssl, true);
     assert.equal(row.api_schema, service === "api");
-    assert.equal(row.indexer_schema, service === "indexer");
+    assert.equal(row.indexer_schema, service === "indexer" || service === "api");
     if (service === "api") {
+      await client.query("SELECT 1 FROM solana_indexer.solana_snapshots LIMIT 0");
       for (const table of [
         "solana_sessions",
         "solana_auth_challenges",

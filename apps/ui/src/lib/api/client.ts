@@ -71,8 +71,8 @@ export async function requestJson<T>(
 }
 
 export const api = {
-  markets: (signal?: AbortSignal) =>
-    requestJson<{ markets: MarketView[] }>("/api/markets", signal ? { signal } : {}),
+  markets: (signal?: AbortSignal, marketId?: string) =>
+    requestJson<{ markets: MarketView[] }>(`/api/markets${marketId ? `?marketId=${encodeURIComponent(marketId)}` : ""}`, signal ? { signal } : {}),
   orders: async (account: string, signal?: AbortSignal) => {
     const path = `/api/indexer/orders?maker=${encodeURIComponent(account)}&limit=1000`;
     const [recent, open] = await Promise.all([
@@ -96,8 +96,8 @@ export const api = {
       `/api/indexer/trades?marketId=${encodeURIComponent(marketId)}&limit=100`,
       signal ? { signal } : {},
     ),
-  prepare: <T>(path: string, body: unknown, token: string) =>
-    requestJson<T>(`/api/gateway/${path}`, { body, token }),
+  prepare: <T>(path: string, body: unknown, token?: string) =>
+    requestJson<T>(`/api/gateway/${path}`, { body, ...(token ? { token } : {}) }),
   resolution: async (marketId: string, signal?: AbortSignal) => {
     try {
       return await requestJson<ResolutionView>(

@@ -14,7 +14,7 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
-  getAccount,
+  unpackAccount,
   createTransferCheckedInstruction,
   createTransferCheckedWithFeeInstruction,
   createRevokeInstruction,
@@ -22,6 +22,7 @@ import {
 import {
   TOKEN_2022_PROGRAM_ID,
   supportedMint,
+  decodeSupportedMint,
   currentTransferFee,
   transferGross,
   transferNet,
@@ -565,46 +566,64 @@ export class SolanaClient {
   async funding(order: OrderWire) {
     const marketKey = key(order.marketId),
       owner = key(order.maker),
-      market = await this.market(marketKey);
+      participants = [...new Set([order.maker, order.recipient])],
+      first = await this.connection.getMultipleAccountsInfoAndContext(
+        [marketKey, ...participants.map((p) => walletAddress(marketKey, key(p), this.program))],
+        { commitment: "confirmed" },
+      );
+    if (first.value.length !== participants.length + 1 || !Number.isSafeInteger(first.context.slot))
+      throw new Error("Incomplete funding account read");
+    const marketInfo = first.value[0];
+    if (!marketInfo || !marketInfo.owner.equals(this.program)) throw new Error("Missing or foreign market");
+    const market = coder.accounts.decode("Market", marketInfo.data) as MarketAccount;
+    if (!market.config.equals(this.config)) throw new Error("Market belongs to another deployment");
+    const wallets = participants.map((p, i) => {
+      const info = first.value[i + 1];
+      if (!info) return null;
+      if (!info.owner.equals(this.program)) throw new Error("Invalid wallet owner");
+      const w = coder.accounts.decode("Wallet", info.data) as WalletAccount;
+      if (!w.market.equals(marketKey) || !w.owner.equals(key(p))) throw new Error("Invalid wallet identity");
+      return w;
+    });
     const asset = fundingAsset(order),
       mint = market.mints[asset]!;
     const required =
       order.side === 0
         ? quote(BigInt(order.quantity), BigInt(order.limitPriceRawX18), true)
         : BigInt(order.quantity);
-    const wallet = await this.wallet(marketKey, owner);
+    const wallet = wallets[0];
     const available = wallet ? big(wallet.balances[asset]!) : 0n;
     const deficit = required > available ? required - available : 0n;
-    const metadata = await supportedMint(this.connection, mint);
-    const deposit = deficit
-      ? await this.depositForCredit(marketKey, owner, mint, asset, deficit)
-      : null;
-    let external = 0n;
-    try {
-      external = (
-        await getAccount(
-          this.connection,
-          getAssociatedTokenAddressSync(mint, owner, true, metadata.program),
-          "confirmed",
-          metadata.program,
-        )
-      ).amount;
-    } catch (error) {
-      if (
-        !error ||
-        typeof error !== "object" ||
-        !("name" in error) ||
-        error.name !== "TokenAccountNotFoundError"
-      )
-        throw error;
-    }
     const instructions: TransactionInstruction[] = [];
-    const participants = [...new Set([order.maker, order.recipient])];
-    for (const participant of participants)
-      if (!(await this.wallet(marketKey, key(participant))))
-        instructions.push(
-          this.initializeWallet(marketKey, key(participant), owner),
-        );
+    for (const [index, participant] of participants.entries())
+      if (!wallets[index]) instructions.push(this.initializeWallet(marketKey, key(participant), owner));
+    if (!deficit) return {
+      amount: required.toString(), assetKind: "spl-token", approved: instructions.length === 0,
+      balanceSufficient: true, depositAmount: "0", transferFee: "0",
+      approvalCall: instructions.length ? envelope(instructions, this.program) : null,
+    };
+    // Both possible ATAs are deterministic; reading them with the mint avoids a
+    // mint -> token-program -> ATA waterfall, including for Token-2022.
+    const programs = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID];
+    const atas = programs.map((p) => getAssociatedTokenAddressSync(mint, owner, true, p));
+    const second = await this.connection.getMultipleAccountsInfoAndContext([mint, ...atas], {
+      commitment: "confirmed", minContextSlot: first.context.slot,
+    });
+    if (second.value.length !== 3 || second.context.slot < first.context.slot)
+      throw new Error("Incomplete or stale funding token read");
+    const metadata = decodeSupportedMint(mint, second.value[0] ?? null);
+    const index = programs.findIndex((p) => p.equals(metadata.program));
+    const tokenInfo = second.value[index + 1];
+    const externalAccount = tokenInfo ? unpackAccount(atas[index]!, tokenInfo, metadata.program) : null;
+    if (externalAccount && (!externalAccount.owner.equals(owner) || !externalAccount.mint.equals(mint)))
+      throw new Error("Funding token identity mismatch");
+    const external = externalAccount?.amount ?? 0n;
+    const fee = deficit ? await currentTransferFee(this.connection, metadata) : null;
+    const gross = deficit ? transferGross(deficit, fee) : 0n;
+    const deposit = deficit ? {
+      gross, fee: gross - deficit,
+      instruction: this.deposit(marketKey, owner, mint, asset, gross, metadata.program, deficit),
+    } : null;
     if (deposit) instructions.push(deposit.instruction);
     return {
       amount: required.toString(),

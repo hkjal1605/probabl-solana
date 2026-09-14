@@ -18,6 +18,7 @@ import type { MarketView } from "@/lib/api/types";
 import { createOrder, previewOrder } from "@/lib/trading/order";
 import { solana } from "@/lib/trading/rpc";
 import { atomicTransaction, verifyAtomicResponse } from "@/lib/trading/atomic";
+import { reviewWithSession } from "@/lib/trading/review-session";
 interface Preparation {
   funding: {
     approvalCall: { to: string; data: string; value: "0" } | null;
@@ -63,15 +64,11 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     ? BigInt(preparation.plan.deadline) <= BigInt(nowSeconds)
     : false;
   const preview = useMemo(() => previewOrder(quantity, price, market), [quantity, price, market]);
-  const prepare = () =>
-    run(async (assertCurrent) => {
+  const prepareAction = async (assertCurrent: () => void) => {
       setPreparation(null);
-      await readiness.requireReady();
-      assertCurrent();
       if (!wallet.account || !preview.valid)
         throw new Error("Connect your wallet and enter a valid quantity and price.");
       await wallet.ensureNetwork();
-      const token = wallet.sessionToken ?? (await wallet.authenticate());
       assertCurrent();
       const candidate = parseOrder(
         createOrder({
@@ -88,14 +85,14 @@ export function useOrderTicket({ market }: { market: MarketView }) {
           tif,
         }),
       );
-      const result = await api.prepare<Preparation>("orders/prepare", { order: candidate }, token);
-      const localFunding = await solana().funding(candidate);
-      if (localFunding.approvalCall)
-        verifyEnvelope(localFunding.approvalCall, {
-          transaction: result.funding.approvalCall,
-        });
-      else if (result.funding.approvalCall)
-        throw new Error("API funding differs from local balances");
+      const [result, localFunding] = await Promise.all([reviewWithSession({
+        token: wallet.sessionToken,
+        request: (token) => api.prepare<Omit<Preparation, "funding">>("orders/prepare", { order: candidate }, token),
+        authenticate: wallet.authenticate,
+        assertCurrent,
+      }), solana().funding(candidate)]);
+      // Funding instructions are built exclusively from locally validated chain
+      // accounts. The API supplies only the indexed execution plan, not custody instructions.
       parseAtomicPlan(result.plan, candidate);
       assertCurrent();
       if (
@@ -105,13 +102,14 @@ export function useOrderTicket({ market }: { market: MarketView }) {
         throw new Error("API order identity differs.");
       setNowSeconds(Math.floor(Date.now() / 1000));
       setPreparation({ ...result, funding: localFunding, order: candidate });
-    });
+    };
+  const prepare = () => run(prepareAction);
   const approve = () =>
     run(async (assertCurrent) => {
       if (!preparation?.funding.approvalCall) return;
-      await readiness.requireReady();
-      assertCurrent();
-      const fresh = await solana().funding(preparation.order);
+      const [, fresh] = await Promise.all([
+        readiness.requireReady(), solana().funding(preparation.order),
+      ]);
       assertCurrent();
       if (!fresh.approvalCall || !fresh.balanceSufficient)
         throw new Error("Funding changed. Review the order again.");
@@ -119,8 +117,10 @@ export function useOrderTicket({ market }: { market: MarketView }) {
         transaction: preparation.funding.approvalCall,
       });
       await wallet.sendTransaction(fresh.approvalCall);
-      toast.success("Order funding confirmed. Review the execution quote again.");
+      toast.success("Order funding confirmed. Refreshing your execution quote.");
       setPreparation(null);
+      assertCurrent();
+      await prepareAction(assertCurrent);
     });
   const submit = () =>
     run(async (assertCurrent) => {

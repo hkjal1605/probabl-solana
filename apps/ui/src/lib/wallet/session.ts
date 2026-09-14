@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 
 type Deployment = { programId?: string; config: string; genesisHash: string };
 
-export const WALLET_SESSION_MS = 4 * 60 * 60 * 1000;
+export const WALLET_SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 export const WALLET_STORAGE_KEY = "probabl:ui:wallet:v1";
 export const SESSION_STORAGE_KEY = "probabl:ui:session:v1";
 export type WalletKind = "phantom" | "solflare" | "injected";
@@ -160,6 +160,6 @@ export function assertRequestSession(token: string, now = Date.now()) {
     now < active.issuedAt ||
     now >= active.expiresAt
   )
-    throw new Error("Your four-hour trading session expired. Sign in again.");
+    throw new Error("Your trading session expired. Sign in again.");
   assertIdentity?.();
 }
