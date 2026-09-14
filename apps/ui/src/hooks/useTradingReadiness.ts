@@ -1,27 +1,16 @@
 "use client";
-import { useQuery } from "@tanstack/react-query";
+import { useResource } from "./useResource";
+import { readinessStore } from "@/stores/useReadinessStore";
+import { fetchReadiness } from "@/modules/MarketDetailPageModule/utils/fetchReadiness";
 import { protocolConfig } from "@/config/protocol";
-import { api } from "@/lib/api/client";
-import type { MarketView } from "@/lib/api/types";
-import { readPollInterval } from "@/lib/api/read-policy";
+import { api } from "@/services/protocol-api-service";
+import type { MarketView } from "@/types/api";
 import { localTradingStatus, readinessMessage, requireTradingReady } from "@/lib/trading/readiness";
 import { useReadFreshness } from "./useReadFreshness";
 
 export function useTradingReadiness(market: MarketView) {
   const configured = Boolean(protocolConfig.config && protocolConfig.genesisHash);
-  const query = useQuery({
-    queryKey: [
-      "trading-readiness",
-      market.id,
-      protocolConfig.genesisHash,
-      protocolConfig.programId,
-      protocolConfig.config,
-    ],
-    queryFn: ({ signal }) => api.readiness(market.id, signal),
-    enabled: configured,
-    refetchInterval: readPollInterval,
-    staleTime: 5000,
-  });
+  const query = useResource(readinessStore, market.id, (force) => fetchReadiness(market.id, force), configured);
   const freshness = useReadFreshness(query, 15_000);
   const local = localTradingStatus(market);
   const ready =

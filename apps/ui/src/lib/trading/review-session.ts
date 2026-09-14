@@ -1,4 +1,4 @@
-import { ApiError } from "../api/client";
+import { ApiError } from "../../services/protocol-api-service";
 
 /** Retry read-only review once after an explicit authentication rejection. */
 export async function reviewWithSession<T>(options: {

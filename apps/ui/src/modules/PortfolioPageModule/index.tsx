@@ -1,6 +1,5 @@
-import { serverApi } from "@/lib/api/server";
 import { PortfolioClient } from "./components/PortfolioClient";
-export async function PortfolioPageModule() {
-  const markets = await serverApi.markets();
+export function PortfolioPageModule() {
+  const markets: import("@/types/api").MarketView[] = [];
   return <PortfolioClient markets={markets} />;
 }

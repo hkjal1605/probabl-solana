@@ -25,7 +25,13 @@ Native SSE does not carry trading bearer tokens in URLs. Streamed wallet data is
 1. Deploy/restart the indexer first. Its existing snapshot JSON gains raw account images and an explicit health flag; the wallet-image table is created at startup. Wait for a healthy snapshot and reconciliation.
 2. On EC2 run `bun ops/ec2/solana/grant-indexed-reads.ts` using the existing private indexer environment. This grants only schema usage and snapshot-table SELECT to the API role. Restart the API through the ecosystem file, which sets `INDEXER_SNAPSHOT_SCHEMA=solana_indexer`. Readiness and review now require the new database snapshot format. Old indexer data deliberately produces an unavailable error, not an RPC scan.
 3. Apply the updated nginx configuration, validate with `nginx -t`, then reload. Both SSE locations disable buffering and allow long reads. Bun servers use a 60-second idle timeout; heartbeats arrive sooner.
-4. Deploy/restart the UI. `/api/stream` forwards the streaming body without buffering or a short request timeout. Confirm reset/index events, wallet changes, spot events, and reconnect recovery in the browser.
+4. Restart the API and indexer with browser CORS enabled before deploying/restarting the UI. Include each UI origin in `API_AUTH_ORIGINS`. The main UI calls `NEXT_PUBLIC_API_URL` directly (default `https://api-solana.probabl.trade`); it has no Next.js API routes or server-side data fetches. `/stream` and `/v1/spot-prices/stream` connect directly to that origin. Confirm reset/index events, wallet changes, spot events, and reconnect recovery in the browser.
+
+## Client organization
+
+`services/*-api-service.ts` owns HTTP requests, module `utils/fetch*.ts` coordinates loading, and `stores/use*Store.ts` owns domain state using vanilla Zustand plus bounded React hooks. Components retain the existing Probabl screens. The shared transport validates the API origin and attaches a trading bearer token only to explicit authenticated calls; no server credentials enter the UI.
+
+Resource reads are single-flight per domain/key. SSE updates the same stores, and an older HTTP response cannot overwrite a newer streamed wallet/readiness image. Wallet changes clear private session-related caches and abort their pending reads. HTTP refreshes are a recovery path when streams are unavailable, not a parallel fixed polling loop. Positions and balances use one wallet image. Spot subscriptions have a short initial SSE grace period before HTTP fallback. Mutations are never automatically retried by the transport.
 
 No deployment, key changes, live orders, or production schema changes are performed by the local implementation tests. Existing sessions and the separate market-maker work are unrelated to this rollout.
 

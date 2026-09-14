@@ -11,14 +11,14 @@ import {
 } from "@conditional-stocks/ui-kit/dialog";
 import { Input } from "@conditional-stocks/ui-kit/input";
 import { Label } from "@conditional-stocks/ui-kit/label";
-import { useQueryClient } from "@tanstack/react-query";
+import { refreshStores } from "@/stores/createResourceStore";
 import { Combine, LoaderCircle } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useWallet } from "@/components/providers/WalletProvider";
 import { Segmented } from "@/components/ui/segmented";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
-import type { MarketView, PositionView } from "@/lib/api/types";
+import type { MarketView, PositionView } from "@/types/api";
 import { key, type SolanaClient } from "@conditional-stocks/solana-client";
 import { readClaimMarket, solana, transactionReceipt } from "@/lib/trading/rpc";
 
@@ -33,8 +33,7 @@ export function PositionActions({
   market: MarketView;
   disabled?: boolean;
 }) {
-  const wallet = useWallet(),
-    cache = useQueryClient();
+  const wallet = useWallet();
   const [open, setOpen] = useState(false),
     [kind, setKind] = useState<"Split" | "Merge" | "Redeem">(
       position.redeemable ? "Redeem" : "Merge",
@@ -153,11 +152,7 @@ export function PositionActions({
       assertCurrent();
       if (receipt.status !== "success")
         throw new Error("Transaction reverted. Balances were not changed.");
-      await Promise.all(
-        ["positions", "whole-balances", "payout-credits"].map((key) =>
-          cache.invalidateQueries({ queryKey: [key] }),
-        ),
-      );
+      await refreshStores(["positions", "payout-credits"]);
       if (approval) toast.success("Approval confirmed. Review the claim action again to continue.");
       else {
         toast.success(`${kind} confirmed. Canonical balances update after indexing.`);

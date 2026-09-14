@@ -1,4 +1,4 @@
-import type { ResolutionView } from "@/lib/api/types";
+import type { ResolutionView } from "@/types/api";
 export function outcomeLabel(resolution: ResolutionView | null) {
   try {
     if (!resolution?.yesPayout || !resolution.noPayout || !resolution.payoutDenominator)

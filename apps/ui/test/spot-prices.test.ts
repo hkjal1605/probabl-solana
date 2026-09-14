@@ -17,7 +17,7 @@ import {
   parseSpotPricesResponse,
   spotPricesUrl,
   withMarketSpotPrices,
-} from "../src/lib/api/spot-prices";
+} from "../src/services/spot-prices";
 import { formatSpotUsd, SpotReference } from "../src/components/market/SpotReference";
 import { previewOrder } from "../src/lib/trading/order";
 import { assetsForMarkets } from "../src/hooks/useWalletAssets";

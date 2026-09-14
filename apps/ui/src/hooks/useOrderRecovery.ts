@@ -1,10 +1,10 @@
 "use client";
-import { useQueryClient } from "@tanstack/react-query";
+import { refreshStores } from "@/stores/createResourceStore";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useWallet } from "@/components/providers/WalletProvider";
 import { protocolConfig } from "@/config/protocol";
-import { api } from "@/lib/api/client";
+import { api } from "@/services/protocol-api-service";
 import { orderRecovery, type RecoveryKind, verifyRecoveryResponse } from "@/lib/trading/recovery";
 import { transactionReceipt } from "@/lib/trading/rpc";
 import { useAsyncAction } from "./useAsyncAction";
@@ -12,8 +12,7 @@ import { useOrders } from "./useProtocolData";
 
 export function useOrderRecovery() {
   const wallet = useWallet(),
-    query = useOrders(),
-    cache = useQueryClient();
+    query = useOrders();
   const [canceling, setCanceling] = useState<string | null>(null);
   const [pending, setPending] = useState<Set<string>>(() => new Set());
   const { run } = useAsyncAction(wallet.account ?? "");
@@ -69,7 +68,7 @@ export function useOrderRecovery() {
           });
           throw error;
         }
-        await cache.invalidateQueries({ queryKey: ["wallet-orders"] });
+        await refreshStores(["wallet-orders", "positions", "payout-credits"]);
       } finally {
         setCanceling(null);
       }

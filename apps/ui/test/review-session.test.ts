@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ApiError } from "../src/lib/api/client";
+import { ApiError } from "../src/services/protocol-api-service";
 import { reviewWithSession } from "../src/lib/trading/review-session";
 
 test("successful public or authenticated review never prompts", async () => {

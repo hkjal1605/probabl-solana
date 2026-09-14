@@ -1,4 +1,4 @@
-import type { MarketView, TradeView } from "@/lib/api/types";
+import type { MarketView, TradeView } from "@/types/api";
 import { displayPrice } from "@/lib/format/display";
 
 export interface PricePoint {

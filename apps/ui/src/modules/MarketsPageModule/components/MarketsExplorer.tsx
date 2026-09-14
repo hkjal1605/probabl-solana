@@ -24,7 +24,7 @@ import { DataError, EmptyState, Page, PageHeading, Stat } from "@/components/ui/
 import { Segmented } from "@/components/ui/segmented";
 import { useMarkets } from "@/hooks/useProtocolData";
 import { RefreshStatus } from "@/components/data/RefreshStatus";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 import { formatNumber } from "@/lib/format/display";
 import {
   compact,

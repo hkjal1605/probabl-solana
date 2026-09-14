@@ -21,50 +21,28 @@ import {
 } from "@conditional-stocks/ui-kit/dialog";
 import { Input } from "@conditional-stocks/ui-kit/input";
 import { Label } from "@conditional-stocks/ui-kit/label";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { refreshStores } from "@/stores/createResourceStore";
+import { payoutsStore } from "@/stores/usePayoutsStore";
+import { useResource } from "@/hooks/useResource";
+import { fetchPayouts } from "../utils/fetchPayouts";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useWallet } from "@/components/providers/WalletProvider";
 import { protocolConfig } from "@/config/protocol";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
-import { api, requestJson } from "@/lib/api/client";
-import type { MarketView, PayoutCreditView } from "@/lib/api/types";
+import { api } from "@/services/protocol-api-service";
+import type { MarketView, PayoutCreditView } from "@/types/api";
 import { shortAddress } from "@/lib/format/display";
 import {
   preparePayoutWithdrawal,
   verifyPayoutResponse,
 } from "@/lib/trading/payouts";
 
-interface Page {
-  vault: string;
-  payouts: PayoutCreditView[];
-  nextCursor: string | null;
-}
 
 export function PendingPayouts({ markets }: { markets: MarketView[] }) {
   const wallet = useWallet();
-  const credits = useInfiniteQuery({
-    queryKey: ["payout-credits", wallet.account, protocolConfig.chainId],
-    initialPageParam: "",
-    queryFn: async ({ pageParam, signal }): Promise<Page> => {
-      const page = await requestJson<Page>(
-        `/api/indexer/payouts/${wallet.account}${pageParam ? `?after=${encodeURIComponent(pageParam)}` : ""}`,
-        { signal },
-      );
-      if (
-        !protocolConfig.payoutVault ||
-        page.vault !== protocolConfig.payoutVault
-      )
-        throw new Error(
-          "Payout vault configuration does not match the indexer",
-        );
-      return page;
-    },
-    getNextPageParam: (page) => page.nextCursor ?? undefined,
-    enabled: Boolean(wallet.account),
-    refetchInterval: 8_000,
-  });
-  const rows = credits.data?.pages.flatMap((page) => page.payouts) ?? [];
+  const credits = useResource(payoutsStore, wallet.account ?? "", (force) => fetchPayouts(wallet.account ?? "", force), !!wallet.account);
+  const rows = credits.data?.payouts ?? [];
   return (
     <Card>
       <CardHeader>
@@ -79,7 +57,7 @@ export function PendingPayouts({ markets }: { markets: MarketView[] }) {
         </p>
         {credits.isError ? (
           <p role="alert" className="text-sm text-destructive">
-            {credits.error.message}
+            {credits.error?.message}
           </p>
         ) : credits.isPending ? (
           <p className="text-sm text-muted-foreground">
@@ -122,15 +100,6 @@ export function PendingPayouts({ markets }: { markets: MarketView[] }) {
             );
           })
         )}
-        {credits.hasNextPage && (
-          <Button
-            variant="outline"
-            onClick={() => credits.fetchNextPage()}
-            disabled={credits.isFetchingNextPage}
-          >
-            Load more payouts
-          </Button>
-        )}
       </CardContent>
     </Card>
   );
@@ -144,7 +113,6 @@ function WithdrawPayout({
   symbol: string;
 }) {
   const wallet = useWallet();
-  const cache = useQueryClient();
   const [open, setOpen] = useState(false);
   const [recipient, setRecipient] = useState(credit.beneficiary);
   const [amount, setAmount] = useState(
@@ -194,9 +162,7 @@ function WithdrawPayout({
         `Payout withdrawal submitted: ${hash.slice(0, 10)}… Balances update after indexing.`,
       );
       setOpen(false);
-      await cache.invalidateQueries({
-        queryKey: ["payout-credits", wallet.account],
-      });
+      await refreshStores(["payout-credits", "positions"]);
     });
   return (
     <Dialog

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { LifecycleBadge } from "@/components/data/StatusBadge";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 import { formatNumber, formatTime } from "@/lib/format/display";
 import { compact, impactPercent, marketCategory, midpoint } from "@/lib/markets/presentation";
 import { ImpactBar } from "./ImpactBar";

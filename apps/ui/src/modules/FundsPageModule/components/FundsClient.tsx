@@ -24,7 +24,7 @@ import { DataError, EmptyState } from "@/components/ui/page";
 import { protocolConfig } from "@/config/protocol";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useWalletAssets } from "@/hooks/useWalletAssets";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 import { shortAddress, tokenAmount } from "@/lib/format/display";
 import { walletTransfer } from "@/lib/trading/funds";
 import { solana } from "@/lib/trading/rpc";

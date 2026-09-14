@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { readFreshness, type ReadState } from "@/lib/api/read-policy";
+import { readFreshness, type ReadState } from "@/services/read-policy";
 
 export function useReadFreshness(query: ReadState, maxAgeMs = 30_000) {
   const [, setNow] = useState(Date.now);

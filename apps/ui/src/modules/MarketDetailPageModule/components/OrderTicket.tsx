@@ -17,7 +17,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { useOrderTicket } from "@/hooks/useOrderTicket";
 import { usePositions } from "@/hooks/useProtocolData";
 import { useWalletAssets } from "@/hooks/useWalletAssets";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 import { formatNumber, formatUsd } from "@/lib/format/display";
 import { marketPriceBound, quantityForSpend } from "@/lib/trading/entry";
 

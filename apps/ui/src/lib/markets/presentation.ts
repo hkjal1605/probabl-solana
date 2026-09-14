@@ -1,4 +1,4 @@
-import type { BranchBook, MarketView } from "@/lib/api/types";
+import type { BranchBook, MarketView } from "@/types/api";
 
 export function midpoint(book: BranchBook): number | null {
   const { bestBid, bestAsk } = book;

@@ -1,7 +1,7 @@
 "use client";
 import { DataError } from "@/components/ui/page";
 import { useMarkets } from "@/hooks/useProtocolData";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 import { FundsClient } from "./FundsClient";
 export function FundsPageClient({ markets }: { markets: MarketView[] }) {
   const query = useMarkets(markets);

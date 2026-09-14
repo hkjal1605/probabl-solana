@@ -8,7 +8,7 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import { envelope, SolanaClient, wireInstruction } from "@conditional-stocks/solana-client";
-import { requestJson } from "../src/lib/api/client";
+import { requestJson } from "../src/services/protocol-api-service";
 import { createWalletController } from "../src/lib/wallet/controller";
 import type { SolanaWallet, WalletSources } from "../src/lib/wallet/injected";
 import {
@@ -490,7 +490,7 @@ test("request-time expiry blocks background tabs before fetch; API 401 invalidat
     const expiry = f.controller.getSnapshot().sessionExpiresAt;
     if (expiry === null) throw new Error("Expected a restored session");
     Date.now = () => expiry;
-    await expect(requestJson("/api/gateway/orders/prepare", { token, body: {} })).rejects.toThrow(
+    await expect(requestJson("/v1/orders/prepare", { token, body: {} })).rejects.toThrow(
       "expired",
     );
     expect(calls).toBe(0);
@@ -498,7 +498,7 @@ test("request-time expiry blocks background tabs before fetch; API 401 invalidat
     expect(f.controller.getSnapshot().account).toBe(owner.toBase58());
     Date.now = now;
     await f.controller.authenticate();
-    await expect(requestJson("/api/gateway/orders/prepare", { token, body: {} })).rejects.toThrow(
+    await expect(requestJson("/v1/orders/prepare", { token, body: {} })).rejects.toThrow(
       "Expired on server",
     );
     expect(calls).toBe(1);

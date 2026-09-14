@@ -7,7 +7,7 @@ import {
   type Hex,
   zeroHash,
 } from "viem";
-import type { MarketView, PositionView } from "../../src/lib/api/types";
+import type { MarketView, PositionView } from "../../src/types/api";
 
 const ctf = "0x5000000000000000000000000000000000000005";
 const registry = "0x4000000000000000000000000000000000000004";

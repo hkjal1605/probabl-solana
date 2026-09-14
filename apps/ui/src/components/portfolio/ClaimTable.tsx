@@ -10,7 +10,7 @@ import {
 import { useWallet } from "@/components/providers/WalletProvider";
 import { DataError, EmptyState } from "@/components/ui/page";
 import { usePositions } from "@/hooks/useProtocolData";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 import { formatNumber, tokenAmount } from "@/lib/format/display";
 import { PositionActions } from "@/modules/PortfolioPageModule/components/PositionActions";
 import { RefreshStatus } from "@/components/data/RefreshStatus";

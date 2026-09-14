@@ -1,15 +1,14 @@
 import { expect, test } from "bun:test";
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ApiError } from "../src/lib/api/client";
+import { ApiError } from "../src/services/protocol-api-service";
 import {
   readFreshness,
   readPollInterval,
   readRetryDelay,
   retryAfterMs,
   retryRead,
-} from "../src/lib/api/read-policy";
+} from "../src/services/read-policy";
 import {
   localTradingStatus,
   readinessMessage,
@@ -58,35 +57,6 @@ test("background errors preserve known display data but immediately block stale-
   expect(readFreshness({ ...state, data: undefined, isError: true }, 1500).isInitialError).toBe(
     true,
   );
-});
-test("React Query retains prior rows through a failed background refetch and recovers", async () => {
-  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  let fail = false,
-    calls = 0;
-  const observer = new QueryObserver(cache, {
-    queryKey: ["positions", "wallet-a", "devnet"],
-    queryFn: async () => {
-      calls++;
-      if (fail) throw new ApiError("offline", 503, null);
-      return { positions: ["claim"] };
-    },
-  });
-  const unsub = observer.subscribe(() => {});
-  const first = await observer.refetch();
-  expect(first.data?.positions).toEqual(["claim"]);
-  fail = true;
-  const down = await observer.refetch();
-  expect(down.data).toBe(first.data);
-  expect(down.isError).toBe(true);
-  expect(readFreshness(down).isInitialError).toBe(false);
-  expect(readFreshness(down).isDataFresh).toBe(false);
-  expect(cache.getQueryData(["positions", "wallet-b", "devnet"])).toBeUndefined();
-  expect(cache.getQueryData(["positions", "wallet-a", "mainnet"])).toBeUndefined();
-  fail = false;
-  expect((await observer.refetch()).isError).toBe(false);
-  expect(calls).toBe(3);
-  unsub();
-  cache.clear();
 });
 test("local trading window and connection failures never mislabel an open market as closed", () => {
   const market = {

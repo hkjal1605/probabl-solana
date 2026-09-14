@@ -1,5 +1,5 @@
 /** Synthetic test responses only. Never imported by application runtime code. */
-import type { IndexedOrder, MarketView, PositionView, TradeView } from "../../src/lib/api/types";
+import type { IndexedOrder, MarketView, PositionView, TradeView } from "../../src/types/api";
 export const fixtureAccount = "0xde00000000000000000000000000000000000001";
 export const fixtureMarkets: MarketView[] = [
   {

@@ -1,6 +1,6 @@
 import { Button } from "@conditional-stocks/ui-kit/button";
 import Link from "next/link";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 export function MarketRules({ market }: { market: MarketView }) {
   return (
     <div className="space-y-4 p-5">

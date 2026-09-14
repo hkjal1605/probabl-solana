@@ -1,12 +1,8 @@
 "use client";
-import { useQueries } from "@tanstack/react-query";
 import { useWallet } from "@/components/providers/WalletProvider";
-import { protocolConfig } from "@/config/protocol";
-import { api } from "@/lib/api/client";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 import { spotUsdValue } from "@conditional-stocks/shared/spot-prices";
-import { readPollInterval } from "@/lib/api/read-policy";
-import { useReadFreshness } from "./useReadFreshness";
+import { usePositions } from "./useProtocolData";
 
 export function assetsForMarkets(markets: MarketView[]) {
   return [
@@ -39,53 +35,11 @@ export function assetsForMarkets(markets: MarketView[]) {
 }
 export function useWalletAssets(markets: MarketView[]) {
   const { account } = useWallet(),
+    query = usePositions(),
     assets = assetsForMarkets(markets);
-  // One cache entry per account/chain/token: the ticket, Funds and Portfolio share each RPC-backed balance read.
-  const queries = useQueries({
-    queries: assets.map((asset) => ({
-      queryKey: [
-        "whole-balances",
-        account,
-        protocolConfig.genesisHash,
-        protocolConfig.programId,
-        protocolConfig.config,
-        asset.token,
-      ],
-      queryFn: async ({ signal }: { signal: AbortSignal }) => {
-        const balance = await api.balance(account ?? "", asset.token, signal);
-        if (
-          balance.account !== account ||
-          balance.token !== asset.token ||
-          balance.decimals !== asset.decimals ||
-          !/^(0|[1-9][0-9]{0,77})$/.test(balance.canonicalBalance) ||
-          BigInt(balance.canonicalBalance) >= 1n << 64n ||
-          Object.values(balance.creditBalances ?? {}).some(
-            (n) => !/^(0|[1-9][0-9]{0,19})$/.test(n) || BigInt(n) >= 1n << 64n,
-          )
-        )
-          throw new Error("Invalid canonical balance or token metadata.");
-        return balance;
-      },
-      enabled: Boolean(account),
-      refetchInterval: readPollInterval,
-    })),
+  const balances = assets.flatMap((asset) => {
+    const balance = query.data?.owner === account ? query.data.balances[asset.token] : undefined;
+    return balance && balance.decimals === asset.decimals ? [{ ...asset, balance }] : [];
   });
-  const balances = assets.flatMap((asset, index) => {
-    const balance = queries[index]?.data;
-    return balance ? [{ ...asset, balance }] : [];
-  });
-  return {
-    ...useReadFreshness({
-      data: queries.length && queries.every((q) => q.data !== undefined) ? true : undefined,
-      dataUpdatedAt: Math.min(...queries.map((q) => q.dataUpdatedAt)),
-      isError: queries.some((q) => q.isError),
-      failureCount: Math.max(0, ...queries.map((q) => q.failureCount)),
-    }),
-    assets,
-    balances,
-    isPending: queries.some((q) => q.isPending),
-    isFetching: queries.some((q) => q.isFetching),
-    isError: queries.some((q) => q.isError),
-    refetch: () => Promise.all(queries.map((q) => q.refetch())),
-  };
+  return { ...query, assets, balances };
 }

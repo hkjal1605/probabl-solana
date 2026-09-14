@@ -18,7 +18,7 @@ import { DataError, EmptyState, Page, Stat } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/segmented";
 import { useProbabilityStream } from "@/hooks/useProbabilityStream";
 import { useMarkets, useTrades } from "@/hooks/useProtocolData";
-import type { BranchBook, MarketView, TradeView } from "@/lib/api/types";
+import type { BranchBook, MarketView, TradeView } from "@/types/api";
 import { formatNumber, formatTime } from "@/lib/format/display";
 import {
   compact,

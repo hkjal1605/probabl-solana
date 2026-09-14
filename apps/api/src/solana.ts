@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { browserCors } from "./browser-cors";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
 import { Pool } from "pg";
@@ -57,6 +58,7 @@ await db.query(`CREATE TABLE IF NOT EXISTS solana_auth_challenges(id text PRIMAR
 const hash = (v: string) => createHash("sha256").update(v).digest("hex");
 const random = () => randomBytes(32).toString("hex");
 const app = new Hono();
+app.use("*", browserCors(origins));
 app.use("*", requestLogging(logger));
 mountSpotPrices(
   app,

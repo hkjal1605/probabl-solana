@@ -3,7 +3,7 @@ import {
   expireProbability,
   parseProbabilityMessage,
   probabilityStreamUrl,
-} from "../src/lib/api/probability";
+} from "../src/services/probability";
 
 test("probability streams default to the deployed WSS endpoint and preserve explicit overrides", () => {
   expect(probabilityStreamUrl("0x1234")).toBe(

@@ -7,7 +7,7 @@ import {
   parseTokenAmount,
   quoteForReservation,
 } from "@conditional-stocks/domain";
-import { mergeOrderPages } from "../src/lib/api/orders";
+import { mergeOrderPages } from "../src/services/orders";
 import { executionImpact, executionPoints } from "../src/lib/markets/history";
 import { groupMarkets, impactPercent, midpoint } from "../src/lib/markets/presentation";
 import { outcomeLabel, safeExternalUrl } from "../src/lib/markets/resolution";

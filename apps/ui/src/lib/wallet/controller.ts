@@ -283,7 +283,7 @@ export function createWalletController(deps: Dependencies) {
       check();
       if (session) return session.token;
       const challenge = await deps.request<{ challengeId: string; message: string }>(
-        "/api/gateway/auth/challenge",
+        "/v1/auth/challenge",
         { body: { address: owner, origin: deps.origin() } },
       );
       assertSignInChallenge(challenge, owner, deps.deployment, deps.origin());
@@ -295,7 +295,7 @@ export function createWalletController(deps: Dependencies) {
       check();
       const issuedAt = Date.now();
       const result = await deps.request<{ token: string; expiresAtMs?: unknown }>(
-        "/api/gateway/auth/verify",
+        "/v1/auth/verify",
         {
           body: {
             address: owner,

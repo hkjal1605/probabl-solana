@@ -1,6 +1,6 @@
 import { Badge } from "@conditional-stocks/ui-kit/badge";
 import { CircleAlert, CircleCheck, CircleDashed, LockKeyhole, Radio } from "lucide-react";
-import type { DataQuality, MarketLifecycle } from "@/lib/api/types";
+import type { DataQuality, MarketLifecycle } from "@/types/api";
 
 export function LifecycleBadge({ state }: { state: MarketLifecycle }) {
   if (state === "open")

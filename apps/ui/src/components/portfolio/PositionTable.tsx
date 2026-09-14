@@ -14,7 +14,7 @@ import { useUiStore } from "@/components/providers/UiStateProvider";
 import { useWallet } from "@/components/providers/WalletProvider";
 import { DataError, EmptyState } from "@/components/ui/page";
 import { useOrders, usePositions } from "@/hooks/useProtocolData";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 import { formatNumber, tokenAmount } from "@/lib/format/display";
 import { midpoint } from "@/lib/markets/presentation";
 import { RefreshStatus } from "@/components/data/RefreshStatus";

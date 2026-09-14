@@ -6,7 +6,7 @@ import Link from "next/link";
 import { PriceChart } from "@/components/market/PriceChart";
 import { DataError } from "@/components/ui/page";
 import { useMarkets } from "@/hooks/useProtocolData";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 import { formatNumber } from "@/lib/format/display";
 import {
   compact,

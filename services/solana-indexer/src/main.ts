@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { Pool } from "pg";
 import {
   SolanaClient,
@@ -90,6 +91,7 @@ const loop = async () => {
 };
 const running = loop();
 const app = new Hono();
+app.use("*", cors({ origin: "*", allowMethods: ["GET", "OPTIONS"], exposeHeaders: ["Retry-After"], maxAge: 3600 }));
 const state = () => {
   if (!current || lastError || Date.now() - current.observedAt > 15_000)
     throw new Error("Finalized indexer snapshot unavailable");

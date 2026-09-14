@@ -16,7 +16,7 @@ import {
 import { DataError, EmptyState, Page, PageHeading } from "@/components/ui/page";
 import { useMarkets, useOrders, usePositions } from "@/hooks/useProtocolData";
 import { useWalletAssets } from "@/hooks/useWalletAssets";
-import type { IndexedOrder, MarketView } from "@/lib/api/types";
+import type { IndexedOrder, MarketView } from "@/types/api";
 import { formatNumber, shortAddress, tokenAmount } from "@/lib/format/display";
 import { groupMarkets } from "@/lib/markets/presentation";
 import { orderHistoryCsv, wholeReserved } from "@/lib/portfolio/presentation";

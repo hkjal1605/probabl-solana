@@ -5,7 +5,7 @@ import {
   parsePriceRawX18,
   parseTokenAmount,
 } from "@conditional-stocks/domain";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 
 /** Round down to an onchain base step; never exceed the entered quote budget. */
 export function quantityForSpend(spend: string, price: string, market: MarketView): string {

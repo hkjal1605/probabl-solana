@@ -1,8 +1,7 @@
 import { Page, PageHeading } from "@/components/ui/page";
-import { serverApi } from "@/lib/api/server";
 import { FundsPageClient } from "./components/FundsPageClient";
-export async function FundsPageModule() {
-  const markets = await serverApi.markets();
+export function FundsPageModule() {
+  const markets: import("@/types/api").MarketView[] = [];
   return (
     <Page>
       <PageHeading

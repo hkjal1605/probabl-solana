@@ -1,6 +1,6 @@
 "use client";
 import { SolanaClient } from "@conditional-stocks/solana-client";
-import { useQueryClient } from "@tanstack/react-query";
+import { clearWalletStores } from "@/stores/createResourceStore";
 import {
   createContext,
   type ReactNode,
@@ -10,7 +10,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { protocolConfig } from "@/config/protocol";
-import { requestJson } from "@/lib/api/client";
+import { requestJson } from "@/services/protocol-api-service";
 import { createWalletController, type WalletState } from "@/lib/wallet/controller";
 import { browserStorage } from "@/lib/wallet/session";
 
@@ -28,7 +28,6 @@ type WalletValue = WalletState &
 const Context = createContext<WalletValue | null>(null);
 
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const cache = useQueryClient();
   const [controller] = useState(() =>
     createWalletController({
       deployment: protocolConfig,
@@ -37,7 +36,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       origin: () => window.location.origin,
       client: () => new SolanaClient(protocolConfig),
       request: requestJson,
-      clearCache: () => cache.clear(),
+      clearCache: clearWalletStores,
     }),
   );
   const state = useSyncExternalStore(

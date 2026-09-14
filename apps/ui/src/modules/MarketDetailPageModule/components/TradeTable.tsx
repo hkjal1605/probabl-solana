@@ -8,7 +8,7 @@ import {
 } from "@conditional-stocks/ui-kit/table";
 import { EmptyState } from "@/components/ui/page";
 import { protocolConfig } from "@/config/protocol";
-import type { MarketView, TradeView } from "@/lib/api/types";
+import type { MarketView, TradeView } from "@/types/api";
 import {
   displayPrice,
   formatNumber,

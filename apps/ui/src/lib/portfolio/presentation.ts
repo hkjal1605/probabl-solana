@@ -1,5 +1,5 @@
 import { formatPriceRawX18, formatTokenAmount } from "@conditional-stocks/domain";
-import type { IndexedOrder, MarketView } from "@/lib/api/types";
+import type { IndexedOrder, MarketView } from "@/types/api";
 
 export function wholeReserved(token: string, orders: IndexedOrder[], markets: MarketView[]) {
   const byId = new Map(markets.map((m) => [m.id, m]));

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ApiError } from "@/lib/api/client";
+import { ApiError } from "@/services/protocol-api-service";
 import { createActionScope } from "@/lib/trading/action-scope";
 
 /** Serializes wallet prompts and invalidates asynchronous work after identity/form changes or unmount. */

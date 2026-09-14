@@ -1,4 +1,4 @@
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 type MarketWindow = Pick<MarketView, "lifecycle" | "tradingOpen" | "cutoff">;
 export function localTradingStatus(market: MarketWindow, now = Date.now()) {
   const open = Date.parse(market.tradingOpen),

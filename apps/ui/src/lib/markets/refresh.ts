@@ -1,4 +1,4 @@
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 
 /** Retain display-only book rows after a partial refresh, never mark them executable. */
 export function retainBookDisplays(previous: unknown, next: { markets: MarketView[] }) {

@@ -1,6 +1,6 @@
 import { SolanaClient,key,big } from "@conditional-stocks/solana-client";
 import { protocolConfig } from "@/config/protocol";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 export const solana=()=>new SolanaClient(protocolConfig);
 export async function readClaimMarket(market:MarketView){const client=solana();await client.assertNetwork();const m=await client.market(key(market.id));
   if(m.mints[0]!.toBase58()!==market.baseToken||m.mints[1]!.toBase58()!==market.quoteToken

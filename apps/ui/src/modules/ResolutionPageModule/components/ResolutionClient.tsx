@@ -1,14 +1,15 @@
 "use client";
 import { Button } from "@conditional-stocks/ui-kit/button";
-import { useQuery } from "@tanstack/react-query";
+import { useResource } from "@/hooks/useResource";
+import { resolutionStore } from "@/stores/useResolutionStore";
+import { fetchResolution } from "../utils/fetchResolution";
 import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 import { LifecycleBadge } from "@/components/data/StatusBadge";
 import { DataError, EmptyState, Page, PageHeading, Stat } from "@/components/ui/page";
 import { protocolConfig } from "@/config/protocol";
 import { useMarkets } from "@/hooks/useProtocolData";
-import { api } from "@/lib/api/client";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 import { formatTime } from "@/lib/format/display";
 import { outcomeLabel, safeExternalUrl } from "@/lib/markets/resolution";
 import { MarketRules } from "@/modules/MarketDetailPageModule/components/MarketRules";
@@ -71,13 +72,7 @@ export function ResolutionClient({
   );
 }
 function ResolutionCard({ market, selected }: { market: MarketView; selected: boolean }) {
-  const query = useQuery({
-    queryKey: ["resolution", market.id, protocolConfig.chainId],
-    queryFn: ({ signal }) => api.resolution(market.id, signal),
-    // The indexer creates a resolution row only after finalization. Market polling detects that transition.
-    enabled: ["resolved", "redeemable", "archived"].includes(market.lifecycle),
-    refetchInterval: 8000,
-  });
+  const query = useResource(resolutionStore, market.id, (force) => fetchResolution(market.id, force), ["resolved", "redeemable", "archived"].includes(market.lifecycle));
   const resolution = query.data ?? null;
   const index = market.lifecycle === "archived" ? 5 : stages.indexOf(market.lifecycle);
   const evidence = safeExternalUrl(resolution?.evidenceUri),

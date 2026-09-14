@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
-import { parseIndexUpdate, parseStreamWallet, setIndexStreamHealthy } from "../src/lib/api/index-stream";
-import { readPollInterval } from "../src/lib/api/read-policy";
+import { parseIndexUpdate, parseStreamWallet, setIndexStreamHealthy } from "../src/services/index-stream";
+import { readPollInterval } from "../src/services/read-policy";
 afterEach(() => setIndexStreamHealthy(0));
 const owner = PublicKey.unique().toBase58();
 test("healthy SSE disables only covered queries; failure restores polling", () => {

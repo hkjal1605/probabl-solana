@@ -17,7 +17,7 @@ import { DataError, EmptyState } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/segmented";
 import { useOrderRecovery } from "@/hooks/useOrderRecovery";
 import { RefreshStatus } from "@/components/data/RefreshStatus";
-import type { MarketView } from "@/lib/api/types";
+import type { MarketView } from "@/types/api";
 import { displayPrice, formatNumber, shortAddress, tokenAmount } from "@/lib/format/display";
 
 export function OrdersClient({
