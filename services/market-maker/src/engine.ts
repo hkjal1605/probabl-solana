@@ -472,23 +472,27 @@ export class Engine {
             minimumNonce = big(s.traders.get(this.owner.toBase58())?.minimum_nonce ?? bn(0)),
             missing = new Map(
               desired.map((q) => [
-                `${q.branch}:${q.side}:${q.price}:${q.quantity}`,
+                `${q.branch}:${q.side}:${q.price}`,
                 q,
               ]),
             );
           for (const [, existing] of owned(s, this.owner, p.market)) {
             const terms = existing.terms,
-              id = `${terms.branch}:${terms.side}:${big(terms.price)}:${big(existing.remaining)}`;
+              id = `${terms.branch}:${terms.side}:${big(terms.price)}`,
+              target = missing.get(id);
             if (
+              !target ||
               terms.funding !== 1 ||
               terms.tif !== 0 ||
               !terms.recipient.equals(this.owner) ||
               terms.max_fee_bps !== s.config.maker_bps ||
               big(terms.nonce) < minimumNonce ||
               big(terms.expiry) <= now ||
-              !missing.delete(id)
+              big(existing.remaining) <= 0n ||
+              big(existing.remaining) > target.quantity
             )
               throw new Error("Static seed found an incompatible existing order");
+            missing.delete(id);
           }
           const q = missing.values().next().value as Quote | undefined;
           if (!q) break;
