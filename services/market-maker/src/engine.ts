@@ -370,7 +370,30 @@ export class Engine {
     for (const p of this.settings.markets) {
       let stage = "snapshot";
       try {
-        if (p.baseMint === NATIVE_MINT.toBase58()) {
+        if (p.baseMint !== NATIVE_MINT.toBase58()) {
+          const before = await this.view(),
+            market = await this.validateMarket(before, p),
+            held = inventory(before, this.owner, p.market),
+            target = units(p.baseInventory, market.decimals[0]!),
+            needed = target - min(held[2]!, held[3]!);
+          if (needed > 0n) {
+            const deposit = await this.client.depositForCredit(
+              key(p.market),
+              this.owner,
+              market.mints[0]!,
+              0,
+              needed,
+            );
+            if (deposit.fee * BPS > deposit.gross * BigInt(this.settings.maxTransferFeeBps))
+              throw new Error("Issuer transfer fee exceeds static top-up policy");
+            stage = "base-top-up";
+            await this.executor.send([
+              deposit.instruction,
+              this.client.position("split", key(p.market), this.owner, 0, needed),
+            ]);
+            log("static-base-top-up", { market: p.market, amount: needed });
+          }
+        } else {
           const before = await this.view(),
             market = await this.validateMarket(before, p),
             held = inventory(before, this.owner, p.market),
