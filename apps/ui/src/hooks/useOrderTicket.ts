@@ -7,7 +7,7 @@ import {
   parseOrder,
   verifyEnvelope,
 } from "@conditional-stocks/solana-client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@/components/providers/WalletProvider";
 import { toast } from "@/components/ui/toast";
 import { protocolConfig } from "@/config/protocol";
@@ -48,15 +48,30 @@ export function useOrderTicket({ market }: { market: MarketView }) {
   const [quantity, setQuantity] = useState("1"),
     [maxFeeBps, setMaxFeeBps] = useState("0"),
     [price, setPrice] = useState(defaultPrice ?? "");
-  const [preparation, setPreparation] = useState<Preparation | null>(null),
-    [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
-  const { busy, run } = useAsyncAction(
-    [wallet.account, market.id, branch, side, tif, funding, quantity, price, maxFeeBps].join(":"),
-  );
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Editing any signed field invalidates the prior order review.
-  useEffect(() => {
-    setPreparation(null);
-  }, [wallet.account, market.id, branch, side, tif, funding, quantity, price, maxFeeBps]);
+  const context = [
+    wallet.account,
+    market.id,
+    branch,
+    side,
+    tif,
+    funding,
+    quantity,
+    price,
+    maxFeeBps,
+  ].join(":");
+  const revision = useRef({ context, version: 0 });
+  if (revision.current.context !== context)
+    revision.current = { context, version: revision.current.version + 1 };
+  const [review, setReview] = useState<{ context: string; value: Preparation } | null>(null);
+  const preparation = review?.context === context ? review.value : null;
+  const setPreparation = (value: Preparation | null) =>
+    setReview(value ? { context, value } : null);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewNonce, setReviewNonce] = useState(0);
+  const [completedContext, setCompletedContext] = useState<string | null>(null);
+  const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
+  const { busy, run } = useAsyncAction(context);
   useEffect(() => {
     if (!preparation) return;
     const timer = setInterval(() => setNowSeconds(Math.floor(Date.now() / 1000)), 1000);
@@ -66,11 +81,10 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     ? BigInt(preparation.plan.deadline) <= BigInt(nowSeconds)
     : false;
   const preview = useMemo(() => previewOrder(quantity, price, market), [quantity, price, market]);
-  const prepareAction = async (assertCurrent: () => void) => {
-    setPreparation(null);
+  const prepareAction = async (assertCurrent: () => void, background = false) => {
     if (!wallet.account || !preview.valid)
       throw new Error("Connect your wallet and enter a valid quantity and price.");
-    await wallet.ensureNetwork();
+    if (!background) await wallet.ensureNetwork();
     assertCurrent();
     const candidate = parseOrder(
       createOrder({
@@ -88,13 +102,23 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       }),
     );
     const [result, localFunding] = await Promise.all([
-      reviewWithSession({
-        token: wallet.sessionToken,
-        request: (token) =>
-          api.prepare<Omit<Preparation, "funding">>("orders/prepare", { order: candidate }, token),
-        authenticate: wallet.authenticate,
-        assertCurrent,
-      }),
+      background
+        ? api.prepare<Omit<Preparation, "funding">>(
+            "orders/prepare",
+            { order: candidate },
+            wallet.sessionToken ?? undefined,
+          )
+        : reviewWithSession({
+            token: wallet.sessionToken,
+            request: (token) =>
+              api.prepare<Omit<Preparation, "funding">>(
+                "orders/prepare",
+                { order: candidate },
+                token,
+              ),
+            authenticate: wallet.authenticate,
+            assertCurrent,
+          }),
       solana().funding(candidate),
     ]);
     // Funding instructions are built exclusively from locally validated chain
@@ -103,10 +127,76 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     assertCurrent();
     if (result.orderHash !== orderId(candidate) || result.atomicRouter !== protocolConfig.programId)
       throw new Error("API order identity differs.");
+    if (BigInt(result.plan.deadline) <= BigInt(Math.floor(Date.now() / 1000)))
+      throw new Error("The returned quote has already expired. Retry review.");
     setNowSeconds(Math.floor(Date.now() / 1000));
     setPreparation({ ...result, funding: localFunding, order: candidate });
   };
-  const prepare = () => run(prepareAction);
+  const latestPrepare = useRef(prepareAction);
+  latestPrepare.current = prepareAction;
+  const canReview = Boolean(
+    wallet.account &&
+      preview.valid &&
+      readiness.ready &&
+      market.lifecycle === "open" &&
+      completedContext !== context,
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Signed input identity and explicit refresh restart the debounce; streamed market objects do not.
+  useEffect(() => {
+    let active = true;
+    const version = revision.current.version;
+    setReview(null);
+    setReviewError(null);
+    setReviewing(canReview);
+    if (!canReview) return;
+    const assertCurrent = () => {
+      if (!active || revision.current.version !== version) throw new Error("Order inputs changed.");
+    };
+    const timer = setTimeout(async () => {
+      try {
+        assertCurrent();
+        await latestPrepare.current(assertCurrent, true);
+      } catch (error) {
+        if (active && revision.current.version === version)
+          setReviewError(error instanceof Error ? error.message : "Order review failed.");
+      } finally {
+        if (active && revision.current.version === version) setReviewing(false);
+      }
+    }, 500);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [context, canReview, reviewNonce]);
+  useEffect(() => {
+    if (!preparation || busy) return;
+    const remaining = Number(preparation.plan.deadline) * 1000 - Date.now();
+    // Refresh at most every 30s, earlier for short-lived quotes. Never replace
+    // the reviewed plan while a funding/signing action is in progress.
+    const delay = Math.max(
+      500,
+      Math.min(30_000, remaining > 10_000 ? remaining - 5_000 : remaining / 2),
+    );
+    const refresh = () => {
+      if (document.visibilityState !== "hidden") setReviewNonce((value) => value + 1);
+    };
+    const resume = () => {
+      if (document.visibilityState !== "hidden" && Date.now() >= refreshAt) refresh();
+    };
+    const refreshAt = Date.now() + delay;
+    const timer = setTimeout(refresh, delay);
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", resume);
+    };
+  }, [preparation, busy]);
+  const prepare = () =>
+    run(async (assertCurrent) => {
+      setReviewError(null);
+      setPreparation(null);
+      await prepareAction(assertCurrent);
+    });
   const approve = () =>
     run(async (assertCurrent) => {
       if (!preparation?.funding.approvalCall) return;
@@ -123,7 +213,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       await wallet.sendTransaction(fresh.approvalCall);
       toast.add({
         type: "success",
-        title: "Order funding confirmed. Refreshing your execution quote.",
+        title: "Order funding confirmed.",
       });
       setPreparation(null);
       assertCurrent();
@@ -163,6 +253,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
           signature.slice(0, 10) +
           "… Fills and balances update after indexing.",
       });
+      setCompletedContext(context);
       setPreparation(null);
     });
   return {
@@ -183,6 +274,8 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     price,
     setPrice,
     busy,
+    reviewing,
+    reviewError,
     preparation,
     setPreparation,
     quoteExpired,

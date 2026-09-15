@@ -1,7 +1,6 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { RefreshStatus } from "@/components/data/RefreshStatus";
 import { useWallet } from "@/components/providers/WalletProvider";
 
 import { Badge } from "@/components/ui/badge";
@@ -70,7 +69,6 @@ export function OrdersClient({
             : "Showing the most recent order history plus older open orders. Earlier closed orders are not included."}
         </p>
       )}
-      <RefreshStatus active={query.isRefreshError} label="orders" />
       {query.isInitialError ? (
         <DataError
           message="Order history is unavailable. Existing orders are not cancelled."
@@ -79,7 +77,7 @@ export function OrdersClient({
           }}
         />
       ) : query.isPending ? (
-        <LoadingState>Reading canonical orders…</LoadingState>
+        <LoadingState />
       ) : !orders.length ? (
         <EmptyState>
           {view === "Open orders"

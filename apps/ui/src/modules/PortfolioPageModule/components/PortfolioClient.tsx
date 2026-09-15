@@ -2,7 +2,6 @@
 import { ArrowUpRight, Download } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { RefreshStatus } from "@/components/data/RefreshStatus";
 import { LifecycleBadge } from "@/components/data/StatusBadge";
 import { ClaimTable } from "@/components/portfolio/ClaimTable";
 import { PositionTable } from "@/components/portfolio/PositionTable";
@@ -94,15 +93,6 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
         </Card>
       ) : (
         <>
-          <RefreshStatus
-            active={
-              marketQuery.isRefreshError ||
-              assetQuery.isRefreshError ||
-              ordersQuery.isRefreshError ||
-              positionsQuery.isRefreshError
-            }
-            label="portfolio data"
-          />
           {marketQuery.isInitialError && (
             <DataError
               message="Market metadata is unavailable. Asset totals may be incomplete."
@@ -177,9 +167,9 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                   }}
                 />
               )}
-              {!balances.length && (
+              {!balances.length && !assetQuery.isFetching && (
                 <span className="text-sm text-muted-foreground">
-                  {assetQuery.isFetching ? "Reading balances…" : "No supported assets indexed yet."}
+                  No supported assets indexed yet.
                 </span>
               )}
             </div>

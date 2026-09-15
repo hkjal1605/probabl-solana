@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
-import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
 export function Page({
@@ -52,11 +51,20 @@ export function Stat({
   label,
   value,
   className,
+  variant = "default",
 }: {
   label: string;
   value: ReactNode;
   className?: string;
+  variant?: "default" | "market";
 }) {
+  if (variant === "market")
+    return (
+      <div className="flex shrink-0 flex-col gap-1">
+        <div className="text-xs font-medium text-muted-foreground">{label}</div>
+        <div className={cn("text-lg font-medium leading-4 tabular-nums", className)}>{value}</div>
+      </div>
+    );
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <div className={cn("text-lg font-normal leading-5 tabular-nums", className)}>{value}</div>
@@ -71,13 +79,8 @@ export function EmptyState({ children }: { children: ReactNode }) {
     </Empty>
   );
 }
-export function LoadingState({ children = "Loading…" }: { children?: ReactNode }) {
-  return (
-    <Empty className="min-h-40" role="status" aria-busy="true">
-      <Spinner />
-      <EmptyDescription>{children}</EmptyDescription>
-    </Empty>
-  );
+export function LoadingState() {
+  return null;
 }
 export function DataError({
   retry,

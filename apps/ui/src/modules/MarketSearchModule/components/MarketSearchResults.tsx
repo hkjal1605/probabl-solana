@@ -15,7 +15,6 @@ import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { InputGroupAddon } from "@/components/ui/input-group";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
-import { Spinner } from "@/components/ui/spinner";
 import type { MarketView } from "@/types/api";
 import { useDebouncedSearch } from "../hooks/useDebouncedSearch";
 import { normalizeSearch, searchMarkets } from "../utils/searchMarkets";
@@ -67,15 +66,6 @@ export function MarketSearchResults({
           <Search />
         </InputGroupAddon>
       </ComboboxInput>
-      {(loading || waiting) && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex min-h-5 items-center gap-2 text-xs text-muted-foreground"
-        >
-          <Spinner /> {loading ? "Loading markets…" : "Searching…"}
-        </div>
-      )}
       {error && (
         <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
           <span>

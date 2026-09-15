@@ -9,6 +9,17 @@ export interface HistoricalEvent {
   market: string;
   data: Record<string, unknown>;
 }
+/** Timestamp metadata is derived only from finalized on-chain creation events. */
+export function creationTimes(rows: { market: string; block_time: string }[]) {
+  const times = new Map<string, string>();
+  for (const row of rows) {
+    if (!/^\d+$/.test(row.block_time)) continue;
+    const seconds = Number(row.block_time);
+    if (!Number.isSafeInteger(seconds) || seconds <= 0 || seconds > 253402300799) continue;
+    times.set(row.market, new Date(seconds * 1000).toISOString());
+  }
+  return times;
+}
 function jsonValue(value: unknown): unknown {
   if (BN.isBN(value)) return value.toString();
   if (value instanceof PublicKey) return value.toBase58();

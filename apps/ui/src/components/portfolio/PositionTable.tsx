@@ -2,7 +2,6 @@
 
 import { formatTokenAmount } from "@conditional-stocks/domain";
 import { useRouter } from "next/navigation";
-import { RefreshStatus } from "@/components/data/RefreshStatus";
 import { useUiStore } from "@/components/providers/UiStateProvider";
 import { useWallet } from "@/components/providers/WalletProvider";
 import { Button } from "@/components/ui/button";
@@ -51,9 +50,7 @@ export function PositionTable({
         Available wallet claims can still be managed in the Claims tab.
       </EmptyState>
     );
-  if (positions.isPending || orders.isPending)
-    return <LoadingState>Reading positions…</LoadingState>;
-  const refreshing = positions.isRefreshError || orders.isRefreshError;
+  if (positions.isPending || orders.isPending) return <LoadingState />;
   const rows = markets
     .flatMap((market) =>
       ([0, 1] as const).map((branch) => {
@@ -73,19 +70,9 @@ export function PositionTable({
       }),
     )
     .filter((row) => row.total > 0n);
-  if (!rows.length)
-    return (
-      <>
-        <RefreshStatus active={refreshing} label="positions" />
-        <EmptyState>
-          {positions.isPending ? "Reading positions…" : "No stock positions in this event yet."}
-        </EmptyState>
-      </>
-    );
+  if (!rows.length) return <EmptyState>No stock positions in this event yet.</EmptyState>;
   return (
-    <>
-      <RefreshStatus active={refreshing} label="positions" />
-      <Table>
+    <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Token</TableHead>
@@ -155,7 +142,6 @@ export function PositionTable({
             </TableRow>
           ))}
         </TableBody>
-      </Table>
-    </>
+    </Table>
   );
 }

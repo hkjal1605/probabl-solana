@@ -59,7 +59,7 @@ test("search keeps distinct market identities and limits rendering without hidin
 
 test("search uses the existing catalogue rather than adding per-query requests or a polling hook", async () => {
   const source = await readFile(
-    new URL("../src/modules/MarketSearchModule/hooks/useSearchMarkets.ts", import.meta.url),
+    new URL("../src/hooks/useMarketCatalogue.ts", import.meta.url),
     "utf8",
   );
   expect(source).toContain('marketsStore.get("all").data === undefined');

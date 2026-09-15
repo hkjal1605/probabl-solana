@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { SolanaClient,key,PROGRAM_ID,coder } from "@conditional-stocks/solana-client";
 import {
   formatPriceRawX18,
@@ -10,6 +12,7 @@ import {
 import { mergeOrderPages } from "../src/services/orders";
 import { executionImpact, executionPoints } from "../src/lib/markets/history";
 import { groupMarkets, impactPercent, midpoint } from "../src/lib/markets/presentation";
+import { OutcomePrice } from "../src/components/market/OutcomePrice";
 import { outcomeLabel, safeExternalUrl } from "../src/lib/markets/resolution";
 import { csvCell, orderHistoryCsv, wholeReserved } from "../src/lib/portfolio/presentation";
 import { createActionScope } from "../src/lib/trading/action-scope";
@@ -182,15 +185,50 @@ describe("honest market, portfolio and evidence presentation", () => {
       }),
     ).toBe(100);
   });
-  test("event grouping cannot mix different evidence mappings, trading windows or lifecycle states", () => {
+  test("market card labels one-sided executable quotes without inventing a midpoint", () => {
+    const askOnly = renderToStaticMarkup(
+      createElement(OutcomePrice, {
+        market: { ...market, yes: { ...market.yes, bestBid: null } },
+        branch: "YES",
+      }),
+    );
+    expect(askOnly).toContain("Ask");
+    expect(askOnly).not.toContain("spot impact unavailable</span>");
+    const crossed = renderToStaticMarkup(
+      createElement(OutcomePrice, {
+        market: { ...market, yes: { ...market.yes, bestBid: 101, bestAsk: 100 } },
+        branch: "YES",
+      }),
+    );
+    expect(crossed).not.toContain("Ask</span>");
+    expect(crossed).toContain("—");
+  });
+  test("event grouping follows immutable Polymarket identity across local windows and states", () => {
     const pair = { ...market, id: `0x${"12".repeat(32)}`, ticker: "TSLA" };
     expect(groupMarkets([market, pair])).toHaveLength(1);
-    for (const other of [
-      { ...pair, cutoff: "different" },
-      { ...pair, lifecycle: "resolved" as const },
-      { ...pair, mapping: { ...pair.mapping, noIndex: "4" } },
-    ])
-      expect(groupMarkets([market, other])).toHaveLength(2);
+    expect(groupMarkets([market, { ...pair, cutoff: "different" }])).toHaveLength(1);
+    expect(groupMarkets([market, { ...pair, lifecycle: "resolved" as const }])).toHaveLength(1);
+    expect(
+      groupMarkets([market, { ...pair, mapping: { ...pair.mapping, noIndex: "4" } }]),
+    ).toHaveLength(2);
+    expect(
+      groupMarkets([
+        market,
+        { ...pair, mapping: { ...pair.mapping, conditionId: `0x${"34".repeat(32)}` } },
+      ]),
+    ).toHaveLength(2);
+  });
+  test("event grouping deduplicates retried markets for the same asset", () => {
+    const retry = {
+      ...market,
+      id: `0x${"99".repeat(32)}`,
+      tradingOpen: "2099-02-01T00:00:00.000Z",
+    };
+    const [group] = groupMarkets([retry, market]);
+    expect(group).toHaveLength(1);
+    expect(group?.[0]?.id).toBe(market.id);
+    const frozen = { ...market, lifecycle: "frozen" as const };
+    expect(groupMarkets([frozen, retry])[0]?.[0]?.id).toBe(retry.id);
   });
   test("whole-asset reservations exclude claim collateral and closed orders", () => {
     const order = {

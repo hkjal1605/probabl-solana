@@ -48,6 +48,7 @@ export interface MarketView extends MarketUnits {
   baseTokenMetadata?: TokenDisplayMetadata;
   quoteTokenMetadata?: TokenDisplayMetadata;
   cutoff: string;
+  createdAt?: string | null;
   description: string;
   eventImpact: number | null;
   id: string;

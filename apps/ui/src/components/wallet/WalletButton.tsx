@@ -137,12 +137,10 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
           }),
         )
       }
-      aria-label={connecting ? "Restoring wallet connection" : "Connect wallet"}
+      aria-label="Connect wallet"
     >
       {connecting ? <Spinner data-icon="inline-start" /> : <WalletCards data-icon="inline-start" />}
-      {!compact && (
-        <span className="hidden sm:inline">{connecting ? "Connecting…" : "Connect wallet"}</span>
-      )}
+      {!compact && <span className="hidden sm:inline">Connect wallet</span>}
     </Button>
   );
 }

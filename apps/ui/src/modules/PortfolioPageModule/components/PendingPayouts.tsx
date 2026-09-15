@@ -57,7 +57,7 @@ export function PendingPayouts({ markets }: { markets: MarketView[] }) {
             <AlertDescription>{credits.error?.message}</AlertDescription>
           </Alert>
         ) : credits.isPending ? (
-          <LoadingState>Reading pending payouts…</LoadingState>
+          <LoadingState />
         ) : rows.length === 0 ? (
           <EmptyState>No pending payouts.</EmptyState>
         ) : (
@@ -201,7 +201,7 @@ function WithdrawPayout({ credit, symbol }: { credit: PayoutCreditView; symbol: 
         </p>
         <Button variant="default" onClick={submit} disabled={busy}>
           {busy && <Spinner data-icon="inline-start" />}
-          {busy ? "Preparing withdrawal…" : "Confirm withdrawal"}
+          Confirm withdrawal
         </Button>
       </DialogContent>
     </Dialog>

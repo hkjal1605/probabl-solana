@@ -1,7 +1,4 @@
 import { expect, test } from "bun:test";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { RefreshStatus } from "../src/components/data/RefreshStatus";
 import { retainBookDisplays } from "../src/lib/markets/refresh";
 import { marketPriceBound } from "../src/lib/trading/entry";
 import {
@@ -128,14 +125,4 @@ test("partial book refresh retains rows only for identical assets, without makin
     retainBookDisplays({ markets: [market] }, { markets: [{ ...next, baseToken: "different" }] })
       .markets[0]!.yes,
   ).toBe(next.yes);
-});
-test("refresh notices reserve layout space and do not become error alerts or toast messages", () => {
-  const render = (active: boolean) =>
-    renderToStaticMarkup(createElement(RefreshStatus, { active, label: "positions" }));
-  expect(render(false)).toContain("min-h-4");
-  expect(render(true)).toContain("min-h-4");
-  expect(render(false)).not.toContain("Reconnecting");
-  expect(render(true)).toContain("last-known positions");
-  expect(render(true)).toContain('role="status"');
-  expect(render(true)).not.toMatch(/role="alert"|text-danger/);
 });

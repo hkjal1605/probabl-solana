@@ -1,5 +1,7 @@
 {
   "markets": [],
+  "quoteLevels": 1,
+  "levelSpacingBps": 25,
   "halfSpreadBps": 60,
   "adverseSelectionBps": 25,
   "maxHalfSpreadBps": 1500,

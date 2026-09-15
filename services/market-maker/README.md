@@ -24,8 +24,10 @@ centers equal spot until a scenario view is configured. It does **not** claim th
 the event has no economic effect. Do not infer that effect from the bot's own
 quotes or a thin, manipulable local midpoint.
 
-One bid and one ask per branch surround these centers. Prices round outward to
-the market tick; sizes round down to its lot size. All token amounts, fees, caps,
+One or more ranked bids and asks per branch surround these centers. Each deeper
+level is separated by `levelSpacingBps`; the configured `orderQuote` is divided
+across the ladder rather than multiplied by its number of levels. Prices round
+outward to the market tick; sizes round down to its lot size. All token amounts, fees, caps,
 probability arithmetic and order prices use integers. Numeric reference prices
 are converted once to fixed precision; they are still indicative, not executable
 quotes. The paired centers preserve the equation to sub-tick rounding accuracy.
@@ -97,7 +99,8 @@ stopping the bot; this service does not automatically liquidate or settle.
 | --- | --- |
 | `market`, `baseMint`, `quoteMint` | Exact allowlisted identities; all three must match chain state. |
 | `baseInventory`, `quoteInventory` | One-time whole-token seed amounts, in normal decimal units. Splitting does not double their economic value. |
-| `orderQuote` | Maximum conditional-quote notional per order, at most 25% of seed quote inventory. Contract caps can reduce it. |
+| `orderQuote` | Maximum aggregate conditional-quote notional per branch/side ladder, at most 25% of seed quote inventory. Contract caps can reduce it. |
+| `quoteLevels`, `levelSpacingBps` | Number of ranked prices per branch/side (1–5) and outward gap between neighboring levels. More levels multiply order-account rent, not economic collateral. |
 | `gapBps` | Signed scenario price difference relative to spot, bounded to ±7500. Zero is the neutral prior. |
 | `basePriceMultiplier`, `quotePriceMultiplier` | Reviewed multiplier from each reference-price unit to one raw token unit divided by `10^decimals`. Never infer scaled stock units from a ticker. |
 

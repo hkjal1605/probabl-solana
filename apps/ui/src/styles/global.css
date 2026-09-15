@@ -21,6 +21,7 @@
   --muted: #f0f3f6;
   --muted-foreground: #616977;
   --accent: #e9eef3;
+  --chart-control-active: #e9eef3;
   --accent-foreground: #1b1f23;
   --destructive: #b12e44;
   --border: #e1e5eb;
@@ -76,6 +77,7 @@
   --muted: #0d0f12;
   --muted-foreground: #9096a5;
   --accent: #151a1e;
+  --chart-control-active: #23272d;
   --accent-foreground: #f0f3f6;
   --destructive: #f97782;
   --border: #1b1f23;
@@ -213,6 +215,8 @@
 }
 
 @source "../";
+/* Keep chart-selector utilities in CSS even when the dev scanner caches component variants. */
+@source inline("p-[3px] h-[18px] hover:bg-(--chart-control-active) aria-pressed:bg-(--chart-control-active) aria-pressed:font-bold");
 
 @layer components {
   .eyebrow {
@@ -235,6 +239,223 @@
 }
 
 @layer utilities {
+  .trade-order-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+  .trade-order-details > div:not([data-slot="separator"]) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 16px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    color: var(--muted-foreground);
+  }
+  .trade-order-details > div:first-child {
+    padding: 4px 0;
+  }
+  .trade-order-details > div > span:last-child {
+    min-width: 0;
+    text-align: right;
+    overflow-wrap: anywhere;
+    color: var(--foreground);
+  }
+  .trade-entry-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 -8px;
+  }
+  .trade-entry-card[data-slot="card"] {
+    padding: 8px;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: none;
+    background: transparent;
+  }
+  .trade-entry-card > [data-slot="card-content"] {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0;
+  }
+  .trade-entry-estimate {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 8px;
+    font-size: 13px;
+    line-height: 16px;
+    color: var(--muted-foreground);
+  }
+  .trade-entry-estimate > span {
+    font-size: 12px;
+  }
+  .trade-entry-submit[data-slot="button"] {
+    height: 40px;
+    font-size: 14px;
+    line-height: 16px;
+    font-weight: 500;
+  }
+  .trade-entry-field[data-slot="field"] {
+    gap: 8px;
+  }
+  .trade-entry-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px 8px;
+    min-height: 28px;
+  }
+  .trade-entry-section > .trade-entry-heading {
+    padding: 0 8px;
+  }
+  .trade-entry-token-icon[data-slot="avatar"] {
+    width: 16px;
+    height: 16px;
+  }
+  .trade-entry-heading [data-slot="field-label"] {
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--muted-foreground);
+  }
+  .trade-amount-input[data-slot="input-group"] {
+    height: auto;
+    min-height: 28px;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .trade-amount-input[data-slot="input-group"]:focus-within {
+    background: var(--secondary);
+  }
+  .trade-amount-input[data-slot="input-group"] [data-slot="input-group-control"] {
+    field-sizing: content;
+    flex: 0 1 auto;
+    width: auto;
+    min-width: 1ch;
+    height: 28px;
+    padding: 0;
+    font-size: 24px;
+    line-height: 28px;
+    font-weight: 500;
+  }
+  .trade-amount-input [data-slot="input-group-addon"] {
+    flex-shrink: 0;
+    padding: 0;
+  }
+  .trade-amount-input [data-slot="input-group-text"] {
+    font-size: 24px;
+    line-height: 28px;
+    font-weight: 500;
+    color: var(--muted-foreground);
+  }
+  .trade-branch-selector [data-slot="toggle-group-item"][aria-pressed="true"] {
+    border-color: color-mix(in srgb, var(--positive) 45%, var(--border));
+    background-color: var(--card);
+    background-image: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--positive) 26%, transparent),
+      color-mix(in srgb, var(--positive) 7%, transparent)
+    );
+  }
+  .trade-branch-selector [data-slot="toggle-group-item"][aria-pressed="true"]:nth-child(2) {
+    border-color: color-mix(in srgb, var(--destructive) 45%, var(--border));
+    background-image: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--destructive) 26%, transparent),
+      color-mix(in srgb, var(--destructive) 7%, transparent)
+    );
+  }
+  .trade-side-selector[data-slot="toggle-group"] {
+    width: 100%;
+    gap: 0;
+    border-radius: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .trade-side-selector [data-slot="toggle-group-item"] {
+    height: 60px;
+    min-width: 0;
+    padding: 0 24px;
+    border-radius: 0;
+    border-top: 2px solid transparent;
+    background: transparent;
+    font-size: var(--text-base);
+    line-height: 16px;
+    font-weight: 500;
+  }
+  .trade-side-selector [data-slot="toggle-group-item"][aria-pressed="true"] {
+    border-top-color: var(--positive);
+    background: var(--card);
+    color: var(--foreground);
+    box-shadow:
+      0 1px var(--card),
+      inset -1px 0 var(--border);
+  }
+  .trade-side-selector [data-slot="toggle-group-item"][aria-pressed="true"]:nth-child(2) {
+    border-top-color: var(--destructive);
+    box-shadow:
+      0 1px var(--card),
+      inset 1px 0 var(--border),
+      inset -1px 0 var(--border);
+  }
+  @media (min-width: 900px) {
+    .market-workspace-grid {
+      grid-template-columns: minmax(0, 1fr) 320px;
+      grid-template-rows: auto auto auto 1fr;
+    }
+    .market-workspace-stats {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    .market-workspace-chart {
+      grid-column: 1;
+      grid-row: 2;
+    }
+    .market-workspace-book {
+      grid-column: 1;
+      grid-row: 3;
+    }
+    .market-workspace-information {
+      grid-column: 1;
+      grid-row: 4;
+    }
+    .market-workspace-ticket {
+      grid-column: 2;
+      grid-row: 1 / 5;
+    }
+  }
+  @media (min-width: 1280px) {
+    .market-workspace-grid {
+      grid-template-columns: minmax(0, 1fr) 280px 320px;
+      grid-template-rows: auto minmax(0, 3fr) minmax(0, 2fr);
+    }
+    .market-workspace-stats {
+      grid-column: 1 / 3;
+    }
+    .market-workspace-book {
+      grid-column: 2;
+      grid-row: 2;
+    }
+    .market-workspace-information {
+      grid-column: 1 / 3;
+      grid-row: 3;
+    }
+    .market-workspace-ticket {
+      grid-column: 3;
+      grid-row: 1 / 4;
+    }
+  }
   .price-grid {
     background-image:
       linear-gradient(

@@ -1,5 +1,6 @@
 import type { SpotPrice } from "@conditional-stocks/shared/spot-prices";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { Stat } from "@/components/ui/page";
 
 export function formatSpotUsd(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -9,7 +10,13 @@ export function formatSpotUsd(value: number) {
   }).format(value);
 }
 
-export function SpotReference({ price }: { price: SpotPrice | undefined }) {
+export function SpotReference({
+  price,
+  variant = "default",
+}: {
+  price: SpotPrice | undefined;
+  variant?: "default" | "market";
+}) {
   const status = price?.status;
   const label =
     status === "available"
@@ -28,10 +35,20 @@ export function SpotReference({ price }: { price: SpotPrice | undefined }) {
       }
     >
       <div className="flex flex-col gap-1">
-        <div className="text-lg font-normal leading-5 tabular-nums">
-          {price?.priceUsd ? formatSpotUsd(price.priceUsd) : "—"}
-        </div>
-        <div className="text-xs text-muted-foreground">Spot reference · USD</div>
+        {variant === "market" ? (
+          <Stat
+            variant="market"
+            label="Spot"
+            value={price?.priceUsd ? formatSpotUsd(price.priceUsd) : "—"}
+          />
+        ) : (
+          <>
+            <div className="text-lg font-normal leading-5 tabular-nums">
+              {price?.priceUsd ? formatSpotUsd(price.priceUsd) : "—"}
+            </div>
+            <div className="text-xs text-muted-foreground">Spot reference · USD</div>
+          </>
+        )}
         {label && (
           <div className="text-xs text-muted-foreground">
             {label}

@@ -3,7 +3,7 @@ import { createStore } from "zustand/vanilla";
 export type DiscoveryFilters = {
   category: string;
   lifecycle: "active" | "resolving" | "all";
-  sort: "depth" | "impact" | "cutoff";
+  sort: "newest" | "oldest";
   view: "Feed" | "Matrix";
 };
 export type OrderPrefill = {
@@ -15,7 +15,7 @@ export type OrderPrefill = {
 export const defaultFilters: DiscoveryFilters = {
   category: "All",
   lifecycle: "active",
-  sort: "depth",
+  sort: "newest",
   view: "Feed",
 };
 

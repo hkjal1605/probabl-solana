@@ -48,38 +48,44 @@ export function quoteChange(
   s: Settings,
   live?: { makerBps: number; minimumNonce: bigint },
 ): { cancel?: string; quote?: Quote } | undefined {
-  for (const [id, o] of current) {
-    const target = desired.find((q) => q.branch === o.terms.branch && q.side === o.terms.side);
-    const duplicate = current.find(
-      ([otherId, other]) =>
-        otherId !== id &&
-        other.terms.branch === o.terms.branch &&
-        other.terms.side === o.terms.side,
-    );
-    if (
-      !target ||
-      duplicate ||
-      o.terms.funding !== 1 ||
-      o.terms.tif !== 0 ||
-      !o.terms.recipient.equals(o.owner)
-    )
-      return { cancel: id };
-    if (
-      (live && (o.terms.max_fee_bps !== live.makerBps || big(o.terms.nonce) < live.minimumNonce)) ||
-      big(o.remaining) > target.quantity ||
-      needsReplace(
-        { price: big(o.terms.price), remaining: big(o.remaining), expiry: big(o.terms.expiry) },
-        target,
-        now,
-        s,
-      )
-    )
-      return { cancel: id, quote: target };
-  }
-  const missing = desired.find(
-    (q) => !current.some(([, o]) => o.terms.branch === q.branch && o.terms.side === q.side),
-  );
-  return missing ? { quote: missing } : undefined;
+  for (const branch of [0, 1] as const)
+    for (const side of [0, 1] as const) {
+      const ranked = current
+          .filter(([, o]) => o.terms.branch === branch && o.terms.side === side)
+          .sort(([, a], [, b]) => {
+            const ap = big(a.terms.price),
+              bp = big(b.terms.price);
+            return ap === bp ? 0 : (ap > bp ? -1 : 1) * (side === 0 ? 1 : -1);
+          }),
+        targets = desired
+          .filter((q) => q.branch === branch && q.side === side)
+          .sort((a, b) => a.level - b.level);
+      for (let level = 0; level < ranked.length; level++) {
+        const [id, o] = ranked[level]!,
+          target = targets[level];
+        if (
+          !target ||
+          o.terms.funding !== 1 ||
+          o.terms.tif !== 0 ||
+          !o.terms.recipient.equals(o.owner)
+        )
+          return { cancel: id };
+        if (
+          (live &&
+            (o.terms.max_fee_bps !== live.makerBps || big(o.terms.nonce) < live.minimumNonce)) ||
+          big(o.remaining) > target.quantity ||
+          needsReplace(
+            { price: big(o.terms.price), remaining: big(o.remaining), expiry: big(o.terms.expiry) },
+            target,
+            now,
+            s,
+          )
+        )
+          return { cancel: id, quote: target };
+      }
+      if (ranked.length < targets.length) return { quote: targets[ranked.length]! };
+    }
+  return undefined;
 }
 export function passiveOrder(
   owner: PublicKey,
@@ -243,7 +249,7 @@ export class Engine {
       let stage = "snapshot";
       try {
         // Serial, atomic cancel/replace. Re-read balances, book sequence and feeds for each action.
-        for (let step = 0; step < 4 && !this.stopped; step++) {
+        for (let step = 0; step < 4 * this.settings.quoteLevels && !this.stopped; step++) {
           stage = "market-and-token-validation";
           const s = await this.view(),
             m = await this.validateMarket(s, p);
@@ -323,6 +329,7 @@ export class Engine {
               order: orderId(o, this.client.program),
               branch: q.branch,
               side: q.side,
+              level: q.level,
               price: q.price,
               quantity: q.quantity,
             });

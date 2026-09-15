@@ -85,6 +85,14 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
         ],
       }
     : await json<{ markets: Record<string, unknown>[] }>(`${upstreamUrl("indexer")}/markets`);
+  const batch = marketId
+    ? null
+    : await json<{
+        books: Record<
+          string,
+          { orders: Record<string, unknown>[]; truncated?: boolean; unavailable?: boolean }
+        >;
+      }>(`${upstreamUrl("indexer")}/orderbooks`).catch(() => null);
   return Promise.all(
     marketResponse.markets.map(async (market): Promise<MarketView> => {
       assertMarketUnits(market);
@@ -93,9 +101,11 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
         json<Record<string, unknown>>(`${upstreamUrl("api")}/v1/markets/${id}/polymarket`).catch(
           () => ({}),
         ),
-        json<{ orders: Record<string, unknown>[]; truncated?: boolean; unavailable?: boolean }>(
-          `${upstreamUrl("indexer")}/orderbook/${id}?limit=2000`,
-        ).catch(() => ({ orders: [], unavailable: true, truncated: false })),
+        marketId
+          ? json<{ orders: Record<string, unknown>[]; truncated?: boolean; unavailable?: boolean }>(
+              `${upstreamUrl("indexer")}/orderbook/${id}?limit=2000`,
+            ).catch(() => ({ orders: [], unavailable: true, truncated: false }))
+          : Promise.resolve(batch?.books?.[id] ?? { orders: [], unavailable: true, truncated: false }),
       ]);
       const attachedRecord = record(attached);
       const metadata = record(record(attachedRecord.metadata).normalized);
@@ -139,6 +149,7 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
         bookQuality: book.unavailable ? "unavailable" : book.truncated ? "truncated" : "available",
         baseToken: text(market.baseToken),
         cutoff: isoSeconds(market.tradingCutoff),
+        createdAt: text(market.createdAt) || null,
         description: text(
           metadata.rules,
           "Immutable conditional stock market with manual resolution.",

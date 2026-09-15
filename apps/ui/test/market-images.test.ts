@@ -20,6 +20,7 @@ test("market reads include saved artwork, including legacy raw snapshots, withou
         if (path === "/markets")
           return Response.json({ markets: [{ ...fixtureMarkets[0], state: 2 }] });
         if (path.endsWith("/polymarket")) return Response.json({ metadata });
+        if (path === "/orderbooks") return Response.json({ books: {} });
         if (path.startsWith("/orderbook/")) return Response.json({ orders: [] });
         throw new Error(`Unexpected request: ${path}`);
       }) as typeof fetch;

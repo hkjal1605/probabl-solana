@@ -52,6 +52,29 @@ test("quotes round outward, respect tick/step, inventory, notional and fee margi
     ).toBe(true);
   }
 });
+test("multi-level ladders use distinct prices without multiplying the per-side budget", () => {
+  const i = input();
+  i.settings = settings({
+    markets: [policy],
+    quoteLevels: 3,
+    levelSpacingBps: 40,
+  });
+  const result = quotes(i);
+  expect(result).toHaveLength(12);
+  for (const branch of [0, 1] as const)
+    for (const side of [0, 1] as const) {
+      const ladder = result.filter((q) => q.branch === branch && q.side === side);
+      expect(ladder.map((q) => q.level)).toEqual([0, 1, 2]);
+      expect(new Set(ladder.map((q) => q.price)).size).toBe(3);
+      expect(ladder.reduce((sum, q) => sum + quote(q.quantity, q.price, true), 0n)).toBeLessThanOrEqual(
+        i.orderQuote,
+      );
+      if (side === 1)
+        expect(ladder.reduce((sum, q) => sum + q.quantity, 0n)).toBeLessThanOrEqual(
+          i.balances[2 + branch]!,
+        );
+    }
+});
 test("missing inventory never produces unbacked quotes; inventory caps stop accumulating buys", () => {
   const i = input();
   i.balances.fill(0n);
@@ -93,6 +116,7 @@ test("configuration is fail-closed for missing unit review, duplicate markets an
     { markets: [policy, policy] },
     { markets: [{ ...policy, basePriceMultiplier: undefined }] },
     { markets: [policy], pollMs: 60000, ttlSeconds: 30 },
+    { markets: [policy], quoteLevels: 5, levelSpacingBps: 500, maxHalfSpreadBps: 1000 },
     { markets: [policy], halfSpreadBps: NaN },
     { markets: [{ ...policy, orderQuote: "100" }] },
   ])

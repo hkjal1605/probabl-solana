@@ -81,11 +81,7 @@ export function ResolutionClient({
       </div>
       {!markets.length && !query.isError && (
         <Card variant="panel">
-          {query.isFetching ? (
-            <LoadingState>Reading markets…</LoadingState>
-          ) : (
-            <EmptyState>No markets are indexed.</EmptyState>
-          )}
+          {query.isFetching ? <LoadingState /> : <EmptyState>No markets are indexed.</EmptyState>}
         </Card>
       )}
     </Page>

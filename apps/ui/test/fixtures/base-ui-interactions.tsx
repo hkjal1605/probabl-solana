@@ -141,7 +141,7 @@ test("search debounces input, clears obsolete options, and supports keyboard sel
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
   expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
-  expect(document.body.textContent).toContain("Searching…");
+  expect(document.body.textContent).not.toContain("Searching");
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
   });

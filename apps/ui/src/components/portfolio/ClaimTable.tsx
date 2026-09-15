@@ -1,5 +1,4 @@
 "use client";
-import { RefreshStatus } from "@/components/data/RefreshStatus";
 import { useWallet } from "@/components/providers/WalletProvider";
 import { DataError, EmptyState, LoadingState } from "@/components/ui/page";
 import {
@@ -28,19 +27,11 @@ export function ClaimTable({ markets }: { markets: MarketView[] }) {
         message="Claim balances are unavailable."
       />
     );
-  if (query.isPending) return <LoadingState>Reading canonical claims…</LoadingState>;
+  if (query.isPending) return <LoadingState />;
   const rows = query.positions.filter((p) => markets.some((m) => m.id === p.marketId));
-  if (!rows.length)
-    return (
-      <>
-        <RefreshStatus active={query.isRefreshError} label="claims" />
-        <EmptyState>No indexed conditional claims yet.</EmptyState>
-      </>
-    );
+  if (!rows.length) return <EmptyState>No indexed conditional claims yet.</EmptyState>;
   return (
-    <>
-      <RefreshStatus active={query.isRefreshError} label="claims" />
-      <Table>
+    <Table>
         <TableHeader>
           <TableRow>
             <TableHead>Asset</TableHead>
@@ -82,7 +73,6 @@ export function ClaimTable({ markets }: { markets: MarketView[] }) {
             );
           })}
         </TableBody>
-      </Table>
-    </>
+    </Table>
   );
 }

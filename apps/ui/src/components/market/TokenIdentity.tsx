@@ -6,10 +6,12 @@ export function TokenIdentity({
   symbol,
   metadata,
   showName = true,
+  iconSize = "default",
 }: {
   symbol: string;
   metadata?: TokenDisplayMetadata | undefined;
   showName?: boolean;
+  iconSize?: "sm" | "default";
 }) {
   return (
     <InfoTooltip
@@ -17,7 +19,7 @@ export function TokenIdentity({
     >
       <span className="inline-flex min-w-0 max-w-full items-center gap-2 align-middle">
         {metadata && (
-          <Avatar>
+          <Avatar size={iconSize}>
             <AvatarImage src={metadata.image} alt="" />
             <AvatarFallback>{symbol.slice(0, 2)}</AvatarFallback>
           </Avatar>

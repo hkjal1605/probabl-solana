@@ -30,6 +30,7 @@ test("quote diff removes duplicates, expired and disallowed orders, and atomical
     q = {
       branch: 0 as const,
       side: 0 as const,
+      level: 0,
       price: BigInt(o.terms.price.toString()),
       quantity: 1000000n,
     };
@@ -46,15 +47,55 @@ test("quote diff removes duplicates, expired and disallowed orders, and atomical
       1n,
       config,
     ),
-  ).toEqual({ cancel: "a" });
+  ).toEqual({ cancel: "b" });
   expect(quoteChange([["a", o]], [{ ...q, quantity: 999999n }], 1n, config)?.cancel).toBe("a");
   expect(
     quoteChange([["a", { ...o, terms: { ...o.terms, funding: 0 } }]], [q], 1n, config),
   ).toEqual({ cancel: "a" });
 });
+test("ranked quote diff retains independent bid and ask ladder levels", () => {
+  const ladder = {
+    bid: [
+      { branch: 0 as const, side: 0 as const, level: 0, price: 1_000_000n, quantity: 1_000_000n },
+      { branch: 0 as const, side: 0 as const, level: 1, price: 900_000n, quantity: 1_000_000n },
+      { branch: 0 as const, side: 0 as const, level: 2, price: 800_000n, quantity: 1_000_000n },
+    ],
+    ask: [
+      { branch: 0 as const, side: 1 as const, level: 0, price: 1_100_000n, quantity: 1_000_000n },
+      { branch: 0 as const, side: 1 as const, level: 1, price: 1_200_000n, quantity: 1_000_000n },
+    ],
+  };
+  const desired = [...ladder.bid, ...ladder.ask];
+  const resting = (price: bigint, side: number) => ({
+    ...order(0, side),
+    terms: { ...order(0, side).terms, price: bn(price) },
+  });
+  const current: [string, ReturnType<typeof order>][] = [
+    ["outer-bid", resting(800_000n, 0)],
+    ["best-bid", resting(1_000_000n, 0)],
+    ["mid-bid", resting(900_000n, 0)],
+    ["outer-ask", resting(1_200_000n, 1)],
+    ["best-ask", resting(1_100_000n, 1)],
+  ];
+  expect(quoteChange(current, desired, 1n, config)).toBeUndefined();
+  expect(quoteChange(current.slice(1), desired, 1n, config)).toEqual({ quote: ladder.bid[2]! });
+  expect(quoteChange(current, desired.slice(0, 3), 1n, config)).toEqual({ cancel: "best-ask" });
+  const changed = [...desired];
+  changed[1] = { ...changed[1]!, price: 700_000n };
+  expect(quoteChange(current, changed, 1n, config)).toEqual({
+    cancel: "mid-bid",
+    quote: changed[1],
+  });
+});
 test("passive orders use own recipient, conditional funding, bounded expiry, no matching legs, and fresh salts", () => {
   const s = book(),
-    q = { branch: 0 as const, side: 0 as const, price: reference.spot, quantity: 1000000n };
+    q = {
+      branch: 0 as const,
+      side: 0 as const,
+      level: 0,
+      price: reference.spot,
+      quantity: 1000000n,
+    };
   const a = passiveOrder(owner, id, market, s, q, 120, 1000n),
     b = passiveOrder(owner, id, market, s, q, 120, 1000n);
   expect(a.recipient).toBe(a.maker);
@@ -124,6 +165,7 @@ test("fee changes, nonce invalidation and foreign recipients cannot leave unusab
     q = {
       branch: 0 as const,
       side: 0 as const,
+      level: 0,
       price: BigInt(o.terms.price.toString()),
       quantity: 1000000n,
     };

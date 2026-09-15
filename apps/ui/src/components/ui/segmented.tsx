@@ -16,18 +16,27 @@ export function Segmented<T extends string>({
   onChange: (value: T) => void;
   className?: string;
   disabled?: boolean;
-  variant?: "default" | "category" | "compact";
+  variant?: "default" | "category" | "compact" | "timeframe" | "chart" | "trade";
 }) {
   return (
     <ToggleGroup
       aria-label={label}
       disabled={disabled}
-      variant={variant === "category" ? "category" : "default"}
-      size={variant === "default" ? "default" : variant}
-      spacing={variant === "category" ? 4 : 1}
+      variant={
+        variant === "category" || variant === "timeframe" || variant === "chart"
+          ? variant
+          : "default"
+      }
+      size={variant === "default" || variant === "trade" ? "default" : variant}
+      spacing={variant === "category" ? 4 : variant === "timeframe" ? 0.5 : 1}
       className={cn(
-        variant === "default" ? "rounded-md border border-border p-0.5" : "border-0 p-0",
+        variant === "chart"
+          ? "rounded-xl border border-border p-[3px]"
+          : variant === "default"
+            ? "rounded-md border border-border p-0.5"
+            : "border-0 p-0",
         className,
+        variant === "trade" && "trade-side-selector",
       )}
       value={[value]}
       onValueChange={(next) => {

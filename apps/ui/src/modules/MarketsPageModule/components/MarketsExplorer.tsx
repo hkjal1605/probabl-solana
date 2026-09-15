@@ -1,13 +1,12 @@
 "use client";
 import Link from "next/link";
-import { RefreshStatus } from "@/components/data/RefreshStatus";
 import { EventCard } from "@/components/market/EventCard";
 import { TokenIdentity } from "@/components/market/TokenIdentity";
 import { useUiStore } from "@/components/providers/UiStateProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { DataError, EmptyState, LoadingState, Page } from "@/components/ui/page";
+import { DataError, EmptyState, Page } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/segmented";
 import {
   Select,
@@ -34,6 +33,7 @@ import {
   marketCategory,
   midpoint,
   percent,
+  sortEventGroups,
 } from "@/lib/markets/presentation";
 import type { MarketView } from "@/types/api";
 
@@ -49,9 +49,7 @@ export function MarketsExplorer({
   const filters = useUiStore((s) => s.filters),
     setFilters = useUiStore((s) => s.setFilters);
   const groups = groupMarkets(markets);
-  const depth = (assets: MarketView[]) =>
-    assets.reduce((sum, m) => sum + m.yes.depthUsd + m.no.depthUsd, 0);
-  const visible = groups
+  const visible = sortEventGroups(groups
     .filter((assets) =>
       assets.some(
         (m) =>
@@ -59,15 +57,7 @@ export function MarketsExplorer({
           (filters.lifecycle === "all" ||
             (filters.lifecycle === "active" ? m.lifecycle === "open" : m.lifecycle !== "open")),
       ),
-    )
-    .sort((a, b) =>
-      filters.sort === "depth"
-        ? depth(b) - depth(a)
-        : filters.sort === "impact"
-          ? Math.max(...b.map((m) => Math.abs(impactPercent(m) ?? 0))) -
-            Math.max(...a.map((m) => Math.abs(impactPercent(m) ?? 0)))
-          : Date.parse(a[0]?.cutoff ?? "") - Date.parse(b[0]?.cutoff ?? ""),
-    );
+    ), filters.sort);
   // Mint identity, not a potentially shared display symbol, determines matrix columns.
   const tokens = [...new Map(markets.map((m) => [m.baseToken, m])).values()].sort((a, b) =>
     a.ticker.localeCompare(b.ticker),
@@ -113,9 +103,9 @@ export function MarketsExplorer({
           </Select>
           <Select
             value={filters.sort}
-            items={{ depth: "Depth ↓", impact: "Impact ↓", cutoff: "Cutoff ↑" }}
+            items={{ newest: "Newest first", oldest: "Oldest first" }}
             onValueChange={(value) => {
-              if (value === "depth" || value === "impact" || value === "cutoff")
+              if (value === "newest" || value === "oldest")
                 setFilters({ sort: value });
             }}
           >
@@ -124,9 +114,8 @@ export function MarketsExplorer({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="depth">Depth ↓</SelectItem>
-                <SelectItem value="impact">Impact ↓</SelectItem>
-                <SelectItem value="cutoff">Cutoff ↑</SelectItem>
+                <SelectItem value="newest">Newest first</SelectItem>
+                <SelectItem value="oldest">Oldest first</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -139,7 +128,6 @@ export function MarketsExplorer({
           onChange={(view) => setFilters({ view })}
         />
       </section>
-      <RefreshStatus active={query.isRefreshError} label="markets" />
       {query.isInitialError && (
         <DataError
           retry={() => {
@@ -147,9 +135,7 @@ export function MarketsExplorer({
           }}
         />
       )}
-      {query.isPending && !visible.length ? (
-        <LoadingState>Loading markets…</LoadingState>
-      ) : !visible.length ? (
+      {!query.isPending && !visible.length ? (
         <EmptyState>No markets match this view. Try another filter.</EmptyState>
       ) : filters.view === "Feed" ? (
         <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2 lg:grid-cols-3">

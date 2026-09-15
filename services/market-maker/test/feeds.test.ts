@@ -65,18 +65,18 @@ test("reference HTTP transport rejects unsafe origins, failure responses and ove
     "https://example.com/?token=x",
   ])
     expect(() => apiOrigin(url)).toThrow();
-  const server = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch: (req) =>
-      new URL(req.url).pathname === "/large"
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(
+    async (request: RequestInfo | URL) =>
+      String(request).endsWith("/large")
         ? new Response("x".repeat(513000))
         : new Response("denied", { status: 429 }),
-  });
+    { preconnect: originalFetch.preconnect },
+  );
   try {
-    await expect(json(server.url.origin)).rejects.toThrow();
-    await expect(json(server.url.origin + "/large")).rejects.toThrow();
+    await expect(json("https://example.com/denied")).rejects.toThrow();
+    await expect(json("https://example.com/large")).rejects.toThrow();
   } finally {
-    await server.stop(true);
+    globalThis.fetch = originalFetch;
   }
 });

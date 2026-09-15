@@ -136,10 +136,8 @@ export function Landing({ initialMarkets }: { initialMarkets: MarketView[] }) {
             </div>
           ))}
         </div>
-        {markets.length === 0 && (
-          <p className="px-8 text-xs text-muted-foreground">
-            {query.isPending ? "Loading indexed markets…" : "No indexed markets available yet."}
-          </p>
+        {markets.length === 0 && !query.isPending && (
+          <p className="px-8 text-xs text-muted-foreground">No indexed markets available yet.</p>
         )}
       </section>
     </main>

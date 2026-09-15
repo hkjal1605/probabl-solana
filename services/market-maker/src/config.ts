@@ -40,6 +40,8 @@ export interface MarketPolicy {
 }
 export interface Settings {
   markets: MarketPolicy[];
+  quoteLevels: number;
+  levelSpacingBps: number;
   halfSpreadBps: number;
   adverseSelectionBps: number;
   maxHalfSpreadBps: number;
@@ -63,6 +65,8 @@ export function settings(input: unknown): Settings {
   if (!raw || !Array.isArray(raw.markets) || raw.markets.length > 50)
     throw new Error("Configure at most 50 explicitly budgeted markets");
   const result: Settings = {
+    quoteLevels: 1,
+    levelSpacingBps: 25,
     halfSpreadBps: 60,
     adverseSelectionBps: 25,
     maxHalfSpreadBps: 1500,
@@ -84,6 +88,8 @@ export function settings(input: unknown): Settings {
     markets: raw.markets,
   };
   const ranges: Record<string, [number, number]> = {
+    quoteLevels: [1, 5],
+    levelSpacingBps: [1, 500],
     halfSpreadBps: [1, 2000],
     adverseSelectionBps: [1, 2000],
     maxHalfSpreadBps: [1, 4000],
@@ -108,6 +114,8 @@ export function settings(input: unknown): Settings {
   if (
     result.ttlSeconds * 1000 < result.pollMs * 3 ||
     result.maxHalfSpreadBps < result.halfSpreadBps ||
+    result.halfSpreadBps + result.levelSpacingBps * (result.quoteLevels - 1) >
+      result.maxHalfSpreadBps ||
     result.repriceBps > result.halfSpreadBps
   )
     throw new Error("Invalid refresh/spread policy");

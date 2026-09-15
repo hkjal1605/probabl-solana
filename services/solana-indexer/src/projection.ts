@@ -21,6 +21,8 @@ export interface Snapshot {
   program: PublicKey;
   slot: number;
   observedAt: number;
+  /** Verified creation event times, indexed from finalized program history. */
+  createdAt?: Map<string, string>;
   config: ConfigAccount;
   markets: Map<string, MarketAccount>;
   orders: Map<string, OrderAccount>;
@@ -102,10 +104,11 @@ export function decodeSnapshot(
   }
   return result;
 }
-export function marketView(id: string, m: MarketAccount) {
+export function marketView(id: string, m: MarketAccount, createdAt?: string) {
   const t = m.terms;
   return {
     id,
+    createdAt: createdAt ?? null,
     baseToken: m.mints[0]!.toBase58(),
     quoteToken: m.mints[1]!.toBase58(),
     conditionId: id,

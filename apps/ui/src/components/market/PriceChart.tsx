@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
-import { RefreshStatus } from "@/components/data/RefreshStatus";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import {
   ChartContainer,
@@ -67,7 +66,7 @@ export function PriceChart({
     ) : (
       <ChartContainer
         config={chartConfig}
-        className="h-[360px] w-full"
+        className="h-full min-h-[360px] w-full xl:min-h-0"
         aria-label={
           mode === "Impact %"
             ? "Relative impact of last executed branch prices"
@@ -135,31 +134,31 @@ export function PriceChart({
       </figure>
     );
   return (
-    <Card variant="panel" className="h-full min-w-0" aria-label="Conditional stock chart">
+    <Card variant="panel" className="h-full min-h-0 min-w-0" aria-label="Conditional stock chart">
       <CardHeader className="flex flex-wrap justify-between gap-2">
         <Segmented
           label="Chart mode"
+          variant="chart"
           value={mode}
           options={["YES vs NO", "Impact %", "vs Spot"]}
           onChange={setMode}
         />
         <Segmented
           label="Chart range"
+          variant="timeframe"
           value={range}
           options={["1H", "1D", "1W", "ALL"]}
           onChange={setRange}
         />
       </CardHeader>
-      <CardContent className="flex min-h-[360px] flex-col justify-center px-0">
-        <RefreshStatus active={query.isRefreshError} label="trade history" />
+      <CardContent className="flex min-h-[360px] flex-1 flex-col justify-center px-0 xl:min-h-0">
         {chart}
       </CardContent>
-      <CardFooter className="flex-wrap justify-between gap-2">
-        {mode === "Impact %" && <span>Last-execution impact · not quote history</span>}
-        <span className="text-xs text-muted-foreground">
-          Latest 100 canonical fills · not a price forecast
-        </span>
-      </CardFooter>
+      {mode === "Impact %" && (
+        <CardFooter className="flex-wrap justify-between gap-2">
+          <span>Last-execution impact · not quote history</span>
+        </CardFooter>
+      )}
     </Card>
   );
 }

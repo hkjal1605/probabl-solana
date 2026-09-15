@@ -10,12 +10,17 @@ const toggleVariants = cva(
     variants: {
       variant: {
         default: "bg-transparent",
+        timeframe: "bg-transparent hover:bg-accent aria-pressed:bg-accent",
+        chart:
+          "bg-transparent hover:bg-(--chart-control-active) aria-pressed:bg-(--chart-control-active)",
         category: "bg-transparent hover:bg-transparent aria-pressed:bg-transparent",
         outline: "border border-border bg-transparent hover:bg-accent",
       },
       size: {
         category: "h-5 min-w-0 rounded-none p-0 text-[16px] font-bold leading-5",
         compact: "h-6 min-w-6 px-2 text-xs leading-[14px]",
+        timeframe: "h-6 min-w-0 px-1.5 text-xs leading-[14px]",
+        chart: "h-5 min-w-0 rounded-sm px-2 text-xs leading-[14px]",
         default:
           "h-8 min-w-8 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
         sm: "h-7 min-w-7 rounded-[min(var(--radius-md),12px)] px-2.5 text-[0.8rem] has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",

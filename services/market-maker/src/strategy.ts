@@ -11,6 +11,7 @@ import { abs, BPS, ceil, max, min, PROB, type Settings } from "./config.ts";
 export interface Quote {
   branch: 0 | 1;
   side: 0 | 1;
+  level: number;
   price: bigint;
   quantity: bigint;
 }
@@ -99,38 +100,57 @@ export function quotes(input: {
     const center = fair[branch],
       held = b[2 + branch]!,
       cash = b[4 + branch]!;
-    const bid = ((center * (BPS - half)) / BPS / tick) * tick;
-    const ask = ceil(ceil(center * (BPS + half), BPS), tick) * tick;
-    if (bid <= 0n || ask > U128_MAX || ask <= bid) continue;
     for (const side of [0, 1] as const) {
-      const price = side === 0 ? bid : ask,
-        best = input.best[branch];
-      // Do not chase somebody else's quote or cross a known book. Omit that side instead.
-      if (
-        (side === 0 && best.ask !== undefined && price >= best.ask) ||
-        (side === 1 && best.bid !== undefined && price <= best.bid)
-      )
-        continue;
       // Keep centers on parity; inventory risk changes size, not the fair-price constraint.
       const room = side === 0 ? max(0n, 2n * target - held) : held;
       const skew = min(BPS, (room * BPS) / target);
-      const budget = min(
+      const totalBudget = min(
         notional,
         big(m.terms.max_order),
         big(m.terms.max_wallet) / 4n,
         big(m.terms.max_market) / 4n,
       );
-      let amount = (min((budget * WAD) / price, big(m.terms.max_quantity), room) * skew) / BPS;
-      if (side === 0) amount = min(amount, (cash * WAD) / price);
-      amount = (amount / step) * step;
-      if (
-        amount <= 0n ||
-        amount > U64_MAX ||
-        quote(amount, price) < big(m.terms.min_notional) ||
-        quote(amount, price, true) > budget
-      )
-        continue;
-      output.push({ branch, side, price, quantity: amount });
+      let remainingRoom = room,
+        remainingCash = cash,
+        remainingBudget = totalBudget,
+        previousPrice: bigint | undefined;
+      for (let level = 0; level < s.quoteLevels; level++) {
+        const edge = half + BigInt(s.levelSpacingBps * level);
+        if (edge > BigInt(s.maxHalfSpreadBps)) break;
+        const price =
+            side === 0
+              ? ((center * (BPS - edge)) / BPS / tick) * tick
+              : ceil(ceil(center * (BPS + edge), BPS), tick) * tick,
+          best = input.best[branch],
+          levelsLeft = BigInt(s.quoteLevels - level),
+          budget = remainingBudget / levelsLeft;
+        if (price <= 0n || price > U128_MAX) continue;
+        // Tick rounding must not turn two ladder levels into the same book price.
+        if (price === previousPrice) continue;
+        // A deeper level may remain passive even when an inner level would cross.
+        if (
+          (side === 0 && best.ask !== undefined && price >= best.ask) ||
+          (side === 1 && best.bid !== undefined && price <= best.bid)
+        )
+          continue;
+        let amount =
+          (min((budget * WAD) / price, big(m.terms.max_quantity), remainingRoom) * skew) / BPS;
+        if (side === 0) amount = min(amount, (remainingCash * WAD) / price);
+        amount = (amount / step) * step;
+        const reserved = side === 0 ? quote(amount, price, true) : amount;
+        if (
+          amount <= 0n ||
+          amount > U64_MAX ||
+          quote(amount, price) < big(m.terms.min_notional) ||
+          quote(amount, price, true) > budget
+        )
+          continue;
+        output.push({ branch, side, level, price, quantity: amount });
+        previousPrice = price;
+        remainingRoom -= amount;
+        remainingBudget -= quote(amount, price, true);
+        if (side === 0) remainingCash -= reserved;
+      }
     }
   }
   return output;

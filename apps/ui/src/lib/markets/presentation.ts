@@ -45,25 +45,64 @@ export function impactPercent(market: MarketView, branch: "YES" | "NO" = "YES"):
   return reference > 0 ? ((branch === "YES" ? yes - no : no - yes) / reference) * 100 : null;
 }
 export function eventKey(market: MarketView) {
-  // Group only contracts that share the exact evidence mapping and trading window.
+  // A Polymarket condition plus its outcome orientation is the immutable event
+  // identity. Local trading windows and lifecycle state belong to each asset
+  // market and must not split one external event into multiple cards.
   return [
     market.mapping.conditionId || market.id,
     market.mapping.yesIndex,
     market.mapping.noIndex,
-    market.tradingOpen,
-    market.cutoff,
-    market.lifecycle,
   ].join(":");
 }
+
+const lifecyclePriority: Record<MarketView["lifecycle"], number> = {
+  open: 0,
+  scheduled: 1,
+  frozen: 2,
+  "awaiting-resolution": 3,
+  resolved: 4,
+  redeemable: 5,
+  archived: 6,
+};
+
+function preferredAssetMarket(current: MarketView, candidate: MarketView): MarketView {
+  const lifecycle = lifecyclePriority[current.lifecycle] - lifecyclePriority[candidate.lifecycle];
+  if (lifecycle !== 0) return lifecycle < 0 ? current : candidate;
+  const opened = Date.parse(current.tradingOpen) - Date.parse(candidate.tradingOpen);
+  if (opened !== 0 && Number.isFinite(opened)) return opened < 0 ? current : candidate;
+  return current.id.localeCompare(candidate.id) <= 0 ? current : candidate;
+}
+
 export function groupMarkets(markets: MarketView[]): MarketView[][] {
-  const groups = new Map<string, MarketView[]>();
+  const groups = new Map<string, Map<string, MarketView>>();
   for (const market of markets) {
     const key = eventKey(market);
-    const group = groups.get(key) ?? [];
-    group.push(market);
+    const group = groups.get(key) ?? new Map<string, MarketView>();
+    const assetKey = `${market.baseToken}:${market.quoteToken}`;
+    const existing = group.get(assetKey);
+    group.set(assetKey, existing ? preferredAssetMarket(existing, market) : market);
     groups.set(key, group);
   }
-  return [...groups.values()];
+  return [...groups.values()].map((group) =>
+    [...group.values()].sort(
+      (a, b) =>
+        a.ticker.localeCompare(b.ticker) ||
+        a.quoteToken.localeCompare(b.quoteToken) ||
+        a.id.localeCompare(b.id),
+    ),
+  );
+}
+export function sortEventGroups(groups: MarketView[][], direction: "newest" | "oldest") {
+  const created = (assets: MarketView[]) =>
+    Math.max(0, ...assets.map((m) => {
+      const at = Date.parse(m.createdAt ?? "");
+      return Number.isFinite(at) ? at : 0;
+    }));
+  return [...groups].sort((a, b) => {
+    const difference = created(b) - created(a);
+    return (direction === "oldest" ? -difference : difference) ||
+      eventKey(a[0]!).localeCompare(eventKey(b[0]!));
+  });
 }
 export function marketCategory(market: MarketView) {
   const question = market.question.toLowerCase();

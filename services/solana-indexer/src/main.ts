@@ -12,7 +12,7 @@ import {
 import { snapshot, marketView, indexedOrder, liveOrder, type Snapshot } from "./projection.ts";
 import { createIndexStream, changedTopics } from "./stream";
 import { WalletIndex } from "./wallet-index";
-import { initializeHistory, replayHistory } from "./history.ts";
+import { creationTimes, initializeHistory, replayHistory } from "./history.ts";
 import { reconcileVaults } from "./reconcile.ts";
 
 const required = (name: string) => {
@@ -50,6 +50,13 @@ async function refresh() {
       reconciliation = await reconcileVaults(client, [...next.markets.keys()], next.slot);
       lastAudit = Date.now();
     }
+    const creations = await db.query<{ market: string; block_time: string }>(
+      `SELECT market, MIN(block_time)::text AS block_time FROM solana_events
+       WHERE domain=$1 AND name='Change' AND data->>'kind'='1'
+       GROUP BY market`,
+      [domain],
+    );
+    next.createdAt = creationTimes(creations.rows);
     // A single atomic upsert prevents concurrent/restarted indexers publishing an older slot.
     await db.query(
       `INSERT INTO solana_snapshots VALUES ($1,$2,to_timestamp($4::double precision/1000),$3::jsonb)
@@ -61,7 +68,7 @@ async function refresh() {
         JSON.stringify({
           healthy: true,
           rawAccounts: next.rawAccounts,
-          markets: [...next.markets].map(([id, m]) => marketView(id, m)),
+          markets: [...next.markets].map(([id, m]) => marketView(id, m, next.createdAt?.get(id))),
           orders: [...next.orders].map(([id, o]) => indexedOrder(id, o, next.slot)),
         }),
         next.observedAt,
@@ -130,13 +137,13 @@ app.get("/reconciliation", (c) => {
   if (!reconciliation) throw new Error("Vault reconciliation is not available");
   return c.json(reconciliation);
 });
-app.get("/markets", (c) =>
-  c.json({ markets: [...state().markets].map(([id, m]) => marketView(id, m)) }),
-);
+app.get("/markets", (c) => {
+  const s = state();
+  return c.json({ markets: [...s.markets].map(([id, m]) => marketView(id, m, s.createdAt?.get(id))) });
+});
 app.get("/markets/:id", (c) => {
-  const id = c.req.param("id"),
-    m = state().markets.get(id);
-  return m ? c.json(marketView(id, m)) : c.json({ error: "not-found" }, 404);
+  const id = c.req.param("id"), s = state(), m = s.markets.get(id);
+  return m ? c.json(marketView(id, m, s.createdAt?.get(id))) : c.json({ error: "not-found" }, 404);
 });
 app.get("/orders", (c) => {
   const s = state(),
@@ -161,6 +168,16 @@ app.get("/orderbook/:id", (c) => {
       .map(([id, o]) => indexedOrder(id, o, s.slot)),
     truncated: false,
   });
+});
+app.get("/orderbooks", (c) => {
+  const s = state();
+  const books: Record<string, { orders: ReturnType<typeof indexedOrder>[]; truncated: false }> = {};
+  for (const id of s.markets.keys()) books[id] = { orders: [], truncated: false };
+  for (const [id, order] of s.orders) {
+    if (!liveOrder(order, s)) continue;
+    books[order.market.toBase58()]?.orders.push(indexedOrder(id, order, s.slot));
+  }
+  return c.json({ books, slot: String(s.slot) });
 });
 app.get("/positions/:owner", async (c) => {
   state();
