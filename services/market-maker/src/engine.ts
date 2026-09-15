@@ -401,6 +401,10 @@ export class Engine {
                 createSyncNativeInstruction(source),
               );
             }
+            if (sourceAmount < needed) {
+              stage = "native-wrap";
+              await this.executor.send(instructions);
+            }
             const deposit = await this.client.depositForCredit(
               key(p.market),
               this.owner,
@@ -408,12 +412,11 @@ export class Engine {
               0,
               needed,
             );
-            instructions.push(
+            stage = "native-top-up";
+            await this.executor.send([
               deposit.instruction,
               this.client.position("split", key(p.market), this.owner, 0, needed),
-            );
-            stage = "native-top-up";
-            await this.executor.send(instructions);
+            ]);
             log("static-native-top-up", { market: p.market, amount: needed });
           }
         }
@@ -492,8 +495,12 @@ export class Engine {
           await this.executor.send([this.client.placement(order, plan)]);
         }
         log("static-market-complete", { market: p.market });
-      } catch {
-        log("static-market-skipped", { market: p.market, stage });
+      } catch (error) {
+        log("static-market-skipped", {
+          market: p.market,
+          stage,
+          reason: error instanceof Error ? error.message : "Unknown static placement failure",
+        });
       }
     }
   }
