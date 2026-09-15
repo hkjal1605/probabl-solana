@@ -76,7 +76,8 @@ for (const [path, status] of checks) {
   console.log(JSON.stringify({ path, status, passed: true }));
 }
 for (const [path, status] of [
-  ["/v1/orders/prepare", 401],
+  // Quote preparation is public and read-only; malformed input is rejected.
+  ["/v1/orders/prepare", 400],
   ["/markets", 403],
 ] as const) {
   const response = await request(path, {
@@ -84,7 +85,7 @@ for (const [path, status] of [
     headers: { "content-type": "application/json" },
     body: "{}",
   });
-  assert.equal(response.status, status, `${path} unauthenticated POST`);
+  assert.equal(response.status, status, `${path} unauthenticated/malformed POST`);
   await response.body?.cancel();
   console.log(JSON.stringify({ path, method: "POST", status, passed: true }));
 }
