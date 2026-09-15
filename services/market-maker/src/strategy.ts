@@ -106,7 +106,7 @@ export function quotes(input: {
       const skew = min(BPS, (room * BPS) / target);
       const totalBudget = min(
         notional,
-        big(m.terms.max_order),
+        big(m.terms.max_order) * BigInt(s.quoteLevels),
         big(m.terms.max_wallet) / 4n,
         big(m.terms.max_market) / 4n,
       );
@@ -142,6 +142,7 @@ export function quotes(input: {
           amount <= 0n ||
           amount > U64_MAX ||
           quote(amount, price) < big(m.terms.min_notional) ||
+          quote(amount, price, true) > big(m.terms.max_order) ||
           quote(amount, price, true) > budget
         )
           continue;

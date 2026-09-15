@@ -75,6 +75,28 @@ test("multi-level ladders use distinct prices without multiplying the per-side b
         );
     }
 });
+test("market max-order limits each ladder order rather than the whole side", () => {
+  const i = input();
+  i.settings = settings({
+    markets: [policy],
+    quoteLevels: 3,
+    levelSpacingBps: 40,
+  });
+  i.market = {
+    ...market,
+    terms: { ...market.terms, max_order: bn(1_800_000) },
+  } as typeof market;
+  const result = quotes(i);
+  expect(result).toHaveLength(12);
+  for (const branch of [0, 1] as const)
+    for (const side of [0, 1] as const) {
+      const ladder = result.filter((q) => q.branch === branch && q.side === side);
+      expect(ladder.every((q) => quote(q.quantity, q.price, true) <= 1_800_000n)).toBe(true);
+      expect(ladder.reduce((sum, q) => sum + quote(q.quantity, q.price, true), 0n)).toBeGreaterThan(
+        1_800_000n,
+      );
+    }
+});
 test("missing inventory never produces unbacked quotes; inventory caps stop accumulating buys", () => {
   const i = input();
   i.balances.fill(0n);
