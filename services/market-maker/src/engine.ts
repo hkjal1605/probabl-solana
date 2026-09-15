@@ -488,8 +488,7 @@ export class Engine {
               terms.max_fee_bps !== s.config.maker_bps ||
               big(terms.nonce) < minimumNonce ||
               big(terms.expiry) <= now ||
-              big(existing.remaining) <= 0n ||
-              big(existing.remaining) > target.quantity
+              big(existing.remaining) <= 0n
             )
               throw new Error("Static seed found an incompatible existing order");
             missing.delete(id);
