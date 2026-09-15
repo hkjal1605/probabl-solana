@@ -40,6 +40,7 @@ const checks: [string, number][] = [
   ["/indexer-health", 200],
   ["/polymarket-health", 200],
   ["/markets", 200],
+  ["/orderbooks", 200],
   ["/orders", 200],
   ["/trades", 200],
   ["/.env", 404],

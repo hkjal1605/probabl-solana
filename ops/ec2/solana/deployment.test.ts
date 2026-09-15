@@ -30,6 +30,7 @@ describe("Solana EC2 deployment boundaries", () => {
     expect(nginx).toContain("listen 80 default_server;");
     expect(nginx).toContain("location ^~ /internal/ { return 404; }");
     expect(nginx).toContain("limit_except GET { deny all; }");
+    expect(nginx).toContain("|orderbooks|orderbook/[^/]+|");
     expect(nginx).toContain("location / { return 404; }");
     const logFormat = nginx.match(/log_format probabl_sol[\s\S]*?;/)?.[0];
     expect(logFormat).toBeDefined();
