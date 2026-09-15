@@ -89,6 +89,11 @@ async function main() {
       await engine.fund();
       return;
     }
+    if (process.argv.includes("--static")) {
+      if (!live) throw new Error("Static placement needs explicit execution");
+      await engine.staticCycle();
+      return;
+    }
     do {
       try {
         await engine.cycle();

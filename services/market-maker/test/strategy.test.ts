@@ -112,6 +112,7 @@ test("repricing hysteresis retains priority but refreshes expiry and material mo
 });
 test("configuration is fail-closed for missing unit review, duplicate markets and unsafe refresh policies", () => {
   expect(settings({ markets: [] }).markets).toEqual([]);
+  expect(settings({ markets: [], quoteLevels: 10, ttlSeconds: 86400 }).quoteLevels).toBe(10);
   for (const input of [
     { markets: [policy, policy] },
     { markets: [{ ...policy, basePriceMultiplier: undefined }] },

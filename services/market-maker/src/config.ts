@@ -88,13 +88,13 @@ export function settings(input: unknown): Settings {
     markets: raw.markets,
   };
   const ranges: Record<string, [number, number]> = {
-    quoteLevels: [1, 5],
+    quoteLevels: [1, 10],
     levelSpacingBps: [1, 500],
     halfSpreadBps: [1, 2000],
     adverseSelectionBps: [1, 2000],
     maxHalfSpreadBps: [1, 4000],
     repriceBps: [1, 1000],
-    ttlSeconds: [30, 600],
+    ttlSeconds: [30, 86400],
     pollMs: [1000, 60000],
     cutoffBufferSeconds: [30, 86400],
     maxFeedAgeMs: [1000, 120000],

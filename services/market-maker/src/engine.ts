@@ -354,6 +354,95 @@ export class Engine {
       }
     }
   }
+  /** One-time, resumable ladder placement using the last observed safe reference.
+   * It does not poll, reprice, or cancel orders when that reference later ages. */
+  async staticCycle() {
+    if (!this.executor) throw new Error("Static placement requires explicit live execution");
+    await this.executor.reconcilePending();
+    for (const p of this.settings.markets) {
+      let stage = "snapshot";
+      try {
+        for (let step = 0; step < 4 * this.settings.quoteLevels; step++) {
+          const s = await this.view(),
+            m = await this.validateMarket(s, p),
+            record = this.state.markets[p.market];
+          if (!record?.fundComplete || !record.spot || !record.probability)
+            throw new Error("Market lacks funded inventory or an observed reference");
+          const desired = quotes({
+            market: m,
+            reference: {
+              spot: BigInt(record.spot),
+              probability: BigInt(record.probability),
+              spread: 0n,
+              observedAt: Date.now(),
+            },
+            gapBps: p.gapBps,
+            balances: inventory(s, this.owner, p.market),
+            targetBase: units(p.baseInventory, m.decimals[0]!),
+            orderQuote: units(p.orderQuote, m.decimals[1]!),
+            makerBps: s.config.maker_bps,
+            movementBps: 0n,
+            settings: this.settings,
+            best: [{}, {}],
+          });
+          if (desired.length !== 4 * this.settings.quoteLevels)
+            throw new Error("Inventory cannot back every requested static level");
+          const action = quoteChange(
+            owned(s, this.owner, p.market),
+            desired,
+            BigInt(Math.floor(Date.now() / 1000)),
+            this.settings,
+            {
+              makerBps: s.config.maker_bps,
+              minimumNonce: big(s.traders.get(this.owner.toBase58())?.minimum_nonce ?? bn(0)),
+            },
+          );
+          if (!action) break;
+          if (action.cancel) throw new Error("Static seed found an incompatible existing order");
+          const q = action.quote!,
+            order = passiveOrder(
+              this.owner,
+              p.market,
+              m,
+              s,
+              q,
+              this.settings.ttlSeconds,
+              BigInt(Math.floor(Date.now() / 1000)),
+            ),
+            wallet = s.wallets.get(
+              walletAddress(key(p.market), this.owner, this.client.program).toBase58(),
+            ),
+            available = wallet ? big(wallet.balances[fundingAsset(order)]!) : 0n,
+            required = q.side === 0 ? quote(q.quantity, q.price, true) : q.quantity;
+          if (available < required) throw new Error("Static order is not fully backed");
+          const plan = planOrder({
+            order,
+            candidates: [],
+            now: BigInt(Math.floor(Date.now() / 1000)),
+            step: big(m.terms.step),
+            nextSequence: big(m.sequence[q.branch]!),
+            makerFeeBps: s.config.maker_bps,
+            takerFeeBps: s.config.taker_bps,
+            program: this.client.program,
+          });
+          stage = "execution";
+          log("static-quote", {
+            market: p.market,
+            branch: q.branch,
+            side: q.side,
+            level: q.level,
+            price: q.price,
+            quantity: q.quantity,
+          });
+          await this.executor.send([this.client.placement(order, plan)]);
+        }
+        log("static-market-complete", { market: p.market });
+      } catch {
+        log("static-market-skipped", { market: p.market, stage });
+      }
+    }
+  }
+
   async fund() {
     if (!this.executor) throw new Error("Funding requires explicit live execution");
     await this.executor.reconcilePending();
