@@ -22,6 +22,14 @@ import { equity, needsReplace, quotes, type Quote, type Reference } from "./stra
 import type { Executor } from "./execution.ts";
 import type { State } from "./state.ts";
 import type { SolanaClient, PublicKey } from "@conditional-stocks/solana-client";
+import { SystemProgram } from "@solana/web3.js";
+import {
+  NATIVE_MINT,
+  TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountIdempotentInstruction,
+  createSyncNativeInstruction,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
 
 export const log = (event: string, detail: Record<string, unknown> = {}) =>
   console.log(
@@ -362,6 +370,53 @@ export class Engine {
     for (const p of this.settings.markets) {
       let stage = "snapshot";
       try {
+        if (p.baseMint === NATIVE_MINT.toBase58()) {
+          const before = await this.view(),
+            market = await this.validateMarket(before, p),
+            held = inventory(before, this.owner, p.market),
+            target = units(p.baseInventory, market.decimals[0]!),
+            needed = target - min(held[2]!, held[3]!);
+          if (needed > 0n) {
+            const source = getAssociatedTokenAddressSync(NATIVE_MINT, this.owner),
+              sourceInfo = await this.client.connection.getAccountInfo(source, "confirmed"),
+              sourceAmount = sourceInfo
+                ? BigInt((await this.client.connection.getTokenAccountBalance(source, "confirmed")).value.amount)
+                : 0n,
+              instructions = [
+                createAssociatedTokenAccountIdempotentInstruction(
+                  this.owner,
+                  source,
+                  this.owner,
+                  NATIVE_MINT,
+                  TOKEN_PROGRAM_ID,
+                ),
+              ];
+            if (sourceAmount < needed) {
+              instructions.push(
+                SystemProgram.transfer({
+                  fromPubkey: this.owner,
+                  toPubkey: source,
+                  lamports: needed - sourceAmount,
+                }),
+                createSyncNativeInstruction(source),
+              );
+            }
+            const deposit = await this.client.depositForCredit(
+              key(p.market),
+              this.owner,
+              NATIVE_MINT,
+              0,
+              needed,
+            );
+            instructions.push(
+              deposit.instruction,
+              this.client.position("split", key(p.market), this.owner, 0, needed),
+            );
+            stage = "native-top-up";
+            await this.executor.send(instructions);
+            log("static-native-top-up", { market: p.market, amount: needed });
+          }
+        }
         for (let step = 0; step < 4 * this.settings.quoteLevels; step++) {
           const s = await this.view(),
             m = await this.validateMarket(s, p),
