@@ -468,19 +468,31 @@ export class Engine {
           });
           if (desired.length !== 4 * this.settings.quoteLevels)
             throw new Error("Inventory cannot back every requested static level");
-          const action = quoteChange(
-            owned(s, this.owner, p.market),
-            desired,
-            BigInt(Math.floor(Date.now() / 1000)),
-            this.settings,
-            {
-              makerBps: s.config.maker_bps,
-              minimumNonce: big(s.traders.get(this.owner.toBase58())?.minimum_nonce ?? bn(0)),
-            },
-          );
-          if (!action) break;
-          if (action.cancel) throw new Error("Static seed found an incompatible existing order");
-          const q = action.quote!,
+          const now = BigInt(Math.floor(Date.now() / 1000)),
+            minimumNonce = big(s.traders.get(this.owner.toBase58())?.minimum_nonce ?? bn(0)),
+            missing = new Map(
+              desired.map((q) => [
+                `${q.branch}:${q.side}:${q.price}:${q.quantity}`,
+                q,
+              ]),
+            );
+          for (const [, existing] of owned(s, this.owner, p.market)) {
+            const terms = existing.terms,
+              id = `${terms.branch}:${terms.side}:${big(terms.price)}:${big(existing.remaining)}`;
+            if (
+              terms.funding !== 1 ||
+              terms.tif !== 0 ||
+              !terms.recipient.equals(this.owner) ||
+              terms.max_fee_bps !== s.config.maker_bps ||
+              big(terms.nonce) < minimumNonce ||
+              big(terms.expiry) <= now ||
+              !missing.delete(id)
+            )
+              throw new Error("Static seed found an incompatible existing order");
+          }
+          const q = missing.values().next().value as Quote | undefined;
+          if (!q) break;
+          const
             order = passiveOrder(
               this.owner,
               p.market,
