@@ -451,6 +451,9 @@ export class Engine {
             record = this.state.markets[p.market];
           if (!record?.fundComplete || !record.spot || !record.probability)
             throw new Error("Market lacks funded inventory or an observed reference");
+          const existing = owned(s, this.owner, p.market).filter(([, o]) =>
+            big(o.terms.expiry) > BigInt(Math.floor(Date.now() / 1000)),
+          );
           const desired = quotes({
             market: m,
             reference: {
@@ -468,36 +471,41 @@ export class Engine {
             settings: this.settings,
             best: [{}, {}],
           });
-          if (desired.length !== 4 * this.settings.quoteLevels)
+          const represented = (q: Quote) => existing.some(([, o]) =>
+            o.terms.branch === q.branch &&
+            o.terms.side === q.side &&
+            big(o.terms.price) === q.price &&
+            o.terms.funding === 1 &&
+            o.terms.tif === 0 &&
+            o.terms.recipient.equals(this.owner),
+          );
+          if (desired.length !== 4 * this.settings.quoteLevels &&
+              desired.length + existing.filter(([, o]) => !desired.some((q) =>
+                o.terms.branch === q.branch && o.terms.side === q.side &&
+                big(o.terms.price) === q.price,
+              )).length < 4 * this.settings.quoteLevels)
             throw new Error("Inventory cannot back every requested static level");
-          const now = BigInt(Math.floor(Date.now() / 1000)),
-            minimumNonce = big(s.traders.get(this.owner.toBase58())?.minimum_nonce ?? bn(0)),
+          const minimumNonce = big(s.traders.get(this.owner.toBase58())?.minimum_nonce ?? bn(0)),
             missing = new Map(
-              desired.map((q) => [
+              desired.filter((q) => !represented(q)).map((q) => [
                 `${q.branch}:${q.side}:${q.price}`,
                 q,
               ]),
             );
-          for (const [, existing] of owned(s, this.owner, p.market)) {
-            const terms = existing.terms,
+          for (const [, held] of existing) {
+            const terms = held.terms,
               id = `${terms.branch}:${terms.side}:${big(terms.price)}`,
               target = missing.get(id);
-            // Expired orders are unfillable even if their collateral has not been
-            // released yet. They must not block a fresh static ladder; the
-            // availability check below still prevents reusing locked credit.
-            if (big(terms.expiry) <= now) continue;
             if (
-              !target ||
               terms.funding !== 1 ||
               terms.tif !== 0 ||
               !terms.recipient.equals(this.owner) ||
               terms.max_fee_bps !== s.config.maker_bps ||
               big(terms.nonce) < minimumNonce ||
-              big(existing.remaining) !== target.quantity ||
-              big(existing.remaining) <= 0n
+              big(held.remaining) <= 0n
             )
               throw new Error("Static seed found an incompatible existing order");
-            missing.delete(id);
+            if (target) missing.delete(id);
           }
           const q = missing.values().next().value as Quote | undefined;
           if (!q) break;
