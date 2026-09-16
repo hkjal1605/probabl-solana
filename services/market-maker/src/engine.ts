@@ -480,6 +480,10 @@ export class Engine {
             const terms = existing.terms,
               id = `${terms.branch}:${terms.side}:${big(terms.price)}`,
               target = missing.get(id);
+            // Expired orders are unfillable even if their collateral has not been
+            // released yet. They must not block a fresh static ladder; the
+            // availability check below still prevents reusing locked credit.
+            if (big(terms.expiry) <= now) continue;
             if (
               !target ||
               terms.funding !== 1 ||
@@ -487,7 +491,6 @@ export class Engine {
               !terms.recipient.equals(this.owner) ||
               terms.max_fee_bps !== s.config.maker_bps ||
               big(terms.nonce) < minimumNonce ||
-              big(terms.expiry) <= now ||
               big(existing.remaining) <= 0n
             )
               throw new Error("Static seed found an incompatible existing order");
