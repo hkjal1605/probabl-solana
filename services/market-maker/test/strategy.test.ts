@@ -66,6 +66,7 @@ test("multi-level ladders use distinct prices without multiplying the per-side b
       const ladder = result.filter((q) => q.branch === branch && q.side === side);
       expect(ladder.map((q) => q.level)).toEqual([0, 1, 2]);
       expect(new Set(ladder.map((q) => q.price)).size).toBe(3);
+      expect(new Set(ladder.map((q) => q.quantity)).size).toBeGreaterThan(1);
       expect(ladder.reduce((sum, q) => sum + quote(q.quantity, q.price, true), 0n)).toBeLessThanOrEqual(
         i.orderQuote,
       );

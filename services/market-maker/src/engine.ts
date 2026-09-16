@@ -139,11 +139,13 @@ export class Engine {
       throw new Error("RPC snapshot is behind the last submitted transaction");
     return s;
   }
-  async cancelMarket(id?: string) {
+  async cancelMarket(id?: string, liveOnly = false) {
     if (!this.executor) return;
     await this.executor.reconcilePending();
     const s = await this.view();
-    for (const [orderId] of owned(s, this.owner, id)) {
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    for (const [orderId, indexed] of owned(s, this.owner, id)) {
+      if (liveOnly && big(indexed.terms.expiry) <= now) continue;
       const current = await this.client.order(key(orderId));
       if (current.status !== 1) continue;
       if (!current.owner.equals(this.owner)) throw new Error("Foreign cancellation");
@@ -491,6 +493,7 @@ export class Engine {
               !terms.recipient.equals(this.owner) ||
               terms.max_fee_bps !== s.config.maker_bps ||
               big(terms.nonce) < minimumNonce ||
+              big(existing.remaining) !== target.quantity ||
               big(existing.remaining) <= 0n
             )
               throw new Error("Static seed found an incompatible existing order");

@@ -122,8 +122,15 @@ export function quotes(input: {
               ? ((center * (BPS - edge)) / BPS / tick) * tick
               : ceil(ceil(center * (BPS + edge), BPS), tick) * tick,
           best = input.best[branch],
-          levelsLeft = BigInt(s.quoteLevels - level),
-          budget = remainingBudget / levelsLeft;
+          levelsLeft = s.quoteLevels - level,
+          // Slightly larger outer levels make displayed depth realistic without
+          // multiplying the configured per-side budget. The narrow weighting
+          // keeps the innermost level above common minimum notionals.
+          weight = BigInt(2 * s.quoteLevels + 5 + level),
+          remainingWeight = BigInt(
+            levelsLeft * (2 * (2 * s.quoteLevels + 5 + level) + levelsLeft - 1) / 2,
+          ),
+          budget = (remainingBudget * weight) / remainingWeight;
         if (price <= 0n || price > U128_MAX) continue;
         // Tick rounding must not turn two ladder levels into the same book price.
         if (price === previousPrice) continue;
@@ -134,7 +141,13 @@ export function quotes(input: {
         )
           continue;
         let amount =
-          (min((budget * WAD) / price, big(m.terms.max_quantity), remainingRoom) * skew) / BPS;
+          (min(
+            (budget * WAD) / price,
+            (big(m.terms.max_order) * WAD) / price,
+            big(m.terms.max_quantity),
+            remainingRoom,
+          ) * skew) /
+          BPS;
         if (side === 0) amount = min(amount, (remainingCash * WAD) / price);
         amount = (amount / step) * step;
         const reserved = side === 0 ? quote(amount, price, true) : amount;

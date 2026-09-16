@@ -85,6 +85,11 @@ async function main() {
       await engine.cancelMarket();
       return;
     }
+    if (process.argv.includes("--cancel-live")) {
+      if (!live) throw new Error("Cancellation needs explicit execution");
+      await engine.cancelMarket(undefined, true);
+      return;
+    }
     if (process.argv.includes("--fund")) {
       await engine.fund();
       return;
