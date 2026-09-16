@@ -44,6 +44,7 @@ const EMPTY_PROBABILITY: MarketView["probability"] = {
   quality: "disconnected",
   value: null,
 };
+const DEPTH_SLOTS = ["one", "two", "three", "four", "five"] as const;
 
 function OutcomeStat({ market, branch }: { market: MarketView; branch: "YES" | "NO" }) {
   const impact = spotImpactPercent(market, branch);
@@ -124,8 +125,11 @@ export function MarketWorkspace({
       ? tradeQuery.trades
       : initialTrades;
   return (
-    <Page variant="terminal" className="flex min-h-0 flex-col px-0 py-0 xl:overflow-hidden">
-      <div className="flex flex-wrap items-start justify-between gap-3 px-3 pt-4 pb-2">
+    <Page
+      variant="terminal"
+      className="market-workspace-scrollbars-hidden flex min-h-0 flex-col bg-secondary px-0 py-0 xl:overflow-hidden"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3 bg-background px-3 py-3">
         <div className="min-w-0 flex-[1_1_28rem]">
           <div className="flex items-center gap-3">
             <Avatar size="lg" className="rounded-xl after:rounded-xl">
@@ -152,8 +156,8 @@ export function MarketWorkspace({
         </div>
         <MarketAssetSwitcher market={market} />
       </div>
-      <div className="market-workspace-grid grid min-h-0 flex-1 items-stretch gap-px bg-border xl:overflow-hidden">
-        <div className="market-workspace-stats bg-background">
+      <div className="market-workspace-grid grid min-h-0 flex-1 items-stretch gap-0.5 bg-secondary p-0.5 xl:overflow-hidden">
+        <div className="market-workspace-stats overflow-hidden rounded-[4px] bg-background">
           <div className="flex flex-wrap items-start gap-x-6 gap-y-3 border-y px-3 py-3">
             <OutcomeStat market={market} branch="YES" />
             <SpotReference price={market.spotReference} variant="market" />
@@ -167,10 +171,13 @@ export function MarketWorkspace({
             />
           )}
         </div>
-        <div className="market-workspace-chart min-h-0 min-w-0">
+        <div className="market-workspace-chart min-h-0 min-w-0 overflow-hidden rounded-[4px]">
           <PriceChart market={market} initialTrades={trades} />
         </div>
-        <Card variant="panel" className="market-workspace-book min-h-0 min-w-0">
+        <Card
+          variant="panel"
+          className="market-workspace-book min-h-0 min-w-0 data-[variant=panel]:rounded-[4px]"
+        >
           <CardHeader className="flex flex-wrap items-center justify-between gap-3">
             <Segmented
               label="Order book outcome"
@@ -188,12 +195,12 @@ export function MarketWorkspace({
             />
           </CardContent>
         </Card>
-        <div className="market-workspace-ticket min-h-0 min-w-0 overflow-y-auto overscroll-contain bg-card">
+        <div className="market-workspace-ticket min-h-0 min-w-0 overflow-y-auto overscroll-contain rounded-[4px] bg-card">
           <OrderTicket key={market.id} market={market} />
         </div>
         <Card
           variant="panel"
-          className="market-workspace-information min-h-0 min-w-0 overflow-hidden"
+          className="market-workspace-information min-h-0 min-w-0 overflow-hidden data-[variant=panel]:rounded-[4px]"
         >
           <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0 overflow-hidden">
             <TabsList aria-label="Market information">
@@ -245,49 +252,69 @@ function BranchDepth({
   label: string;
   available: boolean;
 }) {
-  const max = Math.max(1, ...book.bids.map((l) => l.quantity), ...book.asks.map((l) => l.quantity));
-  const row = (level: BranchBook["asks"][number], ask: boolean) => (
+  const quoteSize = (level: BranchBook["asks"][number]) => level.price * level.quantity;
+  const cumulative = (levels: BranchBook["asks"]) => {
+    let total = 0;
+    return levels.map((level) => {
+      total += quoteSize(level);
+      return { ...level, cumulativeSize: total };
+    });
+  };
+  const asks = cumulative(book.asks.slice(0, 5));
+  const bids = cumulative(book.bids.slice(0, 5));
+  const askTotal = asks.at(-1)?.cumulativeSize ?? 0;
+  const bidTotal = bids.at(-1)?.cumulativeSize ?? 0;
+  const row = (
+    level: BranchBook["asks"][number] & { cumulativeSize: number },
+    ask: boolean,
+    total: number,
+  ) => (
     <TableRow
       key={level.priceExact}
       className={cn("tabular-nums", ask ? "text-danger" : "text-positive")}
       style={{
-        backgroundImage: `linear-gradient(to left, var(--${ask ? "danger" : "positive"}-soft) ${(level.quantity / max) * 100}%, transparent ${(level.quantity / max) * 100}%)`,
+        backgroundImage: `linear-gradient(to left, var(--${ask ? "danger" : "positive"}-soft) ${total > 0 ? (level.cumulativeSize / total) * 100 : 0}%, transparent ${total > 0 ? (level.cumulativeSize / total) * 100 : 0}%)`,
       }}
     >
       <TableCell className="text-sm">{formatNumber(level.price)}</TableCell>
-      <TableCell className="text-right text-sm">{formatNumber(level.quantity, 2)}</TableCell>
+      <TableCell className="text-right text-sm">{formatNumber(quoteSize(level), 2)}</TableCell>
+      <TableCell className="text-right text-sm">{formatNumber(level.cumulativeSize, 2)}</TableCell>
     </TableRow>
   );
+  const emptyRows = (count: number, ask: boolean, showLabel: boolean) =>
+    DEPTH_SLOTS.slice(0, count).map((slot, index) => {
+      const labelRow = showLabel && (ask ? index === count - 1 : index === 0);
+      return (
+        <TableRow key={`${ask ? "ask" : "bid"}-empty-${slot}`} aria-hidden={!labelRow}>
+          <TableCell colSpan={3} className="text-muted-foreground">
+            {labelRow ? (available ? `No ${ask ? "asks" : "bids"}` : "—") : "\u00a0"}
+          </TableCell>
+        </TableRow>
+      );
+    });
   return (
     <div className="min-w-0">
       <Table aria-label={label} density="compact">
-        <TableHeader>
-          <TableRow>
+        <TableHeader className="[&_tr]:border-b-0">
+          <TableRow className="hover:bg-transparent [&_th]:font-medium">
             <TableHead>Price</TableHead>
-            <TableHead className="text-right">Size</TableHead>
+            <TableHead className="text-right">Size (USDC)</TableHead>
+            <TableHead className="text-right">Size (Cumm)</TableHead>
           </TableRow>
         </TableHeader>
-        <TableBody>
-          {[...book.asks.slice(0, 5)].reverse().map((l) => row(l, true))}
-          {!book.asks.length && (
-            <TableRow>
-              <TableCell colSpan={2}>{available ? "No asks" : "—"}</TableCell>
-            </TableRow>
-          )}
+        <TableBody className="[&_tr]:border-b-0">
+          {emptyRows(5 - asks.length, true, asks.length === 0)}
+          {[...asks].reverse().map((level) => row(level, true, askTotal))}
           <TableRow>
-            <TableCell colSpan={2}>
+            <TableCell colSpan={3}>
               <strong className="text-sm tabular-nums">{formatNumber(midpoint(book))}</strong>
               <span className="ml-2 text-xs text-muted-foreground">
                 spr <span className="text-sm">{formatNumber(book.spread)}</span>
               </span>
             </TableCell>
           </TableRow>
-          {book.bids.slice(0, 5).map((l) => row(l, false))}
-          {!book.bids.length && (
-            <TableRow>
-              <TableCell colSpan={2}>{available ? "No bids" : "—"}</TableCell>
-            </TableRow>
-          )}
+          {bids.map((level) => row(level, false, bidTotal))}
+          {emptyRows(5 - bids.length, false, bids.length === 0)}
         </TableBody>
       </Table>
     </div>

@@ -1,10 +1,10 @@
 "use client";
 import Link from "next/link";
 import { EventCard } from "@/components/market/EventCard";
+import { ProbabilityGauge } from "@/components/market/ProbabilityGauge";
 import { TokenIdentity } from "@/components/market/TokenIdentity";
 import { useUiStore } from "@/components/providers/UiStateProvider";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DataError, EmptyState, Page } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/segmented";
@@ -35,6 +35,7 @@ import {
   percent,
   sortEventGroups,
 } from "@/lib/markets/presentation";
+import { cn } from "@/lib/utils";
 import type { MarketView } from "@/types/api";
 
 export function MarketsExplorer({
@@ -146,15 +147,22 @@ export function MarketsExplorer({
       ) : (
         <Card variant="panel">
           <Table>
-            <TableHeader>
-              <TableRow>
+            <TableHeader className="[&_tr]:border-b-0">
+                  <TableRow className="border-b-0 hover:bg-transparent [&_th]:py-3">
                 <TableHead>Event</TableHead>
                 {tokens.map((token) => (
-                  <TableHead key={token.baseToken}>
-                    <TokenIdentity symbol={token.ticker} metadata={token.baseTokenMetadata} />
+                  <TableHead key={token.baseToken} className="text-foreground">
+                    <TokenIdentity
+                      symbol={token.ticker}
+                      metadata={token.baseTokenMetadata}
+                      showName={false}
+                      iconSize="sm"
+                    />
                   </TableHead>
                 ))}
-                <TableHead>P(YES) · Polymarket</TableHead>
+                <TableHead className="text-center font-medium text-foreground">
+                  Probability
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -162,7 +170,7 @@ export function MarketsExplorer({
                 const market = assets[0];
                 if (!market) return null;
                 return (
-                  <TableRow key={eventKey(market)}>
+                  <TableRow key={eventKey(market)} className="border-b-0">
                     <TableCell className="min-w-52 max-w-80 whitespace-normal">
                       <Link href={`/markets/${market.id}`} className="font-semibold">
                         {market.question}
@@ -173,38 +181,46 @@ export function MarketsExplorer({
                     </TableCell>
                     {tokens.map((token) => {
                       const asset = assets.find((m) => m.baseToken === token.baseToken);
+                      const impact = asset ? impactPercent(asset) : null;
                       return (
                         <TableCell key={token.baseToken}>
                           {asset ? (
-                            <Button
-                              variant="outline"
-                              nativeButton={false}
-                              render={<Link href={`/markets/${asset.id}`} />}
-                              className="h-auto min-w-24 flex-col gap-2 py-3"
+                            <Link
+                              href={`/markets/${asset.id}`}
+                              className={cn(
+                                buttonVariants({ variant: "ghost" }),
+                                "h-auto min-w-24 flex-col gap-2 border-0 py-3",
+                                impact === null
+                                  ? "bg-secondary hover:bg-secondary"
+                                  : impact >= 0
+                                    ? "bg-positive-soft hover:bg-positive-soft"
+                                    : "bg-danger-soft hover:bg-danger-soft",
+                              )}
                             >
-                              <Badge
-                                variant={
-                                  impactPercent(asset) === null
-                                    ? "secondary"
-                                    : (impactPercent(asset) ?? 0) >= 0
-                                      ? "positive"
-                                      : "destructive"
-                                }
+                              <span
+                                className={cn(
+                                  impact === null
+                                    ? "text-muted-foreground"
+                                    : impact >= 0
+                                      ? "text-positive"
+                                      : "text-destructive",
+                                )}
                               >
-                                {percent(impactPercent(asset))}
-                              </Badge>
+                                {percent(impact)}
+                              </span>
                               <span>{formatNumber(midpoint(asset.yes))}</span>
-                            </Button>
+                            </Link>
                           ) : (
                             "—"
                           )}
                         </TableCell>
                       );
                     })}
-                    <TableCell className="tabular-nums">
-                      {market.probability.quality === "valid" && market.probability.value !== null
-                        ? `${formatNumber(market.probability.value * 100, 0)}%`
-                        : "—"}
+                    <TableCell className="[&>[role=img]]:mx-auto">
+                      <ProbabilityGauge
+                        probability={market.probability}
+                        conditionId={market.mapping.conditionId}
+                      />
                     </TableCell>
                   </TableRow>
                 );

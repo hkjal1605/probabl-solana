@@ -13,6 +13,7 @@ const usd = new Intl.NumberFormat("en-US", {
 
 export const formatUsd = (value: number | null) =>
   value === null ? "Unavailable" : usd.format(value);
+export const formatCompactNumber = (value: number) => compact.format(value);
 export const formatCompactUsd = (value: number) => `$${compact.format(value)}`;
 export const formatProbability = (value: number | null) =>
   value === null ? "Withheld" : `${Math.round(value * 100)}%`;

@@ -1,7 +1,7 @@
 "use client";
+import { spotUsdValue } from "@conditional-stocks/shared/spot-prices";
 import { useWallet } from "@/components/providers/WalletProvider";
 import type { MarketView } from "@/types/api";
-import { spotUsdValue } from "@conditional-stocks/shared/spot-prices";
 import { usePositions } from "./useProtocolData";
 
 export function assetsForMarkets(markets: MarketView[]) {
@@ -15,6 +15,7 @@ export function assetsForMarkets(markets: MarketView[]) {
               {
                 token: market.quoteToken,
                 symbol: market.quoteTokenMetadata?.symbol ?? "USDC",
+                metadata: market.quoteTokenMetadata,
                 decimals: market.quoteTokenDecimals,
                 reference: spotUsdValue(market.quoteSpotReference),
               },
@@ -24,6 +25,7 @@ export function assetsForMarkets(markets: MarketView[]) {
               {
                 token: market.baseToken,
                 symbol: market.ticker,
+                metadata: market.baseTokenMetadata,
                 decimals: market.baseTokenDecimals,
                 reference: spotUsdValue(market.spotReference),
               },

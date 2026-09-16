@@ -42,11 +42,11 @@ export function PendingPayouts({ markets }: { markets: MarketView[] }) {
   );
   const rows = credits.data?.payouts ?? [];
   return (
-    <Card variant="panel" className="border">
-      <CardHeader>
+    <Card variant="panel" className="rounded-none border-0 bg-transparent">
+      <CardHeader className="border-0 px-0 pb-3">
         <CardTitle>Available vault credits</CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3 py-3">
+      <CardContent className="flex flex-col gap-3 px-0 py-0">
         <p className="text-sm text-muted-foreground">
           Settlement proceeds, refunds and deposited assets remain yours in the vault. They can fund
           another order in this market or be withdrawn. Withdraw to this wallet or another receiving
@@ -70,7 +70,7 @@ export function PendingPayouts({ markets }: { markets: MarketView[] }) {
                 ? "USDC"
                 : (market?.ticker ?? shortAddress(credit.collateralToken));
             return (
-              <Item key={credit.id} variant="outline">
+              <Item key={credit.id} variant="default" className="rounded-xl bg-card px-4 py-3">
                 <ItemContent>
                   <div>
                     <p className="font-medium">

@@ -49,7 +49,7 @@ export function SpotReference({
             <div className="text-xs text-muted-foreground">Spot reference · USD</div>
           </>
         )}
-        {label && (
+        {variant !== "market" && label && (
           <div className="text-xs text-muted-foreground">
             {label}
             {price?.priceUsd && ["stale", "unavailable", "restricted"].includes(status ?? "")

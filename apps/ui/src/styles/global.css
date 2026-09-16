@@ -239,6 +239,15 @@
 }
 
 @layer utilities {
+  .market-workspace-scrollbars-hidden,
+  .market-workspace-scrollbars-hidden * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .market-workspace-scrollbars-hidden::-webkit-scrollbar,
+  .market-workspace-scrollbars-hidden *::-webkit-scrollbar {
+    display: none;
+  }
   .trade-order-details {
     display: flex;
     flex-direction: column;

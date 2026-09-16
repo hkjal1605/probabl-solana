@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Field, FieldGroup, FieldSet, FieldLabel as Label } from "@/components/ui/field";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
-import { Input } from "@/components/ui/input";
 import {
   InputGroup,
   InputGroupAddon,
@@ -40,7 +39,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useOrderTicket } from "@/hooks/useOrderTicket";
 import { usePositions } from "@/hooks/useProtocolData";
 import { useWalletAssets } from "@/hooks/useWalletAssets";
-import { formatNumber, formatUsd } from "@/lib/format/display";
+import { formatCompactNumber, formatNumber, formatUsd } from "@/lib/format/display";
 import { marketPriceBound, quantityForSpend } from "@/lib/trading/entry";
 import type { MarketView } from "@/types/api";
 
@@ -51,7 +50,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
   const setPrefill = useUiStore((s) => s.setPrefill);
   const assets = useWalletAssets([market]),
     positions = usePositions();
-  const [kind, setKind] = useState<"Limit" | "Market">("Limit");
+  const [kind, setKind] = useState<"Limit" | "Market">("Market");
   const [entry, setEntry] = useState<"Quantity" | "Spend">("Quantity");
   const [spend, setSpend] = useState("");
   const [entryError, setEntryError] = useState<string | null>(null);
@@ -63,6 +62,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
     t.setFunding("claim");
     t.setQuantity(prefill.quantity);
     t.setPrice((prefill.branch === "YES" ? market.yes : market.no).bestBidExact ?? "");
+    t.setTif("gtc");
     t.setPreparation(null);
     setEntry("Quantity");
     setKind("Limit");
@@ -77,9 +77,17 @@ export function OrderTicket({ market }: { market: MarketView }) {
     t.setFunding,
     t.setQuantity,
     t.setPrice,
+    t.setTif,
     t.setPreparation,
     setPrefill,
   ]);
+  useEffect(() => {
+    if (t.submissionCount === 0) return;
+    setKind("Market");
+    setEntry("Quantity");
+    setSpend("");
+    setEntryError(null);
+  }, [t.submissionCount]);
   const edit = (action: () => void) => {
     setEntryError(null);
     action();
@@ -220,21 +228,25 @@ export function OrderTicket({ market }: { market: MarketView }) {
                       </Avatar>
                       {market.ticker}
                     </Label>
-                    <div className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                    <div className="flex min-w-0 items-center gap-1 whitespace-nowrap text-xs text-muted-foreground">
                       <WalletIcon className="size-3.5" aria-hidden="true" />
                       <InfoTooltip
                         content={
                           balanceError && available !== null ? "Last-known balance." : undefined
                         }
                       >
-                        <span>
+                        <span className="text-sm font-medium">
                           {available === null
                             ? "—"
-                            : formatTokenAmount(
-                                BigInt(available),
-                                t.side === "buy"
-                                  ? market.quoteTokenDecimals
-                                  : market.baseTokenDecimals,
+                            : formatCompactNumber(
+                                Number(
+                                  formatTokenAmount(
+                                    BigInt(available),
+                                    t.side === "buy"
+                                      ? market.quoteTokenDecimals
+                                      : market.baseTokenDecimals,
+                                  ),
+                                ),
                               )}{" "}
                           {t.side === "buy" ? "USDC" : market.ticker}
                           {t.funding === "claim" ? `-${t.branch}` : ""}
@@ -392,12 +404,15 @@ export function OrderTicket({ market }: { market: MarketView }) {
                               : t.submit()
                         }
                       >
-                        {(t.busy || t.reviewing) && <Spinner data-icon="inline-start" />}
-                        {!t.wallet.account
-                          ? "Connect wallet"
-                          : prepared?.funding.approvalCall
-                            ? "Fund order vault"
-                            : "Sign and place order"}
+                        {t.busy || t.reviewing ? (
+                          <Spinner />
+                        ) : !t.wallet.account ? (
+                          "Connect wallet"
+                        ) : prepared?.funding.approvalCall ? (
+                          "Fund order vault"
+                        ) : (
+                          "Sign and place order"
+                        )}
                       </Button>
                       {t.reviewError && (
                         <div
@@ -413,7 +428,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                     </CardContent>
                   </Card>
                 </div>
-                <Accordion>
+                <Accordion className="-mt-1">
                   <AccordionItem value="details">
                     <AccordionTrigger>Advanced order controls</AccordionTrigger>
                     <AccordionContent>
@@ -480,29 +495,6 @@ export function OrderTicket({ market }: { market: MarketView }) {
                             </Select>
                           </Field>
                         </div>
-                        {
-                          <Field>
-                            <Label htmlFor="max-fee-bps">Maximum trading fee (bps)</Label>
-                            <Input
-                              id="max-fee-bps"
-                              type="number"
-                              min="0"
-                              max="1000"
-                              step="1"
-                              value={t.maxFeeBps}
-                              onChange={(e) => edit(() => t.setMaxFeeBps(e.target.value))}
-                            />
-                            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                              100 bps = 1%. Fees come from received active claims. A fill above your
-                              signed cap reverts; inactive claims are unaffected.
-                            </p>
-                          </Field>
-                        }
-                        <p className="text-xs text-muted-foreground">
-                          Quantity step:{" "}
-                          {formatTokenAmount(BigInt(market.baseStep), market.baseTokenDecimals)}{" "}
-                          {market.ticker}. IOC releases any unfilled remainder.
-                        </p>
                       </div>
                     </AccordionContent>
                   </AccordionItem>
@@ -555,7 +547,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
           </FieldGroup>
         </FieldSet>
       </CardContent>
-      <CardFooter className="flex-col items-stretch gap-3 border-t-0">
+      <CardFooter className="-mt-1 flex-col items-stretch gap-3 border-t-0 pt-0">
         <div className="grid grid-cols-2 gap-2 text-xs leading-5">
           <Item variant="outline" size="sm">
             <ItemContent>

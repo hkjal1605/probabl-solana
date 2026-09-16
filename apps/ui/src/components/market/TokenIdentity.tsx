@@ -7,11 +7,13 @@ export function TokenIdentity({
   metadata,
   showName = true,
   iconSize = "default",
+  textSize = "default",
 }: {
   symbol: string;
   metadata?: TokenDisplayMetadata | undefined;
   showName?: boolean;
   iconSize?: "sm" | "default";
+  textSize?: "default" | "lg";
 }) {
   return (
     <InfoTooltip
@@ -25,9 +27,13 @@ export function TokenIdentity({
           </Avatar>
         )}
         <span className="flex min-w-0 flex-col gap-1">
-          <strong className="block truncate font-medium">{symbol}</strong>
+          <strong className={`block truncate font-medium ${textSize === "lg" ? "text-base" : ""}`}>
+            {symbol}
+          </strong>
           {metadata && showName && (
-            <span className="block truncate text-xs font-normal text-muted-foreground">
+            <span
+              className={`block truncate font-normal text-muted-foreground ${textSize === "lg" ? "text-sm" : "text-xs"}`}
+            >
               {metadata.name}
             </span>
           )}

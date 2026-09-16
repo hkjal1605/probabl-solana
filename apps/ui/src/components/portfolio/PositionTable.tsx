@@ -23,9 +23,11 @@ import type { MarketView } from "@/types/api";
 export function PositionTable({
   markets,
   inline = false,
+  variant = "table",
 }: {
   markets: MarketView[];
   inline?: boolean;
+  variant?: "table" | "portfolio";
 }) {
   const wallet = useWallet(),
     positions = usePositions(),
@@ -71,77 +73,138 @@ export function PositionTable({
     )
     .filter((row) => row.total > 0n);
   if (!rows.length) return <EmptyState>No stock positions in this event yet.</EmptyState>;
+  if (variant === "portfolio")
+    return (
+      <ul className="flex list-none flex-col gap-2" aria-label="Open positions">
+        {rows.map(({ market, branch, available, reserved, total }) => {
+          const mark = midpoint(branch === 0 ? market.yes : market.no);
+          return (
+            <li
+              className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-xl bg-card px-4 py-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(7rem,.6fr)_minmax(6rem,.45fr)_auto]"
+              key={`${market.id}-${branch}`}
+            >
+              <div className="min-w-0">
+                <p
+                  className={`text-base font-medium ${branch === 0 ? "text-positive" : "text-danger"}`}
+                >
+                  {market.ticker}-{branch === 0 ? "YES" : "NO"}
+                </p>
+                <p className="mt-1 truncate text-sm font-medium text-muted-foreground">
+                  {market.question}
+                </p>
+              </div>
+              <div className="text-right sm:text-left">
+                <p className="text-base font-medium tabular-nums">
+                  {formatNumber(tokenAmount(total.toString(), market.baseTokenDecimals), 4)}
+                </p>
+                <p className="mt-1 text-sm font-normal text-muted-foreground">
+                  {reserved > 0n
+                    ? `${formatTokenAmount(reserved, market.baseTokenDecimals)} reserved`
+                    : "Available"}
+                </p>
+              </div>
+              <div className="hidden sm:block">
+                <p className="text-base font-medium tabular-nums">{formatNumber(mark)}</p>
+                <p className="mt-1 text-sm font-normal text-muted-foreground">Mark</p>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="col-start-2 row-start-2 justify-self-end bg-danger-soft px-3 text-destructive hover:bg-danger-soft hover:text-destructive sm:col-start-4 sm:row-start-1"
+                disabled={
+                  available === 0n ||
+                  market.lifecycle !== "open" ||
+                  !positions.isDataFresh ||
+                  !orders.isDataFresh
+                }
+                onClick={() => {
+                  setPrefill({
+                    marketId: market.id,
+                    branch: branch === 0 ? "YES" : "NO",
+                    quantity: formatTokenAmount(available, market.baseTokenDecimals),
+                    nonce: Date.now(),
+                  });
+                  router.push(`/markets/${market.id}`);
+                }}
+              >
+                Close
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+    );
   return (
     <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Token</TableHead>
-            <TableHead>Size incl. reserved</TableHead>
-            <TableHead>Avg entry</TableHead>
-            <TableHead>Mark</TableHead>
-            <TableHead>Mark-to-entry</TableHead>
-            <TableHead />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map(({ market, branch, available, reserved, total }) => (
-            <TableRow key={`${market.id}-${branch}`}>
-              <TableCell
-                className={`font-semibold ${branch === 0 ? "text-positive" : "text-danger"}`}
+      <TableHeader>
+        <TableRow>
+          <TableHead>Token</TableHead>
+          <TableHead>Size incl. reserved</TableHead>
+          <TableHead>Avg entry</TableHead>
+          <TableHead>Mark</TableHead>
+          <TableHead>Mark-to-entry</TableHead>
+          <TableHead />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map(({ market, branch, available, reserved, total }) => (
+          <TableRow key={`${market.id}-${branch}`}>
+            <TableCell
+              className={`font-semibold ${branch === 0 ? "text-positive" : "text-danger"}`}
+            >
+              {market.ticker}-{branch === 0 ? "YES" : "NO"}
+            </TableCell>
+            <TableCell className="tabular-nums">
+              {formatNumber(tokenAmount(total.toString(), market.baseTokenDecimals), 4)}
+              {reserved > 0n && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {formatTokenAmount(reserved, market.baseTokenDecimals)} reserved
+                </p>
+              )}
+            </TableCell>
+            <TableCell className="tabular-nums text-muted-foreground">
+              <InfoTooltip content="Complete execution basis is not available from the canonical indexer.">
+                <span>—</span>
+              </InfoTooltip>
+            </TableCell>
+            <TableCell className="tabular-nums">
+              {formatNumber(midpoint(branch === 0 ? market.yes : market.no))}
+            </TableCell>
+            <TableCell className="tabular-nums text-muted-foreground">
+              <InfoTooltip content="An unknown cost basis cannot be treated as zero.">
+                <span>—</span>
+              </InfoTooltip>
+            </TableCell>
+            <TableCell>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={
+                  available === 0n ||
+                  market.lifecycle !== "open" ||
+                  !positions.isDataFresh ||
+                  !orders.isDataFresh
+                }
+                onClick={() => {
+                  setPrefill({
+                    marketId: market.id,
+                    branch: branch === 0 ? "YES" : "NO",
+                    quantity: formatTokenAmount(available, market.baseTokenDecimals),
+                    nonce: Date.now(),
+                  });
+                  if (inline)
+                    document
+                      .getElementById("trade-ticket")
+                      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  else router.push(`/markets/${market.id}`);
+                }}
               >
-                {market.ticker}-{branch === 0 ? "YES" : "NO"}
-              </TableCell>
-              <TableCell className="tabular-nums">
-                {formatNumber(tokenAmount(total.toString(), market.baseTokenDecimals), 4)}
-                {reserved > 0n && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {formatTokenAmount(reserved, market.baseTokenDecimals)} reserved
-                  </p>
-                )}
-              </TableCell>
-              <TableCell className="tabular-nums text-muted-foreground">
-                <InfoTooltip content="Complete execution basis is not available from the canonical indexer.">
-                  <span>—</span>
-                </InfoTooltip>
-              </TableCell>
-              <TableCell className="tabular-nums">
-                {formatNumber(midpoint(branch === 0 ? market.yes : market.no))}
-              </TableCell>
-              <TableCell className="tabular-nums text-muted-foreground">
-                <InfoTooltip content="An unknown cost basis cannot be treated as zero.">
-                  <span>—</span>
-                </InfoTooltip>
-              </TableCell>
-              <TableCell>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={
-                    available === 0n ||
-                    market.lifecycle !== "open" ||
-                    !positions.isDataFresh ||
-                    !orders.isDataFresh
-                  }
-                  onClick={() => {
-                    setPrefill({
-                      marketId: market.id,
-                      branch: branch === 0 ? "YES" : "NO",
-                      quantity: formatTokenAmount(available, market.baseTokenDecimals),
-                      nonce: Date.now(),
-                    });
-                    if (inline)
-                      document
-                        .getElementById("trade-ticket")
-                        ?.scrollIntoView({ behavior: "smooth", block: "center" });
-                    else router.push(`/markets/${market.id}`);
-                  }}
-                >
-                  Close
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
+                Close
+              </Button>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
     </Table>
   );
 }

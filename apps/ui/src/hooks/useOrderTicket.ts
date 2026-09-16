@@ -14,6 +14,7 @@ import { protocolConfig } from "@/config/protocol";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useTradingReadiness } from "@/hooks/useTradingReadiness";
 import { atomicTransaction, verifyAtomicResponse } from "@/lib/trading/atomic";
+import { marketPriceBound } from "@/lib/trading/entry";
 import { createOrder, previewOrder } from "@/lib/trading/order";
 import { reviewWithSession } from "@/lib/trading/review-session";
 import { solana } from "@/lib/trading/rpc";
@@ -41,13 +42,18 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     readiness = useTradingReadiness(market);
   const [branch, setBranch] = useState<"YES" | "NO">("YES"),
     [side, setSide] = useState<"buy" | "sell">("buy"),
-    [tif, setTif] = useState<"gtc" | "ioc">("gtc"),
+    [tif, setTif] = useState<"gtc" | "ioc">("ioc"),
     [funding, setFunding] = useState<"whole" | "claim">("whole");
-  const book = branch === "YES" ? market.yes : market.no,
-    defaultPrice = side === "buy" ? book.bestAskExact : book.bestBidExact;
-  const [quantity, setQuantity] = useState("1"),
+  const initialMarketPrice = () => {
+    try {
+      return marketPriceBound(market, "YES", "buy");
+    } catch {
+      return "";
+    }
+  };
+  const [quantity, setQuantity] = useState(""),
     [maxFeeBps, setMaxFeeBps] = useState("0"),
-    [price, setPrice] = useState(defaultPrice ?? "");
+    [price, setPrice] = useState(initialMarketPrice);
   const context = [
     wallet.account,
     market.id,
@@ -70,6 +76,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewNonce, setReviewNonce] = useState(0);
   const [completedContext, setCompletedContext] = useState<string | null>(null);
+  const [submissionCount, setSubmissionCount] = useState(0);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const { busy, run } = useAsyncAction(context);
   useEffect(() => {
@@ -129,8 +136,10 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       throw new Error("API order identity differs.");
     if (BigInt(result.plan.deadline) <= BigInt(Math.floor(Date.now() / 1000)))
       throw new Error("The returned quote has already expired. Retry review.");
+    const next = { ...result, funding: localFunding, order: candidate };
     setNowSeconds(Math.floor(Date.now() / 1000));
-    setPreparation({ ...result, funding: localFunding, order: candidate });
+    setPreparation(next);
+    return next;
   };
   const latestPrepare = useRef(prepareAction);
   latestPrepare.current = prepareAction;
@@ -197,6 +206,50 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       setPreparation(null);
       await prepareAction(assertCurrent);
     });
+  const submitPreparation = async (current: Preparation, assertCurrent: () => void) => {
+    if (!wallet.account || !readiness.ready)
+      throw new Error("Review a currently tradable order first.");
+    await readiness.requireReady();
+    assertCurrent();
+    if (
+      current.order.maker !== wallet.account ||
+      BigInt(current.plan.deadline) <= BigInt(Math.floor(Date.now() / 1000))
+    )
+      throw new Error("Wallet changed or quote expired.");
+    const expected = atomicTransaction({
+      order: current.order,
+      plan: current.plan,
+      account: wallet.account,
+      config: protocolConfig,
+    });
+    const token = wallet.sessionToken ?? (await wallet.authenticate());
+    assertCurrent();
+    const response = await api.prepare<unknown>(
+      "orders/transaction",
+      { order: current.order, plan: current.plan },
+      token,
+    );
+    const transaction = verifyAtomicResponse(expected, response);
+    assertCurrent();
+    const signature = await wallet.sendTransaction(transaction);
+    toast.add({
+      type: "success",
+      title:
+        "Order confirmed: " +
+        signature.slice(0, 10) +
+        "… Fills and balances update after indexing.",
+    });
+    setCompletedContext(context);
+    setPreparation(null);
+    setQuantity("");
+    setTif("ioc");
+    try {
+      setPrice(marketPriceBound(market, branch, side));
+    } catch {
+      setPrice("");
+    }
+    setSubmissionCount((value) => value + 1);
+  };
   const approve = () =>
     run(async (assertCurrent) => {
       if (!preparation?.funding.approvalCall) return;
@@ -217,44 +270,16 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       });
       setPreparation(null);
       assertCurrent();
-      await prepareAction(assertCurrent);
+      const fundedPreparation = await prepareAction(assertCurrent);
+      assertCurrent();
+      if (fundedPreparation.funding.approvalCall || !fundedPreparation.funding.balanceSufficient)
+        throw new Error("Confirmed funding is not available yet. Retry the order.");
+      await submitPreparation(fundedPreparation, assertCurrent);
     });
   const submit = () =>
     run(async (assertCurrent) => {
-      if (!preparation || !wallet.account || !readiness.ready)
-        throw new Error("Review a currently tradable order first.");
-      await readiness.requireReady();
-      assertCurrent();
-      if (
-        preparation.order.maker !== wallet.account ||
-        BigInt(preparation.plan.deadline) <= BigInt(Math.floor(Date.now() / 1000))
-      )
-        throw new Error("Wallet changed or quote expired.");
-      const expected = atomicTransaction({
-        order: preparation.order,
-        plan: preparation.plan,
-        account: wallet.account,
-        config: protocolConfig,
-      });
-      const token = wallet.sessionToken ?? (await wallet.authenticate());
-      assertCurrent();
-      const response = await api.prepare<unknown>(
-        "orders/transaction",
-        { order: preparation.order, plan: preparation.plan },
-        token,
-      );
-      const transaction = verifyAtomicResponse(expected, response);
-      assertCurrent();
-      const signature = await wallet.sendTransaction(transaction);
-      toast.add({
-        type: "success",
-        title:
-          "Order confirmed: " +
-          signature.slice(0, 10) +
-          "… Fills and balances update after indexing.",
-      });
-      setCompletedContext(context);
-      setPreparation(null);
+      if (!preparation) throw new Error("Review a currently tradable order first.");
+      await submitPreparation(preparation, assertCurrent);
     });
   return {
     wallet,
@@ -276,6 +301,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     busy,
     reviewing,
     reviewError,
+    submissionCount,
     preparation,
     setPreparation,
     quoteExpired,
