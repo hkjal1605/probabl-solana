@@ -1,7 +1,11 @@
 "use client";
 
-import { Badge } from "@conditional-stocks/ui-kit/badge";
-import { Card, CardContent } from "@conditional-stocks/ui-kit/card";
+import { useQuery } from "@tanstack/react-query";
+import { History } from "lucide-react";
+import { QueryStatus } from "@/components/data/QueryStatus";
+import { useAdmin } from "@/components/providers/AdminProvider";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -9,11 +13,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@conditional-stocks/ui-kit/table";
-import { useQuery } from "@tanstack/react-query";
-import { History } from "lucide-react";
-import { QueryStatus } from "@/components/data/QueryStatus";
-import { useAdmin } from "@/components/providers/AdminProvider";
+} from "@/components/ui/table";
 import { adminConfig } from "@/config/protocol";
 import { adminRequest } from "@/lib/admin-api";
 import { short, time } from "@/lib/format";
@@ -37,7 +37,7 @@ export function HistoryClient() {
   });
   const actions = query.data?.actions ?? [];
   return (
-    <Card className="mt-8">
+    <Card className="ring-0">
       <CardContent>
         <QueryStatus query={query} />
         {actions.length === 0 ? (

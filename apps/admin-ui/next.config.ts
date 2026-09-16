@@ -8,7 +8,6 @@ const nextConfig: NextConfig = {
     "@conditional-stocks/domain",
     "@conditional-stocks/market-data",
     "@conditional-stocks/contract-bindings",
-    "@conditional-stocks/ui-kit",
   ],
   poweredByHeader: false,
 };

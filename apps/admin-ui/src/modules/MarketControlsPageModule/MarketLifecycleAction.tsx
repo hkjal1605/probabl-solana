@@ -1,11 +1,14 @@
 "use client";
 import { SolanaClient } from "@conditional-stocks/solana-client";
-import { lifecycleTransaction,initializeMarketVaults } from "@conditional-stocks/solana-client/admin";
-import { Button } from "@conditional-stocks/ui-kit/button";
+import {
+  initializeMarketVaults,
+  lifecycleTransaction,
+} from "@conditional-stocks/solana-client/admin";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAdmin } from "@/components/providers/AdminProvider";
+import { Button } from "@/components/ui/button";
 import { adminConfig } from "@/config/protocol";
 import { waitForAdminReceipt } from "@/lib/transactions";
 
@@ -24,9 +27,14 @@ export function MarketLifecycleAction({
     [busy, setBusy] = useState(false),
     [hash, setHash] = useState<string | null>(null);
   const lock = useRef(false);
-  const transaction = lifecycleTransaction(adminConfig,admin.account??adminConfig.marketAdmin,marketId,
-    action==="openMarket"?0:action==="freezeAtCutoff"?2:1,reason);
-  const data=transaction.data;
+  const transaction = lifecycleTransaction(
+    adminConfig,
+    admin.account ?? adminConfig.marketAdmin,
+    marketId,
+    action === "openMarket" ? 0 : action === "freezeAtCutoff" ? 2 : 1,
+    reason,
+  );
+  const data = transaction.data;
   const label =
     action === "openMarket"
       ? "Open market"
@@ -38,9 +46,13 @@ export function MarketLifecycleAction({
     lock.current = true;
     setBusy(true);
     try {
-      if(action==="openMarket") {
-        const setup=await initializeMarketVaults(new SolanaClient(adminConfig),marketId,transaction.from);
-        for(const step of setup)await admin.sendTransaction(step);
+      if (action === "openMarket") {
+        const setup = await initializeMarketVaults(
+          new SolanaClient(adminConfig),
+          marketId,
+          transaction.from,
+        );
+        for (const step of setup) await admin.sendTransaction(step);
       }
       const submitted = await admin.sendTransaction(transaction);
       setHash(submitted);
@@ -56,12 +68,13 @@ export function MarketLifecycleAction({
     }
   };
   return (
-    <div className="mt-4 space-y-3">
+    <div className="mt-4 flex flex-col gap-3">
       {reviewed && (
-        <div className="rounded-lg border p-3 text-xs leading-6">
+        <div className="rounded-lg bg-secondary p-3 text-xs leading-6">
           <p>
-            {label} on {adminConfig.chainName}. This costs SOL. Opening a new market first initializes its six vaults in separate transactions. The live program checks
-            timing and wallet roles before the wallet request.
+            {label} on {adminConfig.chainName}. This costs SOL. Opening a new market first
+            initializes its six vaults in separate transactions. The live program checks timing and
+            wallet roles before the wallet request.
           </p>
           <p className="break-all font-mono">Registry: {transaction.to}</p>
           <p className="break-all font-mono">Market: {marketId}</p>

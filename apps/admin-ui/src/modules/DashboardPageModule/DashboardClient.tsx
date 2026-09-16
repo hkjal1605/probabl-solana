@@ -1,11 +1,11 @@
 "use client";
 
-import { Badge } from "@conditional-stocks/ui-kit/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@conditional-stocks/ui-kit/card";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, ClipboardCheck, FileCheck2, Gavel, ShieldAlert } from "lucide-react";
 import { QueryStatus } from "@/components/data/QueryStatus";
 import { useAdmin } from "@/components/providers/AdminProvider";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { adminConfig } from "@/config/protocol";
 import { adminRequest, type EvidenceView, requestJson } from "@/lib/admin-api";
 import { time } from "@/lib/format";
@@ -38,7 +38,7 @@ export function DashboardClient() {
     <>
       <QueryStatus query={evidence} />
       <QueryStatus query={health} />
-      <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric
           icon={ClipboardCheck}
           label="Awaiting review"
@@ -80,7 +80,7 @@ export function DashboardClient() {
         />
       </div>
       <div className="mt-5 grid gap-5 xl:grid-cols-[1.25fr_0.75fr]">
-        <Card>
+        <Card className="ring-0">
           <CardHeader>
             <CardTitle>Workflow queue</CardTitle>
           </CardHeader>
@@ -92,11 +92,11 @@ export function DashboardClient() {
                   : "Evidence data is not available yet."}
               </p>
             ) : (
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 {packets.slice(0, 6).map((item) => (
                   <div
                     key={item.envelope.packetHash}
-                    className="flex items-center gap-3 rounded-xl border p-3"
+                    className="flex items-center gap-3 rounded-xl bg-secondary p-3"
                   >
                     <span className="flex size-9 items-center justify-center rounded-lg bg-muted">
                       <ClipboardCheck className="size-4" />
@@ -128,11 +128,11 @@ export function DashboardClient() {
             )}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="ring-0">
           <CardHeader>
             <CardTitle>Service pulse</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="flex flex-col gap-3">
             {services.map((service) => (
               <div key={service.name} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -168,7 +168,7 @@ function Metric({
   value: string;
 }) {
   return (
-    <Card size="sm">
+    <Card className="ring-0" size="sm">
       <CardContent>
         <Icon className="size-4 text-muted-foreground" />
         <p className="mt-4 text-xs text-muted-foreground">{label}</p>

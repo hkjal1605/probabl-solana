@@ -1,12 +1,12 @@
 "use client";
 import { assertSignInChallenge, SolanaClient } from "@conditional-stocks/solana-client";
 import { type AdminTransaction, preflightAdmin } from "@conditional-stocks/solana-client/admin";
-import { Toaster } from "@conditional-stocks/ui-kit/sonner";
-import { ThemeProvider } from "@conditional-stocks/ui-kit/theme";
-import { TooltipProvider } from "@conditional-stocks/ui-kit/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import bs58 from "bs58";
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { ThemeProvider } from "@/components/providers/ThemeProvider";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { adminConfig } from "@/config/protocol";
 import { requestJson, SESSION_EXPIRED_EVENT } from "@/lib/admin-api";
 import {
@@ -442,7 +442,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
             sendTransaction,
           }}
         >
-          <TooltipProvider delayDuration={250}>
+          <TooltipProvider delay={250}>
             {children}
             <Toaster richColors position="bottom-right" />
           </TooltipProvider>

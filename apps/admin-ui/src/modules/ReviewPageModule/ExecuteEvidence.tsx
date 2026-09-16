@@ -1,10 +1,10 @@
 "use client";
 import type { AdminDeployment } from "@conditional-stocks/solana-client/admin";
-import { Button } from "@conditional-stocks/ui-kit/button";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAdmin } from "@/components/providers/AdminProvider";
+import { Button } from "@/components/ui/button";
 import { adminConfig } from "@/config/protocol";
 import { type AdminPreview, adminRequest, type EvidenceView } from "@/lib/admin-api";
 import { verifyAdminPreview, waitForAdminReceipt } from "@/lib/transactions";
@@ -62,7 +62,7 @@ export function ExecuteEvidence({
     }
   };
   return (
-    <div className="mt-4 space-y-3 border-t pt-4">
+    <div className="mt-4 flex flex-col gap-3 pt-4">
       <p className="text-sm text-muted-foreground">
         This is a real onchain transaction and costs SOL.{" "}
         {authority
@@ -70,7 +70,7 @@ export function ExecuteEvidence({
           : "Connect the required Solana authority wallet to execute directly. Multisig execution requires a separately reviewed integration."}
       </p>
       <Button
-        variant="brand"
+        variant="default"
         disabled={!authority || busy || admin.signing || Boolean(hash)}
         onClick={execute}
       >

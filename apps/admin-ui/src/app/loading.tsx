@@ -1,4 +1,4 @@
-import { Skeleton } from "@conditional-stocks/ui-kit/skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 export default function Loading() {
   return (
     <main className="mx-auto w-full max-w-[1180px] px-5 py-10 sm:px-8">

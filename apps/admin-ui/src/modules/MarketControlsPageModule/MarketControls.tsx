@@ -1,8 +1,15 @@
 "use client";
 
-import { Badge } from "@conditional-stocks/ui-kit/badge";
-import { Button } from "@conditional-stocks/ui-kit/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@conditional-stocks/ui-kit/card";
+import { lifecycleTransaction } from "@conditional-stocks/solana-client/admin";
+import { useQuery } from "@tanstack/react-query";
+import { ClipboardCopy, Snowflake } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+import { QueryStatus } from "@/components/data/QueryStatus";
+import { useAdmin } from "@/components/providers/AdminProvider";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -10,16 +17,9 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@conditional-stocks/ui-kit/dialog";
-import { Input } from "@conditional-stocks/ui-kit/input";
-import { Label } from "@conditional-stocks/ui-kit/label";
-import { useQuery } from "@tanstack/react-query";
-import { ClipboardCopy, Snowflake } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
-import { lifecycleTransaction } from "@conditional-stocks/solana-client/admin";
-import { useAdmin } from "@/components/providers/AdminProvider";
-import { QueryStatus } from "@/components/data/QueryStatus";
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { adminConfig } from "@/config/protocol";
 import { requestJson } from "@/lib/admin-api";
 import { short } from "@/lib/format";
@@ -51,13 +51,13 @@ export function MarketControls() {
   });
   const markets = query.data?.markets ?? [];
   return (
-    <div className="mt-8 grid gap-4">
+    <div className="grid gap-4">
       <QueryStatus query={query} />
       {markets.map((market) => (
         <MarketControl key={market.id} market={market} />
       ))}
       {query.isSuccess && markets.length === 0 && (
-        <div className="flex min-h-64 items-center justify-center rounded-2xl border border-dashed text-sm text-muted-foreground">
+        <div className="flex min-h-64 items-center justify-center rounded-xl bg-card text-sm text-muted-foreground">
           No canonical markets are indexed.
         </div>
       )}
@@ -65,7 +65,7 @@ export function MarketControls() {
   );
 }
 function MarketControl({ market }: { market: Market }) {
-  const admin=useAdmin();
+  const admin = useAdmin();
   const [reason, setReason] = useState("");
   const [payload, setPayload] = useState<string | null>(null);
   const build = () => {
@@ -73,7 +73,13 @@ function MarketControl({ market }: { market: Market }) {
       toast.error("Market registry address is not configured");
       return;
     }
-    const transaction=lifecycleTransaction(adminConfig,admin.account??adminConfig.marketAdmin,market.id,1,reason);
+    const transaction = lifecycleTransaction(
+      adminConfig,
+      admin.account ?? adminConfig.marketAdmin,
+      market.id,
+      1,
+      reason,
+    );
     setPayload(
       JSON.stringify(
         {
@@ -86,7 +92,7 @@ function MarketControl({ market }: { market: Market }) {
     );
   };
   return (
-    <Card>
+    <Card className="ring-0">
       <CardHeader className="flex-row items-center justify-between">
         <div>
           <CardTitle className="font-mono text-sm">{short(market.id, 8)}</CardTitle>
@@ -112,11 +118,9 @@ function MarketControl({ market }: { market: Market }) {
         )}
         {(market.state === 1 || market.state === 2) && (
           <Dialog>
-            <DialogTrigger asChild>
-              <Button className="mt-4" variant="destructive">
-                <Snowflake />
-                Prepare emergency freeze
-              </Button>
+            <DialogTrigger render={<Button className="mt-4" variant="destructive" />}>
+              <Snowflake />
+              Prepare emergency freeze
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>

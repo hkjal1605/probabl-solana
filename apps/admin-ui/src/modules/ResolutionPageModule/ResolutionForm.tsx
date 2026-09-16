@@ -1,12 +1,5 @@
 "use client";
 
-import { Alert, AlertDescription, AlertTitle } from "@conditional-stocks/ui-kit/alert";
-import { Badge } from "@conditional-stocks/ui-kit/badge";
-import { Button } from "@conditional-stocks/ui-kit/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@conditional-stocks/ui-kit/card";
-import { Input } from "@conditional-stocks/ui-kit/input";
-import { Label } from "@conditional-stocks/ui-kit/label";
-import { Tabs, TabsList, TabsTrigger } from "@conditional-stocks/ui-kit/tabs";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, FileSearch, Gavel, LoaderCircle } from "lucide-react";
 import Link from "next/link";
@@ -15,6 +8,20 @@ import { toast } from "sonner";
 import { isAddress, zeroAddress } from "viem";
 import { QueryStatus } from "@/components/data/QueryStatus";
 import { useAdmin } from "@/components/providers/AdminProvider";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { adminConfig } from "@/config/protocol";
 import { adminRequest, type EvidenceView, fetchMarketMetadata, requestJson } from "@/lib/admin-api";
 import { short } from "@/lib/format";
@@ -152,43 +159,45 @@ export function ResolutionForm() {
             MARKET_ADMIN approves the evidence, then executes begin-resolution and resolve-market as
             separate onchain transactions.
           </span>
-          <Button asChild className="mt-4" variant="outline">
-            <Link href="/review">Continue to review queue</Link>
-          </Button>
+          <Link href="/review" className={`${buttonVariants({ variant: "outline" })} mt-4`}>
+            Continue to review queue
+          </Link>
         </AlertDescription>
       </Alert>
     );
   return (
     <fieldset disabled={busy} className="grid gap-5">
       <QueryStatus query={marketsQuery} />
-      <Card>
+      <Card className="ring-0">
         <CardHeader>
           <CardTitle>1. Select the local market</CardTitle>
         </CardHeader>
         <CardContent>
           <Label htmlFor="resolution-market">Frozen or awaiting-resolution market</Label>
-          <select
-            id="resolution-market"
-            className="mt-2 h-10 w-full rounded-lg border bg-background px-3 text-sm"
+          <Select
             value={marketId}
-            onChange={(event) => {
-              setMarketId(event.target.value);
+            onValueChange={(value) => {
+              setMarketId(value ?? "");
               setSnapshot(null);
             }}
           >
-            <option value="">Select canonical market</option>
-            {markets.map((market) => (
-              <option value={market.id} key={market.id}>
-                {short(market.id, 8)} · {market.state === 3 ? "frozen" : "awaiting resolution"}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger id="resolution-market" className="mt-2 w-full bg-secondary">
+              <SelectValue placeholder="Select canonical market" />
+            </SelectTrigger>
+            <SelectContent>
+              {markets.map((market) => (
+                <SelectItem value={market.id} key={market.id}>
+                  {short(market.id, 8)} · {market.state === 3 ? "frozen" : "awaiting resolution"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {marketsQuery.isSuccess && markets.length === 0 && (
             <p className="mt-3 text-xs text-warning">No eligible market is currently indexed.</p>
           )}
         </CardContent>
       </Card>
-      <Card>
+      <Card className="ring-0">
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>2. Capture final Polymarket evidence</CardTitle>
@@ -236,11 +245,11 @@ export function ResolutionForm() {
         </CardContent>
       </Card>
       {snapshot && (
-        <Card>
+        <Card className="ring-0">
           <CardHeader>
             <CardTitle>3. Declare and cross-reference the payout</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="flex flex-col gap-4">
             <div>
               <Label>Local payout vector</Label>
               <Tabs value={outcome} onValueChange={(value) => setOutcome(value as typeof outcome)}>
@@ -303,7 +312,7 @@ export function ResolutionForm() {
             <Button
               className="w-full"
               size="lg"
-              variant="brand"
+              variant="default"
               onClick={prepare}
               disabled={
                 busy ||

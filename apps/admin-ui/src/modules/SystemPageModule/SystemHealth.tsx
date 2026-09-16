@@ -1,17 +1,24 @@
 "use client";
 
-import { Badge } from "@conditional-stocks/ui-kit/badge";
-import { Button } from "@conditional-stocks/ui-kit/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@conditional-stocks/ui-kit/card";
-import { Input } from "@conditional-stocks/ui-kit/input";
-import { Label } from "@conditional-stocks/ui-kit/label";
+import { digest, envelope, key, SolanaClient } from "@conditional-stocks/solana-client";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, ClipboardCopy, PauseCircle, PlayCircle, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { SolanaClient,digest,key,envelope } from "@conditional-stocks/solana-client";
-import { useAdmin } from "@/components/providers/AdminProvider";
 import { QueryStatus } from "@/components/data/QueryStatus";
+import { useAdmin } from "@/components/providers/AdminProvider";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { adminConfig } from "@/config/protocol";
 import { requestJson } from "@/lib/admin-api";
 import { time } from "@/lib/format";
@@ -26,7 +33,7 @@ interface Health {
   }>;
 }
 export function SystemHealth() {
-  const admin=useAdmin();
+  const admin = useAdmin();
   const query = useQuery({
     queryKey: ["health", adminConfig.chainId],
     queryFn: ({ signal }) => requestJson<Health>("/api/health", { signal }),
@@ -40,13 +47,22 @@ export function SystemHealth() {
       toast.error("Exchange address is not configured");
       return;
     }
-    const client=new SolanaClient(adminConfig),transaction=envelope([client.ix("pause",{paused,reason:[...digest(reason)]},
-      {guardian:key(admin.account??adminConfig.marketAdmin),config:client.config})],client.program);
+    const client = new SolanaClient(adminConfig),
+      transaction = envelope(
+        [
+          client.ix(
+            "pause",
+            { paused, reason: [...digest(reason)] },
+            { guardian: key(admin.account ?? adminConfig.marketAdmin), config: client.config },
+          ),
+        ],
+        client.program,
+      );
     setPayload(
       JSON.stringify(
         {
           ...transaction,
-          metadata: { paused, reason,genesisHash:adminConfig.genesisHash },
+          metadata: { paused, reason, genesisHash: adminConfig.genesisHash },
         },
         null,
         2,
@@ -56,9 +72,9 @@ export function SystemHealth() {
   return (
     <>
       <QueryStatus query={query} />
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {(query.data?.services ?? []).map((service) => (
-          <Card key={service.name}>
+          <Card className="ring-0" key={service.name}>
             <CardContent>
               <div className="flex items-center justify-between">
                 <Activity className="size-4 text-muted-foreground" />
@@ -91,30 +107,33 @@ export function SystemHealth() {
           Refresh
         </Button>
       </div>
-      <Card className="mt-8">
+      <Card className="mt-8 ring-0">
         <CardHeader>
           <CardTitle>Incident action · global trading state</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-            Prepare Solana instructions for a guardian to pause or resume new order opening. Existing direct recovery
-            paths stay available according to contract rules.
+            Prepare Solana instructions for a guardian to pause or resume new order opening.
+            Existing direct recovery paths stay available according to contract rules.
           </p>
           <div className="mt-5 grid gap-4 sm:grid-cols-[180px_1fr_auto]">
             <div>
               <Label htmlFor="pause-state">Action</Label>
-              <select
-                id="pause-state"
-                className="mt-2 h-10 w-full rounded-lg border bg-background px-3 text-sm"
+              <Select
                 value={paused ? "pause" : "resume"}
-                onChange={(event) => {
-                  setPaused(event.target.value === "pause");
+                onValueChange={(value) => {
+                  setPaused(value === "pause");
                   setPayload("");
                 }}
               >
-                <option value="pause">Pause trading</option>
-                <option value="resume">Resume trading</option>
-              </select>
+                <SelectTrigger id="pause-state" className="mt-2 w-full bg-secondary">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pause">Pause trading</SelectItem>
+                  <SelectItem value="resume">Resume trading</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label htmlFor="incident-reason">Incident reason</Label>
@@ -131,7 +150,7 @@ export function SystemHealth() {
             </div>
             <Button
               className="self-end"
-              variant={paused ? "destructive" : "brand"}
+              variant={paused ? "destructive" : "default"}
               onClick={build}
               disabled={!reason}
             >

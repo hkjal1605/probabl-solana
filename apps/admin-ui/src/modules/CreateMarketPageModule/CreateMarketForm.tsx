@@ -2,19 +2,20 @@
 
 import { canonicalStringify } from "@conditional-stocks/market-data";
 import { key, SolanaClient } from "@conditional-stocks/solana-client";
-import { Alert, AlertDescription, AlertTitle } from "@conditional-stocks/ui-kit/alert";
-import { Badge } from "@conditional-stocks/ui-kit/badge";
-import { Button } from "@conditional-stocks/ui-kit/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@conditional-stocks/ui-kit/card";
-import { Input } from "@conditional-stocks/ui-kit/input";
-import { Label } from "@conditional-stocks/ui-kit/label";
-import { Textarea } from "@conditional-stocks/ui-kit/textarea";
 import { FileSearch, LoaderCircle, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { formatUnits } from "viem";
 import { useAdmin } from "@/components/providers/AdminProvider";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { adminConfig } from "@/config/protocol";
 import { adminRequest, type EvidenceView, fetchMarketMetadata } from "@/lib/admin-api";
 import { dateTimeInputToUnixSeconds, unixSecondsToDateTimeInput } from "@/lib/date-time";
@@ -198,9 +199,9 @@ export function CreateMarketForm() {
     });
 
   return (
-    <div className="space-y-5">
-      <fieldset disabled={busy || started} className="space-y-5">
-        <Card>
+    <div className="flex flex-col gap-5">
+      <fieldset disabled={busy || started} className="flex flex-col gap-5">
+        <Card className="ring-0">
           <CardHeader>
             <CardTitle>1. Choose one Polymarket condition</CardTitle>
           </CardHeader>
@@ -231,7 +232,7 @@ export function CreateMarketForm() {
               metadata for every pair below.
             </p>
             {source && (
-              <div className="mt-4 rounded-xl border bg-muted/45 p-4">
+              <div className="mt-4 rounded-xl bg-secondary p-4">
                 <p className="font-semibold">{source.normalized.question}</p>
                 <p className="mt-2 break-all font-mono text-xs">
                   Condition: {source.normalized.conditionId}
@@ -256,7 +257,7 @@ export function CreateMarketForm() {
         </Card>
         {source && (
           <>
-            <Card>
+            <Card className="ring-0">
               <CardHeader>
                 <CardTitle>2. Add base tokens</CardTitle>
               </CardHeader>
@@ -288,7 +289,7 @@ export function CreateMarketForm() {
                   Load and verify tokens
                 </Button>
                 {verified && (
-                  <div className="mt-4 rounded-xl border p-4">
+                  <div className="mt-4 rounded-xl bg-secondary p-4">
                     <Label htmlFor="batch-quote">
                       Shared quote mint · fixed by the deployed protocol
                     </Label>
@@ -308,7 +309,7 @@ export function CreateMarketForm() {
               </CardContent>
             </Card>
             {verified && rows.length > 0 && (
-              <Card>
+              <Card className="ring-0">
                 <CardHeader>
                   <CardTitle>3. Define caps per pair and shared timing</CardTitle>
                   <p className="text-sm text-muted-foreground">
@@ -317,7 +318,7 @@ export function CreateMarketForm() {
                     are per market, not per event.
                   </p>
                 </CardHeader>
-                <CardContent className="space-y-5">
+                <CardContent className="flex flex-col gap-5">
                   <div className="grid gap-4 sm:grid-cols-2">
                     {(["tradingOpen", "tradingCutoff"] as const).map((name) => (
                       <div key={name}>
@@ -361,7 +362,7 @@ export function CreateMarketForm() {
                     </div>
                   </div>
                   {rows.map((row, index) => (
-                    <div key={row.mint.address} className="rounded-xl border p-4">
+                    <div key={row.mint.address} className="rounded-xl bg-secondary p-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <h3 className="font-semibold">
                           Pair {index + 1}: {short(row.mint.address)} /{" "}
@@ -423,12 +424,15 @@ export function CreateMarketForm() {
                       }}
                     />
                   </div>
-                  <label className="flex items-start gap-3 rounded-xl border p-4">
-                    <input
-                      type="checkbox"
-                      className="mt-1 size-4 accent-[var(--brand)]"
+                  <label
+                    htmlFor="immutable-field-confirmation"
+                    className="flex items-start gap-3 rounded-xl bg-secondary p-4"
+                  >
+                    <Checkbox
+                      id="immutable-field-confirmation"
+                      className="mt-1"
                       checked={confirmed}
-                      onChange={(event) => setConfirmed(event.target.checked)}
+                      onCheckedChange={setConfirmed}
                     />
                     <span className="text-sm leading-6">
                       <strong className="block">
@@ -442,7 +446,7 @@ export function CreateMarketForm() {
                   <Button
                     className="w-full"
                     size="lg"
-                    variant="brand"
+                    variant="default"
                     onClick={prepare}
                     disabled={!confirmed}
                   >
@@ -495,7 +499,10 @@ export function CreateMarketForm() {
           {plans.map((plan, index) => {
             const result = results[index];
             return (
-              <section key={plan.expectedMarketId} className="space-y-3 rounded-xl border p-4">
+              <section
+                key={plan.expectedMarketId}
+                className="flex flex-col gap-3 rounded-xl bg-secondary p-4"
+              >
                 <h3 className="font-semibold">
                   Pair {index + 1}: {short(plan.base.address)} / {short(plan.quote.address)}
                 </h3>

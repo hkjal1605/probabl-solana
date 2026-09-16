@@ -1,18 +1,5 @@
 "use client";
 
-import { Badge } from "@conditional-stocks/ui-kit/badge";
-import { Button } from "@conditional-stocks/ui-kit/button";
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@conditional-stocks/ui-kit/sheet";
-import { ThemeSelect } from "@conditional-stocks/ui-kit/theme";
-import { cn } from "@conditional-stocks/ui-kit/utils";
 import {
   Activity,
   ClipboardCheck,
@@ -21,17 +8,34 @@ import {
   History,
   LayoutDashboard,
   Menu,
+  Moon,
   PlusCircle,
   Settings2,
+  Sun,
   Wallet,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AdminLogo } from "@/components/brand/AdminLogo";
 import { useAdmin } from "@/components/providers/AdminProvider";
+import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
+import { Spinner } from "@/components/ui/spinner";
 import { adminConfig } from "@/config/protocol";
 import { short } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 const nav = [
   { href: "/", icon: LayoutDashboard, label: "Overview" },
@@ -45,31 +49,29 @@ const nav = [
 function Navigation({ mobile = false }: { mobile?: boolean }) {
   const pathname = usePathname();
   return (
-    <nav className="space-y-1" aria-label="Operator navigation">
+    <nav className="flex flex-col gap-1" aria-label="Operator navigation">
       {nav.map((item) => {
-        const link = (
-          <Button
-            key={item.href}
-            asChild
-            variant="ghost"
-            className={cn(
-              "w-full justify-start",
-              (pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))) &&
-                "bg-accent text-accent-foreground",
-            )}
-          >
-            <Link href={item.href}>
-              <item.icon />
-              {item.label}
-            </Link>
-          </Button>
+        const active =
+          pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
+        const className = cn(
+          buttonVariants({ variant: "ghost" }),
+          "w-full justify-start px-3 text-sm",
+          active && "bg-muted text-foreground",
         );
         return mobile ? (
-          <SheetClose asChild key={item.href}>
-            {link}
+          <SheetClose
+            key={item.href}
+            nativeButton={false}
+            render={<Link href={item.href} className={className} />}
+          >
+            <item.icon data-icon="inline-start" />
+            {item.label}
           </SheetClose>
         ) : (
-          link
+          <Link key={item.href} href={item.href} className={className}>
+            <item.icon data-icon="inline-start" />
+            {item.label}
+          </Link>
         );
       })}
     </nav>
@@ -78,18 +80,19 @@ function Navigation({ mobile = false }: { mobile?: boolean }) {
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const admin = useAdmin();
   const allowed = admin.role === "operator";
+  const { resolvedTheme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   return (
-    <div className="min-h-svh lg:grid lg:grid-cols-[250px_1fr]">
-      <aside className="sticky top-0 hidden h-svh border-r bg-sidebar p-5 lg:flex lg:flex-col">
+    <div className="min-h-svh lg:grid lg:grid-cols-[224px_1fr]">
+      <aside className="sticky top-0 hidden h-svh border-r bg-background p-4 lg:flex lg:flex-col">
         <AdminLogo />
-        <p className="mt-3 text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-          Operations
-        </p>
-        <div className="mt-10">
+        <p className="mt-2 text-xs font-medium text-muted-foreground">Operations</p>
+        <div className="mt-8">
           <Navigation />
         </div>
-        <div className="mt-auto rounded-xl border bg-card p-3 text-xs">
-          <p className="font-semibold">Authority boundary</p>
+        <div className="mt-auto rounded-xl bg-card p-3 text-xs">
+          <p className="font-medium">Authority boundary</p>
           <p className="mt-1 leading-5 text-muted-foreground">
             This UI prepares and verifies actions. Roles and Solana signatures remain enforced
             outside it.
@@ -97,13 +100,15 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
       <div className="min-w-0">
-        <header className="sticky top-0 z-40 flex h-18 items-center gap-2 border-b bg-background/85 px-4 backdrop-blur-xl sm:gap-3 sm:px-8">
+        <header className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b bg-background px-3 sm:gap-3 sm:px-5">
           <div className="lg:hidden">
             <Sheet>
-              <SheetTrigger asChild>
-                <Button size="icon-sm" variant="outline" aria-label="Open operator navigation">
-                  <Menu />
-                </Button>
+              <SheetTrigger
+                render={
+                  <Button size="icon-sm" variant="ghost" aria-label="Open operator navigation" />
+                }
+              >
+                <Menu />
               </SheetTrigger>
               <SheetContent side="left">
                 <SheetHeader>
@@ -118,15 +123,26 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               </SheetContent>
             </Sheet>
           </div>
-          <AdminLogo />
-          <span className="hidden text-xs font-semibold text-muted-foreground xl:block">
-            Operations
-          </span>
-          <div className="ml-auto">
-            <ThemeSelect />
+          <div className="lg:hidden">
+            <AdminLogo />
           </div>
+          <span className="hidden text-sm font-medium text-foreground lg:block">Operations</span>
+          <Button
+            className="ml-auto"
+            variant="ghost"
+            size="icon-sm"
+            disabled={!mounted}
+            aria-label={
+              mounted
+                ? `Switch to ${resolvedTheme === "dark" ? "light" : "dark"} theme`
+                : "Change color theme"
+            }
+            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+          >
+            {mounted && resolvedTheme === "dark" ? <Sun /> : <Moon />}
+          </Button>
           <Badge
-            className="hidden md:inline-flex"
+            className="hidden sm:inline-flex"
             variant={admin.chainId === adminConfig.chainId ? "positive" : "warning"}
           >
             {admin.chainId === null
@@ -138,7 +154,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           {admin.account ? (
             <Button
               variant="outline"
-              className="size-10 px-0 sm:w-auto sm:px-4"
+              className="size-7 px-0 sm:w-auto sm:px-3"
               aria-label={`Disconnect operator ${short(admin.account)}`}
               onClick={admin.disconnect}
             >
@@ -147,8 +163,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </Button>
           ) : (
             <Button
-              variant="brand"
-              className="size-10 px-0 sm:w-auto sm:px-4"
+              variant="default"
+              className="size-7 px-0 sm:w-auto sm:px-3"
               aria-label="Connect operator"
               disabled={admin.restoring}
               onClick={() =>
@@ -171,10 +187,11 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         )}
         {admin.restoring ? (
           <main
-            className="flex min-h-[75svh] items-center justify-center px-5 text-sm text-muted-foreground"
+            className="flex min-h-[75svh] items-center justify-center px-5 text-muted-foreground"
             role="status"
+            aria-label="Restoring operator session"
           >
-            Restoring wallet connection and checking operator roles…
+            <Spinner className="size-5" />
           </main>
         ) : !admin.account || !admin.token || !allowed || admin.chainId !== adminConfig.chainId ? (
           <main className="mx-auto flex min-h-[75svh] max-w-xl flex-col items-center justify-center px-5 text-center">
@@ -200,7 +217,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               (admin.role === "unverified" || admin.chainId !== adminConfig.chainId) ? (
               <Button
                 className="mt-6"
-                variant="brand"
+                variant="default"
                 disabled={admin.checkingNetwork}
                 onClick={() =>
                   admin
@@ -219,7 +236,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             ) : admin.account ? (
               <Button
                 className="mt-6"
-                variant="brand"
+                variant="default"
                 disabled={admin.signing}
                 onClick={() =>
                   admin
@@ -234,7 +251,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             ) : (
               <Button
                 className="mt-6"
-                variant="brand"
+                variant="default"
                 onClick={() =>
                   admin
                     .connect()

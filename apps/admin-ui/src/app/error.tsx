@@ -1,7 +1,7 @@
 "use client";
-import { Button } from "@conditional-stocks/ui-kit/button";
 import { CircleAlert, RotateCcw } from "lucide-react";
 import { useEffect } from "react";
+import { Button } from "@/components/ui/button";
 import { logger } from "@/lib/logger";
 export default function ErrorPage({
   error,

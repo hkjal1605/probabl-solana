@@ -1,9 +1,16 @@
 "use client";
 
 import type { AdminDeployment } from "@conditional-stocks/solana-client/admin";
-import { Badge } from "@conditional-stocks/ui-kit/badge";
-import { Button } from "@conditional-stocks/ui-kit/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@conditional-stocks/ui-kit/card";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { CheckCircle2, ClipboardCopy, FileCheck2, LoaderCircle, XCircle } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+import { QueryStatus } from "@/components/data/QueryStatus";
+import { useAdmin } from "@/components/providers/AdminProvider";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -11,16 +18,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@conditional-stocks/ui-kit/dialog";
-import { Input } from "@conditional-stocks/ui-kit/input";
-import { Label } from "@conditional-stocks/ui-kit/label";
-import { Textarea } from "@conditional-stocks/ui-kit/textarea";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ClipboardCopy, FileCheck2, LoaderCircle, XCircle } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
-import { QueryStatus } from "@/components/data/QueryStatus";
-import { useAdmin } from "@/components/providers/AdminProvider";
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { adminConfig } from "@/config/protocol";
 import { adminRequest, type EvidenceView } from "@/lib/admin-api";
 import { short, time } from "@/lib/format";
@@ -55,7 +56,7 @@ export function ReviewQueue() {
   });
   const packets = query.data?.packets ?? [];
   return (
-    <div className="mt-8 grid gap-4">
+    <div className="grid gap-4">
       <QueryStatus query={query} />
       {packets.map((packet) => (
         <PacketCard
@@ -65,7 +66,7 @@ export function ReviewQueue() {
         />
       ))}
       {query.isSuccess && packets.length === 0 && (
-        <div className="flex min-h-64 items-center justify-center rounded-2xl border border-dashed text-sm text-muted-foreground">
+        <div className="flex min-h-64 items-center justify-center rounded-xl bg-card text-sm text-muted-foreground">
           No evidence packets are waiting.
         </div>
       )}
@@ -123,12 +124,12 @@ export function PacketCard({
     }
   };
   return (
-    <Card>
+    <Card className="ring-0">
       <CardHeader className="flex-row items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
             <Badge
-              variant={packet.envelope.packet.kind === "market-creation" ? "brand" : "warning"}
+              variant={packet.envelope.packet.kind === "market-creation" ? "default" : "warning"}
             >
               {packet.envelope.packet.kind.replace("market-", "")}
             </Badge>
@@ -164,7 +165,7 @@ export function PacketCard({
         <code className="text-xs text-muted-foreground">{short(hash, 6)}</code>
       </CardHeader>
       <CardContent>
-        <details className="mb-4 rounded-xl border p-3">
+        <details className="mb-4 rounded-xl bg-secondary p-3">
           <summary className="cursor-pointer text-sm font-medium">
             Inspect complete evidence, sources and review history
           </summary>
@@ -182,11 +183,9 @@ export function PacketCard({
         </details>
         {packet.status === "prepared" && (
           <Dialog>
-            <DialogTrigger asChild>
-              <Button variant="outline">
-                <FileCheck2 />
-                Review and approve
-              </Button>
+            <DialogTrigger render={<Button variant="outline" />}>
+              <FileCheck2 />
+              Review and approve
             </DialogTrigger>
             <DialogContent className="max-w-xl">
               <DialogHeader>
@@ -197,16 +196,20 @@ export function PacketCard({
                   execution.
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-2">
+              <div className="flex flex-col gap-2">
                 {keys.map((key) => (
-                  <label key={key} className="flex items-start gap-3 rounded-xl border p-3">
-                    <input
-                      type="checkbox"
+                  <label
+                    key={key}
+                    htmlFor={`review-check-${key}`}
+                    className="flex items-start gap-3 rounded-xl bg-secondary p-3"
+                  >
+                    <Checkbox
+                      id={`review-check-${key}`}
                       checked={checks[key] === true}
-                      onChange={(event) =>
-                        setChecks((current) => ({ ...current, [key]: event.target.checked }))
+                      onCheckedChange={(checked) =>
+                        setChecks((current) => ({ ...current, [key]: checked }))
                       }
-                      className="mt-0.5 size-4 accent-[var(--brand)]"
+                      className="mt-0.5"
                     />
                     <span className="text-sm font-medium">{key.replaceAll("-", " ")}</span>
                   </label>
@@ -223,7 +226,7 @@ export function PacketCard({
                   Reject
                 </Button>
                 <Button
-                  variant="brand"
+                  variant="default"
                   onClick={() => review("approve")}
                   disabled={busy || keys.some((key) => !checks[key])}
                 >
@@ -235,7 +238,7 @@ export function PacketCard({
         )}
         {packet.status === "approved" && (
           <Button
-            variant={preview ? "outline" : "brand"}
+            variant={preview ? "outline" : "default"}
             onClick={prepareTransaction}
             disabled={busy || admin.signing}
           >
@@ -244,7 +247,7 @@ export function PacketCard({
           </Button>
         )}
         {preview && packet.status === "approved" && (
-          <div className="mt-4 rounded-xl border bg-muted/45 p-4">
+          <div className="mt-4 rounded-xl bg-secondary p-4">
             <div className="flex items-center justify-between">
               <p className="font-semibold">Reviewed transaction · {preview.action}</p>
               <Button
@@ -328,7 +331,7 @@ function Reconcile({
     }
   };
   return (
-    <div className="mt-4 border-t pt-4">
+    <div className="mt-4 pt-4">
       <Label htmlFor={`tx-${packetHash}`}>
         Executed transaction hash · reconcile after indexing
       </Label>
