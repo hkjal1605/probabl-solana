@@ -28,8 +28,8 @@ export function OutcomePrice({ market, branch }: { market: MarketView; branch: "
       className={cn(
         "flex min-h-8 flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-sm px-2 py-1 tabular-nums to-transparent",
         branch === "YES" ? "bg-linear-to-l" : "flex-row-reverse bg-linear-to-r text-right",
-        impact !== null && impact > 0 && "from-positive/20",
-        impact !== null && impact < 0 && "from-destructive/20",
+        impact !== null && impact > 0 && "from-positive/10",
+        impact !== null && impact < 0 && "from-destructive/10",
       )}
     >
       <span className="font-medium">{formatNumber(price)}</span>

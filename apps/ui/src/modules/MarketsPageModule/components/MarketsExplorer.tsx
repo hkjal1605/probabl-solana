@@ -37,6 +37,11 @@ import {
 } from "@/lib/markets/presentation";
 import { cn } from "@/lib/utils";
 import type { MarketView } from "@/types/api";
+import { FeaturedMarketBanner } from "./FeaturedMarketBanner";
+
+const FEATURED_MARKET_SLUG = "us-x-china-tariff-agreement-by-december-31";
+const FEATURED_CONDITION_ID =
+  "0xf9c12aa09c5317d1cf8d26d0dc100a69ecf70e5132e81ef078d5336f63923b5e";
 
 export function MarketsExplorer({
   markets: initial,
@@ -50,6 +55,13 @@ export function MarketsExplorer({
   const filters = useUiStore((s) => s.filters),
     setFilters = useUiStore((s) => s.setFilters);
   const groups = groupMarkets(markets);
+  const featured = groups.find((assets) =>
+    assets.some(
+      (market) =>
+        market.mapping.conditionId.toLowerCase() === FEATURED_CONDITION_ID ||
+        market.mapping.polymarketUrl.includes(FEATURED_MARKET_SLUG),
+    ),
+  );
   const visible = sortEventGroups(groups
     .filter((assets) =>
       assets.some(
@@ -64,7 +76,8 @@ export function MarketsExplorer({
     a.ticker.localeCompare(b.ticker),
   );
   return (
-    <Page variant="terminal" className="pt-5">
+    <Page variant="terminal" className="page-scrollbars-hidden pt-5">
+      {featured && <FeaturedMarketBanner markets={featured} />}
       <div className="mb-4 overflow-x-auto">
         <Segmented
           label="Market category"

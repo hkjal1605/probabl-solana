@@ -6,6 +6,7 @@ import { useWallet } from "@/components/providers/WalletProvider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataError, EmptyState, Page } from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useMarkets, useOrders, usePositions, useTrades } from "@/hooks/useProtocolData";
 import { useWalletAssets } from "@/hooks/useWalletAssets";
 import { formatCompactNumber, formatNumber, tokenAmount } from "@/lib/format/display";
@@ -13,6 +14,7 @@ import { groupMarkets, sortEventGroups } from "@/lib/markets/presentation";
 import { walletTradeRows } from "@/lib/portfolio/presentation";
 import type { MarketView, PositionView } from "@/types/api";
 import { PortfolioEventCard } from "./PortfolioEventCard";
+import { PortfolioEventSkeleton } from "./PortfolioEventSkeleton";
 import { PortfolioTradeHistory } from "./PortfolioTradeHistory";
 
 const vaultAvailable = (creditBalances?: Record<string, string>) =>
@@ -67,6 +69,8 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
     return claims.some((position) => ids.has(position.marketId));
   }).length;
   const tradeRows = walletTradeRows(tradesQuery.trades, ordersQuery.orders, markets);
+  const eventsPending = marketQuery.isPending || ordersQuery.isPending || positionsQuery.isPending;
+  const tradesPending = eventsPending || tradesQuery.isPending;
 
   return (
     <Page className="page-scrollbars-hidden max-w-[1280px] px-5 py-8 sm:px-6 sm:py-10">
@@ -92,10 +96,14 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
               <h1 className="text-4xl font-medium tracking-tight sm:text-[40px] sm:leading-11">
                 Portfolio
               </h1>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {claimEvents} {claimEvents === 1 ? "event" : "events"} with claims ·{" "}
-                {activeOrders.length} open {activeOrders.length === 1 ? "order" : "orders"}
-              </p>
+              {ordersQuery.isPending || positionsQuery.isPending ? (
+                <Skeleton className="mt-2 h-5 w-56" aria-label="Loading portfolio summary" />
+              ) : (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {claimEvents} {claimEvents === 1 ? "event" : "events"} with claims ·{" "}
+                  {activeOrders.length} open {activeOrders.length === 1 ? "order" : "orders"}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -137,9 +145,13 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                 <p className="eyebrow uppercase tracking-[0.12em] text-muted-foreground">
                   Total balance
                 </p>
-                <p className="mt-2 text-3xl font-medium tracking-tight tabular-nums sm:text-[40px] sm:leading-11">
-                  {total === null ? "—" : `$${formatNumber(total, 2)}`}
-                </p>
+                {assetQuery.isPending && balances.length === 0 ? (
+                  <Skeleton className="mt-2 h-11 w-40" aria-label="Loading total balance" />
+                ) : (
+                  <p className="mt-2 text-3xl font-medium tracking-tight tabular-nums sm:text-[40px] sm:leading-11">
+                    {total === null ? "—" : `$${formatNumber(total, 2)}`}
+                  </p>
+                )}
                 <p className="mt-2 text-xs text-muted-foreground">Whole assets · estimated value</p>
               </div>
               {assetQuery.isInitialError ? (
@@ -147,6 +159,19 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                   message="Token balances are unavailable."
                   retry={() => void assetQuery.refetch()}
                 />
+              ) : assetQuery.isPending && balances.length === 0 ? (
+                <div
+                  role="status"
+                  aria-label="Loading token balances"
+                  className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-4 lg:grid-cols-7"
+                >
+                  {Array.from({ length: 6 }, (_, index) => (
+                    <div key={index} aria-hidden="true" className="flex flex-col gap-2">
+                      <Skeleton className="h-5 w-12" />
+                      <Skeleton className="h-7 w-20" />
+                    </div>
+                  ))}
+                </div>
               ) : balances.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No supported token balances yet.</p>
               ) : (
@@ -168,7 +193,12 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
 
           <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
             <section id="portfolio-events" className="flex min-w-0 flex-col gap-5">
-              {eventGroups.length === 0 ? (
+              {eventGroups.length === 0 && eventsPending ? (
+                <>
+                  <PortfolioEventSkeleton />
+                  <PortfolioEventSkeleton />
+                </>
+              ) : eventGroups.length === 0 ? (
                 <Card variant="panel" className="rounded-xl bg-card">
                   <EmptyState>No event positions, orders, or claims yet.</EmptyState>
                 </Card>
@@ -183,7 +213,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                 ))
               )}
             </section>
-            <PortfolioTradeHistory rows={tradeRows} />
+            <PortfolioTradeHistory rows={tradeRows} isPending={tradesPending} />
           </div>
         </div>
       )}

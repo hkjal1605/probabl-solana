@@ -3,11 +3,18 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/page";
+import { Skeleton } from "@/components/ui/skeleton";
 import { displayPrice, formatNumber, formatTime, tokenAmount } from "@/lib/format/display";
 import { tradeHistoryCsv, type WalletTradeRow } from "@/lib/portfolio/presentation";
 import { cn } from "@/lib/utils";
 
-export function PortfolioTradeHistory({ rows }: { rows: WalletTradeRow[] }) {
+export function PortfolioTradeHistory({
+  rows,
+  isPending = false,
+}: {
+  rows: WalletTradeRow[];
+  isPending?: boolean;
+}) {
   const exportCsv = () => {
     const url = URL.createObjectURL(
       new Blob([tradeHistoryCsv(rows)], { type: "text/csv;charset=utf-8" }),
@@ -29,7 +36,17 @@ export function PortfolioTradeHistory({ rows }: { rows: WalletTradeRow[] }) {
         </Button>
       </CardHeader>
       <CardContent className="px-0 pb-2">
-        {!rows.length ? (
+        {isPending && !rows.length ? (
+          <div role="status" aria-label="Loading trade history" className="flex flex-col gap-2">
+            {Array.from({ length: 3 }, (_, index) => (
+              <div key={index} aria-hidden="true" className="flex flex-col gap-2 px-5 py-4 pl-7">
+                <Skeleton className="h-5 w-4/5" />
+                <Skeleton className="h-4 w-3/5" />
+                <Skeleton className="h-4 w-2/5" />
+              </div>
+            ))}
+          </div>
+        ) : !rows.length ? (
           <EmptyState>No wallet fills yet.</EmptyState>
         ) : (
           <ol className="list-none">
