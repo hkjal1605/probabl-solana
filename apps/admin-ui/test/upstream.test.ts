@@ -45,9 +45,23 @@ test("admin defaults use the deployed API for both gateway and indexer", async (
     "https://api-solana.probabl.trade/v1/admin/evidence",
     "https://api-solana.probabl.trade/markets?limit=10",
   ]);
-  expect(redirects).toEqual(["manual", "error"]);
+  expect(redirects).toEqual(["manual", "manual"]);
   expect(gateway.status).toBe(200);
   expect(indexer.status).toBe(200);
+});
+
+test("indexer redirects remain fail-closed on edge runtimes", async () => {
+  globalThis.fetch = (async (_input, _init) =>
+    new Response(null, {
+      status: 302,
+      headers: { location: "https://attacker.invalid" },
+    })) as typeof fetch;
+  const response = await indexerGet(
+    new NextRequest("http://localhost:3002/api/indexer/markets"),
+    { params: Promise.resolve({ path: ["markets"] }) },
+  );
+  expect(response.status).toBe(503);
+  expect(response.headers.get("location")).toBeNull();
 });
 
 test("explicit origins are read lazily and local-validator overrides remain possible", () => {

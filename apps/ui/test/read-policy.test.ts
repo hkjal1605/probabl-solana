@@ -126,3 +126,24 @@ test("partial book refresh retains rows only for identical assets, without makin
       .markets[0]!.yes,
   ).toBe(next.yes);
 });
+test("partial metadata and probability failures never replace a known event with placeholders", () => {
+  const market = {
+    ...fixtureMarkets[0]!,
+    question: "A real Polymarket event?",
+    description: "Resolution rules",
+    imageUrl: "https://example.com/event.png",
+    probability: { ...fixtureMarkets[0]!.probability, value: 0.57 },
+  };
+  const next = {
+    ...market,
+    question: `Conditional market ${market.id.slice(0, 8)}`,
+    description: "Immutable conditional stock market with manual resolution.",
+    imageUrl: null,
+    probability: { ...market.probability, value: null, quality: "disconnected" as const },
+  };
+  const merged = retainBookDisplays({ markets: [market] }, { markets: [next] }).markets[0]!;
+  expect(merged.question).toBe(market.question);
+  expect(merged.description).toBe(market.description);
+  expect(merged.imageUrl).toBe(market.imageUrl);
+  expect(merged.probability.value).toBe(0.57);
+});

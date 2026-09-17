@@ -28,9 +28,13 @@ export async function GET(
     target.search = request.nextUrl.search;
     const response = await fetch(target, {
       cache: "no-store",
-      redirect: "error",
+      redirect: "manual",
       signal: AbortSignal.timeout(5_000),
     });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
+      throw new Error("Upstream redirects are not permitted");
+    }
     return new Response(response.body, {
       headers: { ...privateResponseHeaders, "content-type": "application/json" },
       status: response.status,

@@ -1,13 +1,13 @@
 "use client";
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
+import { apiUrl } from "@/services/constants";
 import {
   indexStreamHealthy,
   parseIndexUpdate,
   parseStreamWallet,
   setIndexStreamHealthy,
 } from "@/services/index-stream";
-import { apiUrl } from "@/services/constants";
-import { resources, refreshStores } from "@/stores/createResourceStore";
+import { refreshStores, resources } from "@/stores/createResourceStore";
 import { useWallet } from "./WalletProvider";
 
 const IndexStreamProvider = ({ children }: { children: ReactNode }) => {
@@ -51,7 +51,8 @@ const IndexStreamProvider = ({ children }: { children: ReactNode }) => {
             const changed =
               reset ||
               (name === "markets" && update.markets.some((m) => key === "all" || key === m)) ||
-              (["trades", "resolution"].includes(name) && update.markets.includes(key)) ||
+              (["trades", "resolution"].includes(name) &&
+                (key === "all" ? update.markets.length > 0 : update.markets.includes(key))) ||
               (["wallet-orders", "payout-credits"].includes(name) && update.owners.includes(key));
             if (changed) void active.refresh();
             else if (!["positions", "trading-readiness"].includes(name)) {
@@ -78,5 +79,6 @@ const IndexStreamProvider = ({ children }: { children: ReactNode }) => {
   }, [account]);
   return children;
 };
+
 export { IndexStreamProvider };
 export default IndexStreamProvider;

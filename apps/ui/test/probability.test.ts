@@ -5,6 +5,7 @@ import {
   expireProbability,
   parseProbabilityMessage,
   probabilityStreamUrl,
+  retainProbabilityDisplay,
 } from "../src/services/probability";
 
 test("probability streams use our API and canonical condition IDs", () => {
@@ -26,8 +27,11 @@ test("cached display allows the cache window without rewriting timestamps or pro
   const view = parseProbabilityMessage({ topic: `probability.${id}`, value: tick }, id);
   const at = Number(tick.observedAtMs);
   expect(expireCachedProbability(view, at + 60_000)).toEqual(view);
-  expect(expireCachedProbability(view, at + 90_001).quality).toBe("stale");
-  expect(expireCachedProbability({ ...view, quality: "disconnected" }, at + 1000).value).toBeNull();
+  expect(expireCachedProbability(view, at + 90_001)).toMatchObject({
+    quality: "stale",
+    value: 0.5,
+  });
+  expect(expireCachedProbability({ ...view, quality: "disconnected" }, at + 1000).value).toBe(0.5);
 });
 
 const id = `0x${"11".repeat(32)}`;
@@ -56,4 +60,24 @@ test("browser locally expires a quiet feed and rejects another condition", () =>
   const view = parseProbabilityMessage({ topic: `probability.${id}`, value: tick }, id);
   expect(expireProbability(view, Number(tick.observedAtMs) + 31000).quality).toBe("stale");
   expect(() => parseProbabilityMessage({ topic: "wrong", value: tick }, id)).toThrow();
+});
+test("a quality transition without a midpoint retains the last display value and timestamp", () => {
+  const previous = parseProbabilityMessage({ topic: `probability.${id}`, value: tick }, id);
+  const disconnected = parseProbabilityMessage(
+    {
+      topic: `probability.${id}`,
+      value: {
+        ...tick,
+        quality: "disconnected",
+        midpointX6: null,
+        observedAtMs: String(Date.now()),
+      },
+    },
+    id,
+  );
+  expect(retainProbabilityDisplay(previous, disconnected)).toMatchObject({
+    observedAt: previous.observedAt,
+    quality: "disconnected",
+    value: 0.5,
+  });
 });

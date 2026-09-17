@@ -30,7 +30,7 @@ test("reference tokens and typography are centralized without the old Manrope CS
     "--card: #0d0f12",
     "--foreground: #f0f3f6",
     "--border: #1b1f23",
-    "--primary: #2997ff",
+    "--primary: #00e191",
     "--muted-foreground: #9096a5",
   ]) {
     expect(css).toContain(token);

@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "probabl-admin-ui",
+  "account_id": "d0b56668a3d06078d1ae87fc54671202",
+  "main": ".open-next/worker.js",
+  // Current UTC date supported by the pinned workerd runtime.
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "preview_urls": false,
+  // Keep any service origins configured in the Cloudflare dashboard. Public
+  // Next variables are compiled into the client build from .env.local.
+  "keep_vars": true,
+  "vars": {
+    "PROBABL_HOSTING": "cloudflare",
+    "API_URL": "https://api-solana.probabl.trade",
+    "INDEXER_URL": "https://api-solana.probabl.trade",
+    "INDEXER_HEALTH_ORIGIN": "https://api-solana.probabl.trade",
+    "POLYMARKET_INGESTOR_URL": "https://api-solana.probabl.trade"
+  },
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "probabl-admin-ui" }],
+  "observability": { "enabled": true },
+  "dev": { "ip": "127.0.0.1", "port": 8788 }
+}

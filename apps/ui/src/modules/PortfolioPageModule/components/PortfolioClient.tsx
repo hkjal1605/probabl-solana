@@ -1,22 +1,27 @@
 "use client";
 
-import BoringAvatar from "boring-avatars";
 import { WalletCards } from "lucide-react";
-import { TokenIdentity } from "@/components/market/TokenIdentity";
-import { ClaimTable } from "@/components/portfolio/ClaimTable";
-import { PositionTable } from "@/components/portfolio/PositionTable";
+import Link from "next/link";
 import { useWallet } from "@/components/providers/WalletProvider";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { DataError, EmptyState, Page } from "@/components/ui/page";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useMarkets, useOrders, usePositions } from "@/hooks/useProtocolData";
+import { useMarkets, useOrders, usePositions, useTrades } from "@/hooks/useProtocolData";
 import { useWalletAssets } from "@/hooks/useWalletAssets";
-import { formatCompactNumber, formatNumber, shortAddress, tokenAmount } from "@/lib/format/display";
-import type { MarketView } from "@/types/api";
-import { PendingPayouts } from "./PendingPayouts";
+import { formatCompactNumber, formatNumber, tokenAmount } from "@/lib/format/display";
+import { groupMarkets, sortEventGroups } from "@/lib/markets/presentation";
+import { walletTradeRows } from "@/lib/portfolio/presentation";
+import type { MarketView, PositionView } from "@/types/api";
+import { PortfolioEventCard } from "./PortfolioEventCard";
+import { PortfolioTradeHistory } from "./PortfolioTradeHistory";
 
 const vaultAvailable = (creditBalances?: Record<string, string>) =>
   Object.values(creditBalances ?? {}).reduce((sum, amount) => sum + BigInt(amount), 0n);
+
+const hasClaims = (position: PositionView) =>
+  [position.stockYes, position.stockNo, position.quoteYes, position.quoteNo].some(
+    (amount) => BigInt(amount) > 0n,
+  );
 
 export function PortfolioClient({ markets: initial }: { markets: MarketView[] }) {
   const wallet = useWallet();
@@ -24,6 +29,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
   const { markets } = marketQuery;
   const ordersQuery = useOrders();
   const positionsQuery = usePositions();
+  const tradesQuery = useTrades();
   const assetQuery = useWalletAssets(markets);
   const activeOrders = ordersQuery.orders.filter((order) => order.status === "open");
   const balances = assetQuery.balances
@@ -33,14 +39,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
       return { ...asset, vault, walletAmount, available: walletAmount + vault };
     })
     .filter((asset) => asset.available > 0n);
-  const positions = positionsQuery.positions.filter((position) =>
-    [position.stockYes, position.stockNo].some((amount) => BigInt(amount) > 0n),
-  );
-  const claims = positionsQuery.positions.filter((position) =>
-    [position.stockYes, position.stockNo, position.quoteYes, position.quoteNo].some(
-      (amount) => BigInt(amount) > 0n,
-    ),
-  );
+  const claims = positionsQuery.positions.filter(hasClaims);
   const valuesKnown =
     balances.length > 0 &&
     assetQuery.isDataFresh &&
@@ -53,31 +52,24 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
         0,
       )
     : null;
-  const allocation =
-    total && total > 0
-      ? balances
-          .map((asset) => ({
-            symbol: asset.symbol,
-            share:
-              (tokenAmount(asset.available.toString(), asset.decimals) * (asset.reference ?? 0)) /
-              total,
-          }))
-          .filter((asset) => asset.share > 0)
-          .sort((a, b) => b.share - a.share)
-      : [];
-  let allocationOffset = 0;
-  const allocationBackground = allocation.length
-    ? `conic-gradient(${allocation
-        .map((asset, index) => {
-          const start = allocationOffset;
-          allocationOffset += asset.share * 100;
-          return `var(--chart-${(index % 5) + 1}) ${start}% ${allocationOffset}%`;
-        })
-        .join(", ")})`
-    : undefined;
+  const relevantMarketIds = new Set([
+    ...ordersQuery.orders.map((order) => order.marketId),
+    ...positionsQuery.positions.filter(hasClaims).map((position) => position.marketId),
+  ]);
+  const eventGroups = sortEventGroups(
+    groupMarkets(markets).filter((group) =>
+      group.some((market) => relevantMarketIds.has(market.id)),
+    ),
+    "newest",
+  );
+  const claimEvents = eventGroups.filter((group) => {
+    const ids = new Set(group.map((market) => market.id));
+    return claims.some((position) => ids.has(position.marketId));
+  }).length;
+  const tradeRows = walletTradeRows(tradesQuery.trades, ordersQuery.orders, markets);
 
   return (
-    <Page className="max-w-[1120px] py-8 sm:px-6 sm:py-10">
+    <Page className="page-scrollbars-hidden max-w-[1280px] px-5 py-8 sm:px-6 sm:py-10">
       {!wallet.account ? (
         <div className="flex min-h-[60dvh] items-center justify-center">
           <div className="flex max-w-sm flex-col items-center gap-4 text-center">
@@ -87,161 +79,114 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
             <div>
               <h1 className="text-xl font-medium">Your portfolio</h1>
               <p className="mt-2 text-sm text-muted-foreground">
-                Connect your wallet to view tokens, positions, and claims.
+                Connect your wallet to view balances, event positions, claims, and fills.
               </p>
             </div>
             <Button onClick={() => wallet.connect().catch(() => undefined)}>Connect wallet</Button>
           </div>
         </div>
       ) : (
-        <>
-          <header className="mb-10">
-            <div className="flex items-center gap-2">
-              <span
-                className="flex size-8 shrink-0 overflow-hidden rounded-full"
-                aria-hidden="true"
-              >
-                <BoringAvatar name={wallet.account} variant="beam" size={32} />
-              </span>
-              <p className="text-base font-semibold text-foreground">
-                {shortAddress(wallet.account, 6)}
+        <div className="flex flex-col gap-7">
+          <header className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-4xl font-medium tracking-tight sm:text-[40px] sm:leading-11">
+                Portfolio
+              </h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {claimEvents} {claimEvents === 1 ? "event" : "events"} with claims ·{" "}
+                {activeOrders.length} open {activeOrders.length === 1 ? "order" : "orders"}
               </p>
             </div>
-            <div className="mt-4 flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Total worth</p>
-                <h1 className="mt-1 text-4xl font-medium tracking-tight tabular-nums sm:text-5xl">
-                  {total === null ? "—" : `$${formatNumber(total, 2)}`}
-                </h1>
-                {total === null && balances.length > 0 && (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    A current reference price is unavailable for one or more tokens.
-                  </p>
-                )}
-              </div>
-              <div className="flex flex-col gap-7 sm:flex-row sm:items-center">
-                <dl className="grid grid-cols-2 gap-x-10 gap-y-5 sm:grid-cols-4">
-                  <PortfolioStat label="Tokens" value={balances.length} />
-                  <PortfolioStat label="Open positions" value={positions.length} />
-                  <PortfolioStat label="Open orders" value={activeOrders.length} />
-                  <PortfolioStat label="Claim markets" value={claims.length} />
-                </dl>
-                {allocationBackground && allocation[0] && (
-                  <div
-                    role="img"
-                    className="relative hidden size-24 shrink-0 rounded-full lg:block"
-                    style={{ background: allocationBackground }}
-                    aria-label={`${allocation[0].symbol} is ${formatNumber(allocation[0].share * 100, 0)}% of available token value`}
-                  >
-                    <div className="absolute inset-3 flex flex-col items-center justify-center rounded-full bg-background">
-                      <strong className="text-sm font-medium">{allocation[0].symbol}</strong>
-                      <span className="text-xs text-muted-foreground tabular-nums">
-                        {formatNumber(allocation[0].share * 100, 0)}%
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={() =>
+                  document
+                    .getElementById("portfolio-events")
+                    ?.scrollIntoView({ behavior: "smooth" })
+                }
+                disabled={!eventGroups.length}
+              >
+                View claims
+              </Button>
+              <Button size="lg" render={<Link href="/markets" />} nativeButton={false}>
+                Explore markets
+              </Button>
             </div>
           </header>
 
           {(marketQuery.isInitialError ||
             ordersQuery.isInitialError ||
-            positionsQuery.isInitialError) && (
-            <div className="mb-5">
-              <DataError
-                message="Some portfolio data is temporarily unavailable."
-                retry={() => {
-                  void marketQuery.refetch();
-                  void ordersQuery.refetch();
-                  void positionsQuery.refetch();
-                }}
-              />
-            </div>
+            positionsQuery.isInitialError ||
+            tradesQuery.isInitialError) && (
+            <DataError
+              message="Some portfolio data is temporarily unavailable."
+              retry={() => {
+                void marketQuery.refetch();
+                void ordersQuery.refetch();
+                void positionsQuery.refetch();
+                void tradesQuery.refetch();
+              }}
+            />
           )}
 
-          <Tabs defaultValue="tokens" className="gap-6">
-            <div className="w-fit max-w-full overflow-hidden rounded-lg bg-card px-1 py-1">
-              <TabsList
-                aria-label="Portfolio views"
-                className="h-7 max-w-full gap-1 overflow-hidden border-0 bg-transparent p-0"
-              >
-                <TabsTrigger className="h-7 flex-none px-3" value="tokens">
-                  Tokens
-                </TabsTrigger>
-                <TabsTrigger className="h-7 flex-none px-3" value="positions">
-                  Open positions
-                </TabsTrigger>
-                <TabsTrigger className="h-7 flex-none px-3" value="claims">
-                  Claims
-                </TabsTrigger>
-              </TabsList>
-            </div>
-
-            <TabsContent value="tokens">
+          <Card variant="panel" className="rounded-xl bg-card">
+            <CardContent className="grid gap-7 px-0 py-7 lg:min-h-[150px] lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center">
+              <div>
+                <p className="eyebrow uppercase tracking-[0.12em] text-muted-foreground">
+                  Total balance
+                </p>
+                <p className="mt-2 text-3xl font-medium tracking-tight tabular-nums sm:text-[40px] sm:leading-11">
+                  {total === null ? "—" : `$${formatNumber(total, 2)}`}
+                </p>
+                <p className="mt-2 text-xs text-muted-foreground">Whole assets · estimated value</p>
+              </div>
               {assetQuery.isInitialError ? (
                 <DataError
                   message="Token balances are unavailable."
                   retry={() => void assetQuery.refetch()}
                 />
               ) : balances.length === 0 ? (
-                <EmptyState>No supported token balances yet.</EmptyState>
+                <p className="text-sm text-muted-foreground">No supported token balances yet.</p>
               ) : (
-                <ul className="flex list-none flex-col gap-2" aria-label="Token balances">
-                  {balances.map((asset) => {
-                    const amount = tokenAmount(asset.available.toString(), asset.decimals);
-                    return (
-                      <li
-                        key={asset.token}
-                        className="flex min-h-16 items-center justify-between gap-5 rounded-xl bg-card px-4 py-3"
-                      >
-                        <TokenIdentity
-                          symbol={asset.symbol}
-                          metadata={asset.metadata}
-                          textSize="lg"
-                        />
-                        <div className="min-w-0 text-right">
-                          <p className="text-base font-medium tabular-nums">
-                            {formatCompactNumber(amount)} {asset.symbol}
-                          </p>
-                          {asset.vault > 0n && (
-                            <p className="mt-1 text-sm text-muted-foreground tabular-nums">
-                              {formatCompactNumber(
-                                tokenAmount(asset.vault.toString(), asset.decimals),
-                              )}{" "}
-                              {asset.symbol} in vault
-                            </p>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-4 lg:grid-cols-7">
+                  {balances.map((asset) => (
+                    <div key={asset.token} className="min-w-0">
+                      <dt className="text-sm font-medium text-muted-foreground">{asset.symbol}</dt>
+                      <dd className="mt-2 truncate text-lg font-medium tabular-nums">
+                        {formatCompactNumber(
+                          tokenAmount(asset.available.toString(), asset.decimals),
+                        )}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
               )}
-            </TabsContent>
+            </CardContent>
+          </Card>
 
-            <TabsContent value="positions">
-              <PositionTable markets={markets} variant="portfolio" />
-            </TabsContent>
-
-            <TabsContent value="claims">
-              <div className="flex flex-col gap-8">
-                <ClaimTable markets={markets} variant="portfolio" />
-                <PendingPayouts markets={markets} />
-              </div>
-            </TabsContent>
-          </Tabs>
-        </>
+          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <section id="portfolio-events" className="flex min-w-0 flex-col gap-5">
+              {eventGroups.length === 0 ? (
+                <Card variant="panel" className="rounded-xl bg-card">
+                  <EmptyState>No event positions, orders, or claims yet.</EmptyState>
+                </Card>
+              ) : (
+                eventGroups.map((group) => (
+                  <PortfolioEventCard
+                    key={group[0]?.mapping.conditionId ?? group[0]?.id}
+                    markets={group}
+                    orders={ordersQuery.orders}
+                    positions={positionsQuery.positions}
+                  />
+                ))
+              )}
+            </section>
+            <PortfolioTradeHistory rows={tradeRows} />
+          </div>
+        </div>
       )}
     </Page>
-  );
-}
-
-function PortfolioStat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="min-w-24">
-      <dd className="text-xl font-medium tabular-nums">{value}</dd>
-      <dt className="mt-1 text-xs text-muted-foreground">{label}</dt>
-    </div>
   );
 }

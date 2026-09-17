@@ -4,13 +4,13 @@ import {
   formatTokenAmount,
   type MarketUnits,
 } from "@conditional-stocks/domain";
-import { marketTokenDisplay } from "../lib/tokens/devnet";
 import { polymarketImageUrl } from "@conditional-stocks/market-data";
-
-import { expireCachedProbability, parseProbabilityMessage } from "./probability";
+import { marketTokenDisplay } from "../lib/tokens/devnet";
 import type { BranchBook, MarketLifecycle, MarketView } from "../types/api";
-import { API_URL } from "./constants";
 import { requestJson } from "./api";
+import { API_URL } from "./constants";
+import { expireCachedProbability, parseProbabilityMessage } from "./probability";
+
 const upstreamUrl = (_service: string) => API_URL;
 
 const record = (value: unknown): Record<string, unknown> =>
@@ -37,6 +37,35 @@ const isoSeconds = (value: unknown) => {
   const seconds = number(value);
   return seconds === null ? new Date(0).toISOString() : new Date(seconds * 1_000).toISOString();
 };
+function metadataProbability(attached: Record<string, unknown>): MarketView["probability"] | null {
+  const snapshot = record(attached.metadata);
+  const raw = record(snapshot.rawPayload);
+  const parseList = (value: unknown): unknown[] => {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== "string") return [];
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+  const outcomes = parseList(raw.outcomes);
+  const prices = parseList(raw.outcomePrices);
+  const yes = outcomes.findIndex(
+    (outcome) => typeof outcome === "string" && outcome.trim().toLowerCase() === "yes",
+  );
+  const value = number(prices[yes]);
+  if (yes < 0 || value === null || value < 0 || value > 1) return null;
+  const observed = number(snapshot.fetchedAtMs);
+  return {
+    ask: null,
+    bid: null,
+    observedAt: observed === null ? null : new Date(observed).toISOString(),
+    quality: "stale",
+    value,
+  };
+}
 function aggregateBook(
   orders: Record<string, unknown>[],
   branch: number,
@@ -62,12 +91,12 @@ function aggregateBook(
   const bestBid = bids[0]?.price ?? null;
   const bestAsk = asks[0]?.price ?? null;
   return {
-    asks: asks.slice(0, 12),
+    asks,
     bestAskExact: asks[0]?.priceExact ?? null,
     bestBidExact: bids[0]?.priceExact ?? null,
     bestAsk,
     bestBid,
-    bids: bids.slice(0, 12),
+    bids,
     depthUsd: [...bids, ...asks].reduce((total, item) => total + item.price * item.quantity, 0),
     spread: bestAsk !== null && bestBid !== null ? bestAsk - bestBid : null,
   };
@@ -93,19 +122,35 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
           { orders: Record<string, unknown>[]; truncated?: boolean; unavailable?: boolean }
         >;
       }>(`${upstreamUrl("indexer")}/orderbooks`).catch(() => null);
+  // Sibling asset markets share one immutable Polymarket condition. Fetch its
+  // metadata/probability once so one event cannot randomly diverge per asset.
+  const attachments = new Map<string, Promise<Record<string, unknown>>>();
+  for (const market of marketResponse.markets) {
+    const condition = text(market.polymarketConditionId).toLowerCase();
+    if (!attachments.has(condition)) {
+      const id = text(market.id);
+      attachments.set(
+        condition,
+        json<Record<string, unknown>>(`${upstreamUrl("api")}/v1/markets/${id}/polymarket`).catch(
+          () => ({}),
+        ),
+      );
+    }
+  }
   return Promise.all(
     marketResponse.markets.map(async (market): Promise<MarketView> => {
       assertMarketUnits(market);
       const id = text(market.id);
+      const condition = text(market.polymarketConditionId).toLowerCase();
       const [attached, book] = await Promise.all([
-        json<Record<string, unknown>>(`${upstreamUrl("api")}/v1/markets/${id}/polymarket`).catch(
-          () => ({}),
-        ),
+        attachments.get(condition) ?? Promise.resolve({}),
         marketId
           ? json<{ orders: Record<string, unknown>[]; truncated?: boolean; unavailable?: boolean }>(
               `${upstreamUrl("indexer")}/orderbook/${id}?limit=2000`,
             ).catch(() => ({ orders: [], unavailable: true, truncated: false }))
-          : Promise.resolve(batch?.books?.[id] ?? { orders: [], unavailable: true, truncated: false }),
+          : Promise.resolve(
+              batch?.books?.[id] ?? { orders: [], unavailable: true, truncated: false },
+            ),
       ]);
       const attachedRecord = record(attached);
       const metadata = record(record(attachedRecord.metadata).normalized);
@@ -127,6 +172,8 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
       } catch {
         /* Unverified reference data must not become a usable probability. */
       }
+      if (probabilityView.value === null)
+        probabilityView = metadataProbability(attachedRecord) ?? probabilityView;
       // A capped response cannot establish best prices or total depth on both sides.
       const usableOrders = book.truncated || book.unavailable ? [] : book.orders;
       const yes = aggregateBook(usableOrders, 0, market);

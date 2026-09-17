@@ -55,7 +55,9 @@ export function parseProbabilityMessage(input: unknown, conditionId: string): Pr
     bid,
     observedAt: new Date(at).toISOString(),
     quality: tick.quality as ProbabilityView["quality"],
-    value: tick.quality === "valid" ? value : null,
+    // Quality remains explicit, but an available midpoint is still useful as
+    // display-only last-known context. Trading never consumes this value.
+    value,
   };
 }
 
@@ -65,9 +67,9 @@ export function expireProbability(
   maxAgeMs = 30_000,
 ): ProbabilityView {
   const at = value.observedAt ? Date.parse(value.observedAt) : NaN;
-  if (value.quality === "disconnected") return { ...value, value: null };
+  if (value.quality === "disconnected") return value;
   return !Number.isFinite(at) || now - at > maxAgeMs || at > now + 5000
-    ? { ...value, quality: "stale", value: null }
+    ? { ...value, quality: "stale" }
     : value;
 }
 
@@ -76,4 +78,15 @@ export function expireProbability(
  */
 export function expireCachedProbability(value: ProbabilityView, now = Date.now()): ProbabilityView {
   return expireProbability(value, now, 90_000);
+}
+
+/** A transport/quality transition with no new midpoint must not erase the last
+ * display value. Preserve its original timestamp so it cannot appear freshly observed. */
+export function retainProbabilityDisplay(
+  previous: ProbabilityView,
+  next: ProbabilityView,
+): ProbabilityView {
+  return next.value === null && previous.value !== null
+    ? { ...next, observedAt: previous.observedAt, value: previous.value }
+    : next;
 }

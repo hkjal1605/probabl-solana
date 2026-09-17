@@ -1,10 +1,14 @@
-import { requestJson, ApiError } from "./api";
-export { requestJson, ApiError } from "./api";
-import type { TradeView, ResolutionView } from "../types/api";
+import { ApiError, requestJson } from "./api";
+
+export { ApiError, requestJson } from "./api";
+
+import type { ResolutionView, TradeView } from "../types/api";
 export const api = {
-  trades: (marketId: string, signal?: AbortSignal) =>
+  trades: (marketId?: string, signal?: AbortSignal) =>
     requestJson<{ trades: TradeView[] }>(
-      `/trades?marketId=${encodeURIComponent(marketId)}&limit=100`,
+      marketId
+        ? `/trades?marketId=${encodeURIComponent(marketId)}&limit=100`
+        : "/trades?limit=1000",
       signal ? { signal } : {},
     ),
   prepare: <T>(path: string, body: unknown, token?: string) =>

@@ -7,9 +7,9 @@
 :root {
   color-scheme: light;
   /* Light is a neutral companion theme; the Figma reference specifies dark. */
-  --primary: #0878d8;
-  --primary-foreground: #ffffff;
-  --primary-hover: #0069c2;
+  --primary: #00e191;
+  --primary-foreground: #071a12;
+  --primary-hover: #00c77f;
   --background: #ffffff;
   --foreground: #1b1f23;
   --card: #ffffff;
@@ -26,10 +26,10 @@
   --destructive: #b12e44;
   --border: #e1e5eb;
   --input: #d1d7df;
-  --ring: #0878d8;
+  --ring: #00b978;
   --brand: #00e191;
-  --brand-strong: #0878d8;
-  --brand-soft: #e7f3ff;
+  --brand-strong: #007e52;
+  --brand-soft: #d9f9eb;
   --positive: #0a8f55;
   --positive-soft: #00e47c1f;
   --warning: #805000;
@@ -63,9 +63,9 @@
 .dark {
   color-scheme: dark;
   /* Nexa / InsiDeX dark-theme: measured in Figma's Properties panel. */
-  --primary: #2997ff;
-  --primary-foreground: #d8ebff;
-  --primary-hover: #52abff;
+  --primary: #00e191;
+  --primary-foreground: #071a12;
+  --primary-hover: #20efa4;
   --background: #000000;
   --foreground: #f0f3f6;
   --card: #0d0f12;
@@ -82,10 +82,10 @@
   --destructive: #f97782;
   --border: #1b1f23;
   --input: #1b1f23;
-  --ring: #2997ff;
+  --ring: #00e191;
   --brand: #00e191;
-  --brand-strong: #2997ff;
-  --brand-soft: #2997ff1a;
+  --brand-strong: #00e191;
+  --brand-soft: #00e1911a;
   --positive: #6aba90;
   --positive-soft: #6aba901a;
   --warning: #ffd07a;
@@ -239,6 +239,19 @@
 }
 
 @layer utilities {
+  html:has(.page-scrollbars-hidden),
+  body:has(.page-scrollbars-hidden),
+  .page-scrollbars-hidden,
+  .page-scrollbars-hidden * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  html:has(.page-scrollbars-hidden)::-webkit-scrollbar,
+  body:has(.page-scrollbars-hidden)::-webkit-scrollbar,
+  .page-scrollbars-hidden::-webkit-scrollbar,
+  .page-scrollbars-hidden *::-webkit-scrollbar {
+    display: none;
+  }
   .market-workspace-scrollbars-hidden,
   .market-workspace-scrollbars-hidden * {
     scrollbar-width: none;

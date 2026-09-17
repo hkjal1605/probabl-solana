@@ -6,7 +6,6 @@ import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { Logo } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
-import { InfoTooltip } from "@/components/ui/info-tooltip";
 import {
   NavigationMenu,
   NavigationMenuItem,
@@ -64,20 +63,6 @@ export function SiteHeader() {
                   </NavigationMenuLink>
                 </NavigationMenuItem>
               ),
-          )}
-          {landing && (
-            <NavigationMenuItem>
-              <InfoTooltip content="Documentation coming soon">
-                <span aria-disabled="true">Docs</span>
-              </InfoTooltip>
-              <NavigationMenuLink
-                href="https://x.com/probabldottrade"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                X
-              </NavigationMenuLink>
-            </NavigationMenuItem>
           )}
         </NavigationMenuList>
       </NavigationMenu>

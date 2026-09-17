@@ -1,12 +1,20 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "probabl-ui",
+  "account_id": "d0b56668a3d06078d1ae87fc54671202",
   "main": ".open-next/worker.js",
   // Current UTC date supported by the pinned workerd runtime.
   "compatibility_date": "2026-09-07",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
   "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "solana.probabl.trade",
+      "zone_id": "e8c8d1bced8467502e418a6d03f79085",
+      "custom_domain": true
+    }
+  ],
   // Preserve API_URL and INDEXER_URL configured in the dashboard. Secrets are
   // also supported; never put database credentials or signing keys in this UI.
   "keep_vars": true,

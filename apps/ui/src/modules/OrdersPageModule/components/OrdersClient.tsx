@@ -21,16 +21,19 @@ import {
 } from "@/components/ui/table";
 import { useOrderRecovery } from "@/hooks/useOrderRecovery";
 import { displayPrice, formatNumber, shortAddress, tokenAmount } from "@/lib/format/display";
+import { cn } from "@/lib/utils";
 import type { MarketView } from "@/types/api";
 
 export function OrdersClient({
   markets,
   marketIds,
   embedded = false,
+  fixedView,
 }: {
   markets: MarketView[];
   marketIds?: string[];
   embedded?: boolean;
+  fixedView?: "Open orders" | "History" | "All";
 }) {
   const wallet = useWallet(),
     query = useOrderRecovery();
@@ -44,24 +47,32 @@ export function OrdersClient({
         </Button>
       </EmptyState>
     );
+  const selectedView = fixedView ?? view;
   const orders = [...query.orders].filter(
     (o) =>
       (!marketIds || marketIds.includes(o.marketId)) &&
-      (view === "All" || (view === "Open orders" ? o.status === "open" : o.status !== "open")),
+      (selectedView === "All" ||
+        (selectedView === "Open orders" ? o.status === "open" : o.status !== "open")),
   );
   return (
-    <Card variant="panel" className={embedded ? "min-w-0" : "border"} aria-label="Orders">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-3 py-2">
-        <span className="text-xs font-medium text-muted-foreground">
-          {orders.length} {view.toLowerCase()}
-        </span>
-        <Segmented
-          label="Order status"
-          value={view}
-          options={["Open orders", "History", "All"]}
-          onChange={setView}
-        />
-      </div>
+    <Card
+      variant="panel"
+      className={embedded ? "min-w-0 data-[variant=panel]:bg-transparent" : "border"}
+      aria-label="Orders"
+    >
+      {!fixedView && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b px-3 py-2">
+          <span className="text-xs font-medium text-muted-foreground">
+            {orders.length} {selectedView.toLowerCase()}
+          </span>
+          <Segmented
+            label="Order status"
+            value={selectedView}
+            options={["Open orders", "History", "All"]}
+            onChange={setView}
+          />
+        </div>
+      )}
       {(query.data?.truncated || query.data?.openTruncated) && (
         <p role="status" className="border-b px-3 py-2 text-xs font-medium text-warning">
           {query.data.openTruncated
@@ -80,7 +91,7 @@ export function OrdersClient({
         <LoadingState />
       ) : !orders.length ? (
         <EmptyState>
-          {view === "Open orders"
+          {selectedView === "Open orders"
             ? "No open orders. Your next opportunity is in Markets."
             : "No closed orders yet."}
         </EmptyState>
@@ -88,12 +99,12 @@ export function OrdersClient({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Market</TableHead>
+              {!embedded && <TableHead>Market</TableHead>}
               <TableHead>Token / side</TableHead>
               <TableHead>Limit</TableHead>
               <TableHead>Filled / qty</TableHead>
               <TableHead>TIF · Funding</TableHead>
-              <TableHead>Reserved / fees</TableHead>
+              <TableHead>Reserved</TableHead>
               <TableHead>Status</TableHead>
               <TableHead />
             </TableRow>
@@ -111,23 +122,31 @@ export function OrdersClient({
               );
               return (
                 <TableRow key={order.id}>
-                  <TableCell className="max-w-52 whitespace-normal">
-                    <Link href={`/markets/${order.marketId}`} className="line-clamp-2 font-medium">
-                      {market?.question ?? shortAddress(order.marketId)}
-                    </Link>
-                    <InfoTooltip content={order.id}>
-                      <code className="mt-1 block text-xs text-muted-foreground">
-                        {shortAddress(order.id)}
-                      </code>
-                    </InfoTooltip>
-                  </TableCell>
+                  {!embedded && (
+                    <TableCell className="max-w-52 whitespace-normal">
+                      <Link
+                        href={`/markets/${order.marketId}`}
+                        className="line-clamp-2 font-medium"
+                      >
+                        {market?.question ?? shortAddress(order.marketId)}
+                      </Link>
+                      <InfoTooltip content={order.id}>
+                        <code className="mt-1 block text-muted-foreground">
+                          {shortAddress(order.id)}
+                        </code>
+                      </InfoTooltip>
+                    </TableCell>
+                  )}
                   <TableCell>
-                    <strong className={order.branch === 0 ? "text-positive" : "text-danger"}>
-                      {market?.ticker ?? "Stock"}-{order.branch === 0 ? "YES" : "NO"}
-                    </strong>
-                    <p
-                      className={`text-xs font-medium ${order.side === 0 ? "text-positive" : "text-danger"}`}
+                    <span
+                      className={cn(
+                        "font-semibold",
+                        order.branch === 0 ? "text-positive" : "text-danger",
+                      )}
                     >
+                      {market?.ticker ?? "Stock"}-{order.branch === 0 ? "YES" : "NO"}
+                    </span>
+                    <p className="mt-1 text-muted-foreground">
                       {order.side === 0 ? "Buy" : "Sell"}
                     </p>
                   </TableCell>
@@ -155,21 +174,15 @@ export function OrdersClient({
                       }
                     />
                   </TableCell>
-                  <TableCell className="text-xs font-medium text-muted-foreground">
+                  <TableCell className="text-foreground">
                     {order.tif === 0 ? "GTC" : "IOC"} ·{" "}
                     {order.fundingKind === 0 ? "Whole" : "Active claim"}
                   </TableCell>
-                  <TableCell className="tabular-nums text-xs">
+                  <TableCell className="tabular-nums">
                     {market
                       ? `${formatNumber(tokenAmount(order.reserved, order.side === 0 ? market.quoteTokenDecimals : market.baseTokenDecimals), 4)} ${order.side === 0 ? "USDC" : market.ticker}`
                       : "—"}
                     {order.fundingKind === 1 && `-${order.branch === 0 ? "YES" : "NO"}`}
-                    <p className="mt-1 text-muted-foreground">
-                      Fees:{" "}
-                      {market && order.feesPaid !== undefined
-                        ? `${formatNumber(tokenAmount(order.feesPaid, order.side === 0 ? market.baseTokenDecimals : market.quoteTokenDecimals), 4)} ${order.side === 0 ? market.ticker : "USDC"} claims`
-                        : "—"}
-                    </p>
                   </TableCell>
                   <TableCell>
                     <Badge
@@ -179,15 +192,16 @@ export function OrdersClient({
                     >
                       {partial ? "Partially filled" : order.status}
                     </Badge>
-                    {order.confirmation && (
-                      <p className="mt-1 text-xs text-muted-foreground">{order.confirmation}</p>
-                    )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className={embedded ? "text-right" : undefined}>
                     {order.status === "open" && (
                       <Button
                         size="sm"
-                        variant="link"
+                        variant={embedded ? "ghost" : "link"}
+                        className={cn(
+                          embedded &&
+                            "border-0 bg-danger-soft px-3 text-destructive hover:bg-danger-soft hover:text-destructive",
+                        )}
                         disabled={query.canceling !== null || query.pending.has(order.id)}
                         onClick={() =>
                           query.cancel(order.id, expired ? "expired" : closed ? "closed" : "cancel")

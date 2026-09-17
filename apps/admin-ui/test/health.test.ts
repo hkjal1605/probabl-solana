@@ -25,7 +25,7 @@ test("public health defaults use the correct HTTPS aliases and do not call priva
   const calls: string[] = [];
   globalThis.fetch = (async (url, init) => {
     calls.push(String(url));
-    expect(init?.redirect).toBe("error");
+    expect(init?.redirect).toBe("manual");
     return Response.json(
       String(url).endsWith("/polymarket-health")
         ? { status: "ok" }

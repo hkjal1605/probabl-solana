@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { LifecycleBadge } from "@/components/data/StatusBadge";
 import { PriceChart } from "@/components/market/PriceChart";
 import { ProbabilityGauge } from "@/components/market/ProbabilityGauge";
@@ -29,6 +29,7 @@ import { useProbabilityStream } from "@/hooks/useProbabilityStream";
 import { useMarkets, useTrades } from "@/hooks/useProtocolData";
 import { formatNumber, formatTime } from "@/lib/format/display";
 import { midpoint, percent, spotImpactPercent } from "@/lib/markets/presentation";
+import { visibleDepthPerSide } from "@/lib/markets/visible-depth";
 import { cn } from "@/lib/utils";
 import { OrdersClient } from "@/modules/OrdersPageModule/components/OrdersClient";
 import type { BranchBook, MarketView, TradeView } from "@/types/api";
@@ -44,8 +45,6 @@ const EMPTY_PROBABILITY: MarketView["probability"] = {
   quality: "disconnected",
   value: null,
 };
-const DEPTH_SLOTS = ["one", "two", "three", "four", "five"] as const;
-
 function OutcomeStat({ market, branch }: { market: MarketView; branch: "YES" | "NO" }) {
   const impact = spotImpactPercent(market, branch);
   return (
@@ -187,7 +186,7 @@ export function MarketWorkspace({
               onChange={(value) => setBookBranch(value === `${market.ticker}-YES` ? "YES" : "NO")}
             />
           </CardHeader>
-          <CardContent className="flex flex-1 flex-col justify-center px-0">
+          <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-0">
             <BranchDepth
               book={bookBranch === "YES" ? market.yes : market.no}
               label={`${market.ticker}-${bookBranch}`}
@@ -252,6 +251,25 @@ function BranchDepth({
   label: string;
   available: boolean;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [visibleLevels, setVisibleLevels] = useState(5);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const measure = () => {
+      const header = container.querySelector<HTMLElement>("thead")?.getBoundingClientRect().height;
+      const midpointRow = container
+        .querySelector<HTMLElement>("[data-depth-midpoint]")
+        ?.getBoundingClientRect().height;
+      if (!header || !midpointRow || container.clientHeight <= 0) return;
+      const next = visibleDepthPerSide(container.clientHeight, header, midpointRow);
+      setVisibleLevels((current) => (current === next ? current : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
   const quoteSize = (level: BranchBook["asks"][number]) => level.price * level.quantity;
   const cumulative = (levels: BranchBook["asks"]) => {
     let total = 0;
@@ -260,8 +278,8 @@ function BranchDepth({
       return { ...level, cumulativeSize: total };
     });
   };
-  const asks = cumulative(book.asks.slice(0, 5));
-  const bids = cumulative(book.bids.slice(0, 5));
+  const asks = cumulative(book.asks.slice(0, visibleLevels));
+  const bids = cumulative(book.bids.slice(0, visibleLevels));
   const askTotal = asks.at(-1)?.cumulativeSize ?? 0;
   const bidTotal = bids.at(-1)?.cumulativeSize ?? 0;
   const row = (
@@ -281,19 +299,18 @@ function BranchDepth({
       <TableCell className="text-right text-sm">{formatNumber(level.cumulativeSize, 2)}</TableCell>
     </TableRow>
   );
-  const emptyRows = (count: number, ask: boolean, showLabel: boolean) =>
-    DEPTH_SLOTS.slice(0, count).map((slot, index) => {
-      const labelRow = showLabel && (ask ? index === count - 1 : index === 0);
-      return (
-        <TableRow key={`${ask ? "ask" : "bid"}-empty-${slot}`} aria-hidden={!labelRow}>
-          <TableCell colSpan={3} className="text-muted-foreground">
-            {labelRow ? (available ? `No ${ask ? "asks" : "bids"}` : "—") : "\u00a0"}
-          </TableCell>
-        </TableRow>
-      );
-    });
+  const emptyRow = (ask: boolean) => (
+    <TableRow key={`${ask ? "ask" : "bid"}-empty`}>
+      <TableCell colSpan={3} className="text-muted-foreground">
+        {available ? `No ${ask ? "asks" : "bids"}` : "—"}
+      </TableCell>
+    </TableRow>
+  );
   return (
-    <div className="min-w-0">
+    <div
+      ref={containerRef}
+      className="flex h-full min-h-0 min-w-0 flex-col justify-center overflow-hidden"
+    >
       <Table aria-label={label} density="compact">
         <TableHeader className="[&_tr]:border-b-0">
           <TableRow className="hover:bg-transparent [&_th]:font-medium">
@@ -303,9 +320,9 @@ function BranchDepth({
           </TableRow>
         </TableHeader>
         <TableBody className="[&_tr]:border-b-0">
-          {emptyRows(5 - asks.length, true, asks.length === 0)}
+          {asks.length === 0 && emptyRow(true)}
           {[...asks].reverse().map((level) => row(level, true, askTotal))}
-          <TableRow>
+          <TableRow data-depth-midpoint>
             <TableCell colSpan={3}>
               <strong className="text-sm tabular-nums">{formatNumber(midpoint(book))}</strong>
               <span className="ml-2 text-xs text-muted-foreground">
@@ -314,7 +331,7 @@ function BranchDepth({
             </TableCell>
           </TableRow>
           {bids.map((level) => row(level, false, bidTotal))}
-          {emptyRows(5 - bids.length, false, bids.length === 0)}
+          {bids.length === 0 && emptyRow(false)}
         </TableBody>
       </Table>
     </div>

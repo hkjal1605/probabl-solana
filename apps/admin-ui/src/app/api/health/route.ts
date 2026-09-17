@@ -48,10 +48,14 @@ export async function GET() {
           new URL(service.path, serviceOrigin(service.url, service.name)),
           {
             cache: "no-store",
-            redirect: "error",
+            redirect: "manual",
             signal: AbortSignal.timeout(2_500),
           },
         );
+        if (response.status >= 300 && response.status < 400) {
+          await response.body?.cancel();
+          throw new Error("Health endpoint redirects are not permitted");
+        }
         const body = await response.json().catch(() => null);
         return {
           detail: body,

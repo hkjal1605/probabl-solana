@@ -1,7 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { SolanaClient,key,PROGRAM_ID,coder } from "@conditional-stocks/solana-client";
 import {
   formatPriceRawX18,
   MAX_ORDER_UINT128,
@@ -9,15 +6,25 @@ import {
   parseTokenAmount,
   quoteForReservation,
 } from "@conditional-stocks/domain";
-import { mergeOrderPages } from "../src/services/orders";
+import { coder, key, PROGRAM_ID, SolanaClient } from "@conditional-stocks/solana-client";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { OutcomePrice } from "../src/components/market/OutcomePrice";
 import { executionImpact, executionPoints } from "../src/lib/markets/history";
 import { groupMarkets, impactPercent, midpoint } from "../src/lib/markets/presentation";
-import { OutcomePrice } from "../src/components/market/OutcomePrice";
 import { outcomeLabel, safeExternalUrl } from "../src/lib/markets/resolution";
-import { csvCell, orderHistoryCsv, wholeReserved } from "../src/lib/portfolio/presentation";
+import { conditionalPositionRows } from "../src/lib/portfolio/positions";
+import {
+  csvCell,
+  orderHistoryCsv,
+  tradeHistoryCsv,
+  walletTradeRows,
+  wholeReserved,
+} from "../src/lib/portfolio/presentation";
 import { createActionScope } from "../src/lib/trading/action-scope";
 import { marketPriceBound, quantityForSpend } from "../src/lib/trading/entry";
 import { previewOrder } from "../src/lib/trading/order";
+import { mergeOrderPages } from "../src/services/orders";
 import { createUiStore } from "../src/stores/ui-store";
 import { fixtureMarkets, fixtureState as state } from "./fixtures/protocol";
 
@@ -65,8 +72,12 @@ describe("raw-unit amount entry", () => {
         baseStep: "1",
       };
       for (const spend of ["1", "10", "12345"]) {
-        const expectedRaw=(parseTokenAmount(spend,quoteTokenDecimals)*10n**18n)/parsePriceRawX18("0.37",m);
-        if(expectedRaw>=1n<<64n){expect(()=>quantityForSpend(spend,"0.37",m)).toThrow();continue;}
+        const expectedRaw =
+          (parseTokenAmount(spend, quoteTokenDecimals) * 10n ** 18n) / parsePriceRawX18("0.37", m);
+        if (expectedRaw >= 1n << 64n) {
+          expect(() => quantityForSpend(spend, "0.37", m)).toThrow();
+          continue;
+        }
         const quantity = quantityForSpend(spend, "0.37", m),
           raw = parseTokenAmount(quantity, m.baseTokenDecimals);
         const price = parsePriceRawX18("0.37", m),
@@ -160,15 +171,19 @@ describe("wallet action scoping", () => {
     expect(Object.keys(a.getState()).some((key) => /token|session|secret/i.test(key))).toBe(false);
   });
 });
-describe("Solana claim transaction construction",()=>{
-  test("split and merge bind the owner, market and exact SPL raw amount",()=>{
-    const client=new SolanaClient({rpcUrl:"http://127.0.0.1:8899",config:account,genesisHash:"fixture"});
-    for(const action of ["split","merge"]as const){
-      const ix=client.position(action,key(account),key(account),0,1_000_001n);
-      const decoded=coder.instruction.decode(ix.data)!;
+describe("Solana claim transaction construction", () => {
+  test("split and merge bind the owner, market and exact SPL raw amount", () => {
+    const client = new SolanaClient({
+      rpcUrl: "http://127.0.0.1:8899",
+      config: account,
+      genesisHash: "fixture",
+    });
+    for (const action of ["split", "merge"] as const) {
+      const ix = client.position(action, key(account), key(account), 0, 1_000_001n);
+      const decoded = required(coder.instruction.decode(ix.data));
       expect(decoded.name).toBe(action);
-      expect(String((decoded.data as {amount:unknown}).amount)).toBe("1000001");
-      expect(ix.keys[0]!.isSigner).toBe(true);
+      expect(String((decoded.data as { amount: unknown }).amount)).toBe("1000001");
+      expect(ix.keys[0]?.isSigner).toBe(true);
     }
   });
 });
@@ -252,6 +267,57 @@ describe("honest market, portfolio and evidence presentation", () => {
       ),
     ).toBe(123n);
   });
+  test("positions include event-level USDC branches once and aggregate their active reservations", () => {
+    const baseOrder = required(state.orders[0]);
+    const basePosition = required(state.positions[0]);
+    const secondMarket = {
+      ...market,
+      id: `0x${"31".repeat(32)}`,
+      baseToken: `0x${"32".repeat(20)}`,
+      ticker: "SPY",
+    };
+    const rows = conditionalPositionRows(
+      [market, secondMarket],
+      [basePosition, { ...basePosition, marketId: secondMarket.id }],
+      [
+        {
+          ...baseOrder,
+          status: "open",
+          fundingKind: 1,
+          side: 0,
+          branch: 0,
+          reserved: "123",
+        },
+        {
+          ...baseOrder,
+          id: `0x${"33".repeat(32)}`,
+          marketId: secondMarket.id,
+          status: "open",
+          fundingKind: 1,
+          side: 0,
+          branch: 0,
+          reserved: "77",
+        },
+        {
+          ...baseOrder,
+          id: `0x${"34".repeat(32)}`,
+          status: "open",
+          fundingKind: 1,
+          side: 1,
+          branch: 0,
+          reserved: "55",
+        },
+      ],
+    );
+    const quoteRows = rows.filter((row) => row.kind === "quote");
+    expect(quoteRows).toHaveLength(2);
+    expect(quoteRows.map((row) => `${row.symbol}-${row.branch === 0 ? "YES" : "NO"}`)).toEqual([
+      "USDC-YES",
+      "USDC-NO",
+    ]);
+    expect(quoteRows[0]?.reserved).toBe(200n);
+    expect(rows.find((row) => row.key === `stock-${market.id}-0`)?.reserved).toBe(55n);
+  });
   test("invalid payout is not incorrectly reported YES merely because numerator is one", () => {
     const r = {
       admin: null,
@@ -293,6 +359,53 @@ describe("honest market, portfolio and evidence presentation", () => {
     expect(csv).toContain("1.000000000000000001");
     expect(csv).toContain(formatPriceRawX18(123456789n, market));
     expect(csv).toContain("Updated block");
+  });
+  test("wallet trade history includes only fills belonging to the connected wallet orders", () => {
+    const order = required(state.orders[0]);
+    const trade = {
+      ...required(state.trades[0]),
+      buyOrderHash: order.id,
+      sellOrderHash: `0x${"44".repeat(32)}`,
+      executionQuote: "255250000",
+    };
+    const unrelated = {
+      ...trade,
+      id: `0x${"55".repeat(32)}`,
+      buyOrderHash: `0x${"66".repeat(32)}`,
+    };
+    const rows = walletTradeRows([trade, unrelated], [order], [market]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.side).toBe("Buy");
+    expect(tradeHistoryCsv(rows)).toContain('"255.25"');
+  });
+  test("wallet trade history identifies self-matches without double-counting the fill", () => {
+    const buy = required(state.orders[0]);
+    const sell = { ...buy, id: `0x${"77".repeat(32)}`, side: 1 };
+    const trade = {
+      ...required(state.trades[0]),
+      buyOrderHash: buy.id,
+      sellOrderHash: sell.id,
+    };
+    const rows = walletTradeRows([trade], [buy, sell], [market]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.side).toBe("Self-match");
+  });
+  test("wallet trade history matches canonical Solana maker and taker order hashes", () => {
+    const buy = required(state.orders[0]);
+    const sell = { ...buy, id: "solana-sell-order", side: 1 };
+    const makerFill = {
+      ...required(state.trades[0]),
+      makerOrderHash: sell.id,
+      takerOrderHash: "unrelated-taker",
+    };
+    const takerFill = {
+      ...required(state.trades[0]),
+      id: "second-solana-fill",
+      makerOrderHash: "unrelated-maker",
+      takerOrderHash: buy.id,
+    };
+    const rows = walletTradeRows([makerFill, takerFill], [buy, sell], [market]);
+    expect(rows.map((row) => row.side)).toEqual(["Sell", "Buy"]);
   });
   test("historical impact waits for both branch executions and respects market and time boundaries", () => {
     const points = [

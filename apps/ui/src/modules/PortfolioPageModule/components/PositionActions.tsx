@@ -187,7 +187,16 @@ export function PositionActions({
       }}
     >
       {confirmation}
-      <DialogTrigger render={<Button variant="outline" size="sm" disabled={disabled} />}>
+      <DialogTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            className="border-0 bg-primary/10 px-3 text-primary hover:bg-primary/10 hover:text-primary"
+            disabled={disabled}
+          />
+        }
+      >
         <Combine />
         {position.redeemable ? "Redeem" : "Manage"}
       </DialogTrigger>
@@ -339,10 +348,6 @@ export function PositionActions({
             </Button>
           </FieldGroup>
         </FieldSet>
-        <p className="text-xs leading-5 text-muted-foreground">
-          Merge and redemption use the Solana program. Credited assets can be withdrawn from
-          Portfolio. Only your wallet can withdraw your credited assets.
-        </p>
       </DialogContent>
     </Dialog>
   );

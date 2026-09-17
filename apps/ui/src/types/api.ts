@@ -1,6 +1,6 @@
 import type { MarketUnits } from "@conditional-stocks/domain";
-import type { TokenDisplayMetadata } from "../lib/tokens/devnet";
 import type { SpotPrice } from "@conditional-stocks/shared/spot-prices";
+import type { TokenDisplayMetadata } from "../lib/tokens/devnet";
 
 export type MarketLifecycle =
   | "scheduled"
@@ -88,7 +88,7 @@ export interface IndexedOrder {
   updatedBlock: string;
 }
 export interface WholeBalanceView {
-  creditBalances?: Record<string,string>;
+  creditBalances?: Record<string, string>;
   decimals: number;
   account: string;
   blockNumber: string;
@@ -120,10 +120,16 @@ export interface PositionView extends MarketUnits {
 export interface TradeView {
   branch: number;
   blockTimestamp: string;
+  buyOrderHash?: string;
+  confirmation?: string;
   executionPriceRawX18: string;
+  executionQuote?: string;
   fillQuantity: string;
   id: string;
+  makerOrderHash?: string;
   marketId: string;
+  sellOrderHash?: string;
+  takerOrderHash?: string;
   transactionHash: string;
 }
 export interface ResolutionView {

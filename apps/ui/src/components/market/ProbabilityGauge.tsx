@@ -13,11 +13,7 @@ export function ProbabilityGauge({
 }) {
   const { probability: source } = useProbabilityStream(conditionId, initial);
   const probability =
-    source.quality === "valid" &&
-    source.value !== null &&
-    Number.isFinite(source.value) &&
-    source.value >= 0 &&
-    source.value <= 1
+    source.value !== null && Number.isFinite(source.value) && source.value >= 0 && source.value <= 1
       ? source.value * 100
       : null;
   return (
