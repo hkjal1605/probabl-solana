@@ -101,6 +101,7 @@ export class PolymarketYesBook {
   #connected = true;
   #lastSequence: bigint | null = null;
   #observedAtMs = 0n;
+  #sourceAtMs = 0n;
   #sourceHash = "";
 
   constructor(
@@ -118,8 +119,10 @@ export class PolymarketYesBook {
     this.#assertIdentity(raw);
     const eventDigest = hashCanonical(raw);
     const duplicate = this.#seen.has(eventDigest);
-    const observedAtMs = timestamp(raw.timestamp, "timestamp");
-    if (observedAtMs < this.#observedAtMs) return this.#result(false, false, true, nowMs);
+    const sourceAtMs = timestamp(raw.timestamp, "timestamp");
+    if (sourceAtMs > nowMs + 5_000n)
+      throw new MarketDataError("INVALID_BOOK", "snapshot timestamp is in the future");
+    if (sourceAtMs < this.#sourceAtMs) return this.#result(false, false, true, nowMs);
     // REST is the authoritative recovery source and must replace local state even when a
     // repeated payload hash was seen before a WebSocket delta.
     const bids = levels(raw.bids, "bids");
@@ -128,7 +131,11 @@ export class PolymarketYesBook {
     const nextSequence = sequence(raw.sequence);
     this.#replace(this.#bids, bids);
     this.#replace(this.#asks, asks);
-    this.#observedAtMs = observedAtMs;
+    this.#sourceAtMs = sourceAtMs;
+    // A successful REST read proves that this unchanged book is still the
+    // authoritative current snapshot. Keep the source-change timestamp only
+    // for ordering; freshness is based on when we actually observed it.
+    this.#observedAtMs = nowMs;
     this.#sourceHash = sourceHash;
     this.#lastSequence = nextSequence;
     this.#connected = true;
@@ -158,7 +165,7 @@ export class PolymarketYesBook {
       return this.#result(false, false, true, nowMs);
     }
     const observedAtMs = timestamp(raw.timestamp, "timestamp");
-    if (observedAtMs < this.#observedAtMs) return this.#result(false, false, true, nowMs);
+    if (observedAtMs < this.#sourceAtMs) return this.#result(false, false, true, nowMs);
     if (!Array.isArray(raw.price_changes)) {
       throw new MarketDataError("INVALID_BOOK", "price_changes must be an array");
     }
@@ -182,6 +189,7 @@ export class PolymarketYesBook {
       else target.set(price, size);
     }
     this.#observedAtMs = observedAtMs;
+    this.#sourceAtMs = observedAtMs;
     this.#sourceHash = eventDigest;
     this.#lastSequence = nextSequence ?? this.#lastSequence;
     this.#connected = true;

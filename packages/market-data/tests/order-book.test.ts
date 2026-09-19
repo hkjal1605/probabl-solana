@@ -69,6 +69,30 @@ describe("Polymarket YES order book", () => {
     ).toMatchObject({ applied: false, requiresSnapshot: true });
   });
 
+  test("uses REST receipt time for freshness while preserving source ordering", () => {
+    const book = createBook();
+    const oldSource = bookSnapshot({ timestamp: String(now - 86_400_000n) });
+    expect(book.applySnapshot(oldSource, now).tick).toMatchObject({
+      observedAtMs: now.toString(),
+      quality: "valid",
+    });
+    expect(book.applySnapshot(oldSource, now + 20_000n).tick).toMatchObject({
+      observedAtMs: (now + 20_000n).toString(),
+      quality: "valid",
+    });
+    expect(
+      book.applyWebSocket(
+        {
+          event_type: "price_change",
+          market: conditionId,
+          price_changes: [{ asset_id: "111", price: "0.49", side: "BUY", size: "400" }],
+          timestamp: String(now - 86_400_001n),
+        },
+        now + 20_000n,
+      ),
+    ).toMatchObject({ applied: false, requiresSnapshot: true });
+  });
+
   test("withholds midpoint for empty, one-sided, crossed, stale, low-depth, and disconnected books", () => {
     const cases: Array<{
       asks: Array<{ price: string; size: string }>;
