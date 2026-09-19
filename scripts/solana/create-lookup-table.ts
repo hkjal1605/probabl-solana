@@ -1,23 +1,25 @@
 // Explicit operator action, never part of order review or wallet input changes.
 import { readFileSync } from "node:fs";
 import {
+  assetCreditAddress,
+  claimAddress,
+  delegationAddress,
+  key,
+  poolAddress,
+  poolVaultAddress,
+  SolanaClient,
+  traderAddress,
+  vaultAddress,
+  walletAddress,
+} from "@conditional-stocks/solana-client";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import {
   AddressLookupTableProgram,
   ComputeBudgetProgram,
   Keypair,
   SystemProgram,
 } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import {
-  SolanaClient,
-  key,
-  claimAddress,
-  vaultAddress,
-  traderAddress,
-  walletAddress,
-  poolAddress,
-  poolVaultAddress,
-  assetCreditAddress,
-} from "@conditional-stocks/solana-client";
+import { assertDevnet, parseDeployer } from "./devnet-policy.ts";
 
 if (!process.argv.includes("--execute"))
   throw new Error("Creating/funding/freezing a lookup table requires --execute");
@@ -26,15 +28,20 @@ const required = (name: string) => {
   if (!value) throw new Error(`Missing ${name}`);
   return value;
 };
+const keypairFile = process.env.SOLANA_PAYER_KEYPAIR?.trim();
+const usingDevnetSecret = !keypairFile;
 const client = new SolanaClient({
-  rpcUrl: required("SOLANA_RPC_URL"),
+  rpcUrl:
+    (usingDevnetSecret ? process.env.DEVNET_BROWSER_RPC_URL : undefined) ??
+    required("SOLANA_RPC_URL"),
   config: required("SOLANA_CONFIG"),
   genesisHash: required("SOLANA_GENESIS_HASH"),
 });
 await client.assertNetwork();
-const payer = Keypair.fromSecretKey(
-  Uint8Array.from(JSON.parse(readFileSync(required("SOLANA_PAYER_KEYPAIR"), "utf8"))),
-);
+if (usingDevnetSecret) await assertDevnet(client.connection);
+const payer = keypairFile
+  ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keypairFile, "utf8"))))
+  : parseDeployer(process.env.DEVNET_DEPLOYER_PRIVATE_KEY);
 const markets = [
   ...new Set(
     (process.env.LOOKUP_TABLE_MARKETS ?? required("LOOKUP_TABLE_MARKET"))
@@ -50,6 +57,11 @@ const owners = (process.env.LOOKUP_TABLE_OWNERS ?? "")
   .map((v) => v.trim())
   .filter(Boolean)
   .map(key);
+const delegates = (process.env.LOOKUP_TABLE_DELEGATES ?? "")
+  .split(",")
+  .map((v) => v.trim())
+  .filter(Boolean)
+  .map(key);
 const addresses = [
   client.config,
   client.program,
@@ -59,7 +71,9 @@ const addresses = [
 ];
 for (const [index, market] of markets.entries()) {
   addresses.push(market);
-  for (const mint of marketAccounts[index]!.mints.slice(0, 2)) {
+  const marketAccount = marketAccounts[index];
+  if (!marketAccount) throw new Error("Missing fetched market account");
+  for (const mint of marketAccount.mints.slice(0, 2)) {
     const pool = poolAddress(client.config, mint, client.program);
     addresses.push(mint, pool, poolVaultAddress(pool, client.program));
     for (const owner of owners) addresses.push(assetCreditAddress(pool, owner, client.program));
@@ -71,6 +85,9 @@ for (const [index, market] of markets.entries()) {
   for (const owner of owners) addresses.push(walletAddress(market, owner, client.program));
 }
 for (const owner of owners) addresses.push(traderAddress(client.config, owner, client.program));
+for (const owner of owners)
+  for (const delegate of delegates)
+    addresses.push(delegationAddress(client.config, owner, delegate, client.program));
 const unique = [...new Map(addresses.map((a) => [a.toBase58(), a])).values()];
 if (unique.length > 256) throw new Error("Too many lookup addresses");
 // ALTs are not protocol envelopes; the table program is intentionally not in

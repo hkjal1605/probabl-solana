@@ -12,12 +12,12 @@ import {
   quote,
   type SolanaClient,
 } from "@conditional-stocks/solana-client";
-import { liveOrder } from "@conditional-stocks/solana-indexer/projection";
+import { liveOrder, type Snapshot } from "@conditional-stocks/solana-indexer/projection";
 import { indexedSnapshot } from "../chain/indexed-snapshot.ts";
 
 export function createOrderPlan(client: SolanaClient, db: SolanaDatabase, domain: string) {
-  return async (order: OrderWire) => {
-    const s = await indexedSnapshot(db, client, domain),
+  return async (order: OrderWire, snapshot?: Snapshot) => {
+    const s = snapshot ?? (await indexedSnapshot(db, client, domain)),
       m = s.markets.get(order.marketId);
     if (!m) throw new Error("Unknown market");
     const now = BigInt(Math.floor(Date.now() / 1000)),
@@ -74,13 +74,15 @@ export function createOrderPlan(client: SolanaClient, db: SolanaDatabase, domain
         remaining: big(o.remaining),
         sequence: big(o.sequence),
       }));
+    const nextSequence = m.sequence[order.branch];
+    if (!nextSequence) throw new Error("Market branch sequence is unavailable");
     const plan = planOrder({
       program: client.program,
       order,
       candidates,
       now,
       step: big(m.terms.step),
-      nextSequence: big(m.sequence[order.branch]!),
+      nextSequence: big(nextSequence),
       makerFeeBps: s.config.maker_bps,
       takerFeeBps: s.config.taker_bps,
     });

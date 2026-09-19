@@ -1,10 +1,10 @@
 "use client";
 import {
   type AtomicPlan,
-  type OrderWire,
   claimAddress,
   fundingAsset,
   key,
+  type OrderWire,
   orderId,
   parseAtomicPlan,
   parseOrder,
@@ -15,12 +15,17 @@ import { useWallet } from "@/components/providers/WalletProvider";
 import { toast } from "@/components/ui/toast";
 import { protocolConfig } from "@/config/protocol";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
-import { useTradingReadiness } from "@/hooks/useTradingReadiness";
 import { usePositions } from "@/hooks/useProtocolData";
-import { useTradingPermission } from "@/hooks/useTradingPermission";
+import {
+  announceTradingPermissionChange,
+  useTradingPermission,
+} from "@/hooks/useTradingPermission";
+import { useTradingReadiness } from "@/hooks/useTradingReadiness";
 import { marketPriceBound } from "@/lib/trading/entry";
 import { createOrder, previewOrder } from "@/lib/trading/order";
+import { tradingPermissionApproval } from "@/lib/trading/permission";
 import { reviewWithSession } from "@/lib/trading/review-session";
+import { solana } from "@/lib/trading/rpc";
 import { api } from "@/services/protocol-api-service";
 import { refreshStores } from "@/stores/createResourceStore";
 import type { MarketView } from "@/types/api";
@@ -40,7 +45,12 @@ export function useOrderTicket({ market }: { market: MarketView }) {
   const wallet = useWallet(),
     readiness = useTradingReadiness(market),
     positions = usePositions(),
-    { permission, refresh: refreshPermission } = useTradingPermission();
+    {
+      permission,
+      loaded: permissionLoaded,
+      error: permissionError,
+      refresh: refreshPermission,
+    } = useTradingPermission();
   const [branch, setBranch] = useState<"YES" | "NO">("YES"),
     [side, setSide] = useState<"buy" | "sell">("buy"),
     [tif, setTif] = useState<"gtc" | "ioc">("ioc"),
@@ -84,6 +94,9 @@ export function useOrderTicket({ market }: { market: MarketView }) {
   const [submissionCount, setSubmissionCount] = useState(0);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const { busy, run } = useAsyncAction(context);
+  const { busy: permissionBusy, run: runPermissionAction } = useAsyncAction(
+    [wallet.account, permission?.delegate].join(":"),
+  );
   useEffect(() => {
     if (!preparation) return;
     const timer = setInterval(() => setNowSeconds(Math.floor(Date.now() / 1000)), 1000);
@@ -94,7 +107,13 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     : false;
   const preview = useMemo(() => previewOrder(quantity, price, market), [quantity, price, market]);
   const prepareAction = async (assertCurrent: () => void, background = false) => {
-    if (!wallet.account || !preview.valid || !permission?.active || !permission.delegate || !permission.grant)
+    if (
+      !wallet.account ||
+      !preview.valid ||
+      !permission?.active ||
+      !permission.delegate ||
+      !permission.grant
+    )
       throw new Error("Deposit assets and enable trading in Portfolio before placing an order.");
     assertCurrent();
     const candidate = parseOrder(
@@ -115,40 +134,49 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       }),
     );
     const result = background
-        ? await api.prepare<Omit<Preparation, "funding">>(
-            "orders/prepare",
-            { order: candidate },
-          )
-        : await reviewWithSession({
-            token: wallet.sessionToken,
-            request: (token) =>
-              api.prepare<Omit<Preparation, "funding">>(
-                "orders/prepare",
-                { order: candidate },
-                token,
-              ),
-            authenticate: wallet.authenticate,
-            assertCurrent,
-          });
+      ? await api.prepare<Omit<Preparation, "funding">>("orders/prepare", { order: candidate })
+      : await reviewWithSession({
+          token: wallet.sessionToken,
+          request: (token) =>
+            api.prepare<Omit<Preparation, "funding">>(
+              "orders/prepare",
+              { order: candidate },
+              token,
+            ),
+          authenticate: wallet.authenticate,
+          assertCurrent,
+        });
     const asset = fundingAsset(candidate),
-      mint = asset < 2 ? (asset === 0 ? market.baseToken : market.quoteToken)
-        : String(claimAddress(key(market.id), asset, key(protocolConfig.programId))),
-      balance = positions.data?.owner === wallet.account ? positions.data.balances[mint] : undefined,
-      available = asset < 2 ? BigInt(balance?.vaultAvailable ?? "0")
-        : BigInt(balance?.creditBalances?.[market.id] ?? "0"),
-      required = candidate.side === 0
-        ? quote(BigInt(candidate.quantity), BigInt(candidate.limitPriceRawX18), true)
-        : BigInt(candidate.quantity);
+      mint =
+        asset < 2
+          ? asset === 0
+            ? market.baseToken
+            : market.quoteToken
+          : String(claimAddress(key(market.id), asset, key(protocolConfig.programId))),
+      balance =
+        positions.data?.owner === wallet.account ? positions.data.balances[mint] : undefined,
+      available =
+        asset < 2
+          ? BigInt(balance?.vaultAvailable ?? "0")
+          : BigInt(balance?.creditBalances?.[market.id] ?? "0"),
+      required =
+        candidate.side === 0
+          ? quote(BigInt(candidate.quantity), BigInt(candidate.limitPriceRawX18), true)
+          : BigInt(candidate.quantity);
     parseAtomicPlan(result.plan, candidate);
     assertCurrent();
     if (result.orderHash !== orderId(candidate) || result.atomicRouter !== protocolConfig.programId)
       throw new Error("API order identity differs.");
     if (BigInt(result.plan.deadline) <= BigInt(Math.floor(Date.now() / 1000)))
       throw new Error("The returned quote has already expired. Retry review.");
-    const next = { ...result, funding: {
-      balanceSufficient: positions.isDataFresh && available >= required,
-      amount: String(required),
-    }, order: candidate };
+    const next = {
+      ...result,
+      funding: {
+        balanceSufficient: positions.isDataFresh && available >= required,
+        amount: String(required),
+      },
+      order: candidate,
+    };
     setNowSeconds(Math.floor(Date.now() / 1000));
     setPreparation(next);
     return next;
@@ -230,17 +258,26 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       BigInt(current.plan.deadline) <= BigInt(Math.floor(Date.now() / 1000))
     )
       throw new Error("Wallet changed or quote expired.");
-    if (!current.funding.balanceSufficient) throw new Error("Deposit the required balance in Portfolio");
+    if (!current.funding.balanceSufficient)
+      throw new Error("Deposit the required balance in Portfolio");
     const token = wallet.sessionToken ?? (await wallet.authenticate());
     assertCurrent();
-    const response = await api.prepare<{signature:string;orderHash:string}>(
-      "trading/submit", { order: current.order }, token);
-    if (response.orderHash !== orderId(current.order, key(protocolConfig.programId)) ||
-      !response.signature) throw new Error("Submitted order identity differs from the reviewed order");
+    const response = await api.prepare<{ signature: string; orderHash: string }>(
+      "trading/submit",
+      { order: current.order },
+      token,
+    );
+    if (
+      response.orderHash !== orderId(current.order, key(protocolConfig.programId)) ||
+      !response.signature
+    )
+      throw new Error("Submitted order identity differs from the reviewed order");
     assertCurrent();
     toast.add({
       type: "success",
-      title: "Order confirmed: " + response.signature.slice(0, 10) +
+      title:
+        "Order confirmed: " +
+        response.signature.slice(0, 10) +
         "… Vault balances update after indexing.",
     });
     setCompletedContext(context);
@@ -261,9 +298,38 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       if (!preparation) throw new Error("Review a currently tradable order first.");
       await submitPreparation(preparation, assertCurrent);
     });
+  const enableTrading = () =>
+    runPermissionAction(async (assertCurrent) => {
+      if (!wallet.account) throw new Error("Connect a wallet to enable trading");
+      const current = await refreshPermission();
+      assertCurrent();
+      if (!current) throw new Error(permissionError ?? "Trading permission is unavailable");
+      await wallet.ensureNetwork();
+      assertCurrent();
+      const client = solana();
+      const transaction = tradingPermissionApproval({
+        client,
+        owner: wallet.account,
+        permission: current,
+      });
+      const signature = await wallet.sendTransaction(transaction);
+      toast.add({
+        type: "success",
+        title: `Trading permission confirmed · ${signature.slice(0, 10)}…`,
+      });
+      for (let attempt = 0; attempt < 20; attempt++) {
+        assertCurrent();
+        const refreshed = await refreshPermission();
+        if (refreshed?.active) break;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      announceTradingPermissionChange();
+    });
   return {
     wallet,
     permission,
+    permissionLoaded,
+    permissionError,
     readiness,
     branch,
     setBranch,
@@ -279,7 +345,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     setMaxFeeBps,
     price,
     setPrice,
-    busy,
+    busy: busy || permissionBusy,
     reviewing,
     reviewError,
     submissionCount,
@@ -288,6 +354,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     quoteExpired,
     preview,
     prepare,
+    enableTrading,
     submit,
   };
 }

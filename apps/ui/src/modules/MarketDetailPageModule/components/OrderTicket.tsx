@@ -6,7 +6,6 @@ import { Repeat2Icon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useUiStore } from "@/components/providers/UiStateProvider";
-import { protocolConfig } from "@/config/protocol";
 import {
   Accordion,
   AccordionContent,
@@ -39,6 +38,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { protocolConfig } from "@/config/protocol";
 import { useOrderTicket } from "@/hooks/useOrderTicket";
 import { usePositions } from "@/hooks/useProtocolData";
 import { useWalletAssets } from "@/hooks/useWalletAssets";
@@ -123,14 +123,12 @@ export function OrderTicket({ market }: { market: MarketView }) {
   const token = t.side === "buy" ? market.quoteToken : market.baseToken;
   const claimAsset = (t.side === "buy" ? 4 : 2) + (t.branch === "YES" ? 0 : 1);
   const claimMint = String(claimAddress(key(market.id), claimAsset, key(protocolConfig.programId)));
-  const claim = positions.data?.owner === t.wallet.account
-    ? positions.data.balances[claimMint]?.creditBalances?.[market.id] ?? "0"
-    : null;
+  const claim =
+    positions.data?.owner === t.wallet.account
+      ? (positions.data.balances[claimMint]?.creditBalances?.[market.id] ?? "0")
+      : null;
   const wholeBalance = assets.balances.find((a) => a.token === token)?.balance;
-  const available =
-    t.funding === "whole"
-      ? wholeBalance?.vaultAvailable ?? null
-      : claim;
+  const available = t.funding === "whole" ? (wholeBalance?.vaultAvailable ?? null) : claim;
   const balanceError = t.funding === "whole" ? !assets.isDataFresh : !positions.isDataFresh;
   const maxQuantity = () =>
     edit(() => {
@@ -381,23 +379,29 @@ export function OrderTicket({ market }: { market: MarketView }) {
                         size="lg"
                         disabled={
                           t.busy ||
-                          (Boolean(t.wallet.account && t.permission?.active &&
-                            (!prepared ||
-                              t.reviewing ||
-                              t.quoteExpired ||
-                              !t.preview.valid ||
-                              !t.readiness.ready ||
-                              market.lifecycle !== "open")))
+                          Boolean(t.wallet.account && !t.permissionLoaded) ||
+                          Boolean(
+                            t.wallet.account &&
+                              t.permission?.active &&
+                              (!prepared ||
+                                t.reviewing ||
+                                t.quoteExpired ||
+                                !t.preview.valid ||
+                                !t.readiness.ready ||
+                                market.lifecycle !== "open"),
+                          )
                         }
                         onClick={() =>
                           !t.wallet.account
                             ? t.wallet.connect().catch(() => undefined)
-                            : !t.permission?.active || (prepared && !prepared.funding.balanceSufficient)
-                              ? router.push("/portfolio")
-                              : t.submit()
+                            : !t.permission?.active
+                              ? t.enableTrading()
+                              : prepared && !prepared.funding.balanceSufficient
+                                ? router.push("/portfolio")
+                                : t.submit()
                         }
                       >
-                        {t.busy || t.reviewing ? (
+                        {t.busy || t.reviewing || (t.wallet.account && !t.permissionLoaded) ? (
                           <Spinner />
                         ) : !t.wallet.account ? (
                           "Connect wallet"

@@ -14,7 +14,7 @@ import {
   LineTabsList as TabsList,
   LineTabsTrigger as TabsTrigger,
 } from "@/components/ui/line-tabs";
-import { DataError, EmptyState, LoadingState, Page, Stat } from "@/components/ui/page";
+import { DataError, EmptyState, Page, Stat } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/segmented";
 import {
   Table,
@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { OrdersClient } from "@/modules/OrdersPageModule/components/OrdersClient";
 import type { BranchBook, MarketView, TradeView } from "@/types/api";
 import { MarketAssetSwitcher } from "./MarketAssetSwitcher";
+import { MarketDetailPageSkeleton } from "./MarketDetailPageSkeleton";
 import { MarketRulesDialog } from "./MarketRulesDialog";
 import { OrderTicket } from "./OrderTicket";
 import { TradeTable } from "./TradeTable";
@@ -98,7 +99,9 @@ export function MarketWorkspace({
   const [tab, setTab] = useState("positions"),
     [bookBranch, setBookBranch] = useState<"YES" | "NO">("YES");
   if (!market)
-    return (
+    return query.isPending ? (
+      <MarketDetailPageSkeleton />
+    ) : (
       <Page>
         {query.isError ? (
           <DataError
@@ -106,8 +109,6 @@ export function MarketWorkspace({
               void query.refetch();
             }}
           />
-        ) : query.isPending ? (
-          <LoadingState />
         ) : (
           <EmptyState>
             Market not found in the canonical indexer.

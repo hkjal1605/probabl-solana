@@ -24,12 +24,20 @@ mock.module("../../src/hooks/useTradingReadiness", () => ({
   useTradingReadiness: () => ({ ready }),
 }));
 mock.module("../../src/hooks/useTradingPermission", () => ({
-  useTradingPermission: () => ({ permission: { active: true, delegate: "delegate",
-    grant: { expiresAt: "9999999999" } }, refresh: async () => {} }),
+  announceTradingPermissionChange: () => {},
+  useTradingPermission: () => ({
+    permission: { active: true, delegate: "delegate", grant: { expiresAt: "9999999999" } },
+    refresh: async () => {},
+  }),
 }));
 mock.module("../../src/hooks/useProtocolData", () => ({
-  usePositions: () => ({ data: { owner: wallet.account,
-    balances: { [market.quoteToken]: { vaultAvailable: "1000000" } } }, isDataFresh: true }),
+  usePositions: () => ({
+    data: {
+      owner: wallet.account,
+      balances: { [market.quoteToken]: { vaultAvailable: "1000000" } },
+    },
+    isDataFresh: true,
+  }),
 }));
 mock.module("../../src/hooks/useAsyncAction", () => ({
   useAsyncAction: () => ({
@@ -49,6 +57,10 @@ mock.module("../../src/lib/trading/order", () => ({
   }),
   createOrder: (value: unknown) => value,
 }));
+mock.module("../../src/lib/trading/permission", () => ({
+  tradingPermissionApproval: () => ({}),
+}));
+mock.module("../../src/lib/trading/rpc", () => ({ solana: () => ({}) }));
 mock.module("@conditional-stocks/solana-client", () => ({
   parseOrder: (value: unknown) => value,
   parseAtomicPlan: () => {},

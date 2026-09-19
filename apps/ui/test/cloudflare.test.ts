@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { validateCloudflareEnvironment } from "../scripts/cloudflare-preflight";
 import { sanitizedEnvironmentModule } from "../scripts/cloudflare-sanitize";
+
 const valid = {
   NEXT_PUBLIC_APP_URL: "https://probabl-ui.account.workers.dev",
   NEXT_PUBLIC_API_URL: "https://api-solana.probabl.trade",
@@ -8,17 +9,15 @@ const valid = {
   NEXT_PUBLIC_SOLANA_GENESIS_HASH: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
   NEXT_PUBLIC_SOLANA_PROGRAM_ID: "8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg",
   NEXT_PUBLIC_SOLANA_CONFIG: "6buYkVtSJjaoozCDsPFYrPhp5g1q1oLg2eLp7FpsZ1tF",
+  NEXT_PUBLIC_SOLANA_ADDRESS_LOOKUP_TABLES:
+    "4jotxTZdn4GnN5PgmeVwT3oB5YxPDBNBVgdrNyCTMiqk,8t9QCxN9TVJtSu9BFaSQWzdEiPFm13nEaU9cJ7zmLDiM",
 };
 describe("Workers deployment guard", () => {
   test("default deployment skips env checks; strict deployment remains opt-in", async () => {
-    const app = (await Bun.file(
-      new URL("../package.json", import.meta.url),
-    ).json()) as {
+    const app = (await Bun.file(new URL("../package.json", import.meta.url)).json()) as {
       scripts: Record<string, string>;
     };
-    const root = (await Bun.file(
-      new URL("../../../package.json", import.meta.url),
-    ).json()) as {
+    const root = (await Bun.file(new URL("../../../package.json", import.meta.url)).json()) as {
       scripts: Record<string, string>;
     };
     expect(root.scripts["deploy:ui:cloudflare"]).toBe(
@@ -27,9 +26,7 @@ describe("Workers deployment guard", () => {
     expect(app.scripts["deploy:cloudflare"]).toBe(
       "bun run build:cloudflare && opennextjs-cloudflare deploy",
     );
-    expect(app.scripts["build:cloudflare"]).toContain(
-      "&& bun scripts/cloudflare-sanitize.ts",
-    );
+    expect(app.scripts["build:cloudflare"]).toContain("&& bun scripts/cloudflare-sanitize.ts");
     expect(root.scripts["deploy:ui:cloudflare:strict"]).toBe(
       "bun --filter @conditional-stocks/web deploy:cloudflare:strict",
     );
@@ -39,15 +36,11 @@ describe("Workers deployment guard", () => {
   });
   test("accepts complete public settings; runtime credentials are not build requirements", () => {
     expect(validateCloudflareEnvironment(valid)).toEqual([]);
-    expect(validateCloudflareEnvironment({})).toHaveLength(
-      Object.keys(valid).length,
-    );
+    expect(validateCloudflareEnvironment({})).toHaveLength(Object.keys(valid).length);
   });
   test("rejects every missing required setting", () => {
     for (const key of Object.keys(valid))
-      expect(
-        validateCloudflareEnvironment({ ...valid, [key]: "" }).length,
-      ).toBeGreaterThan(0);
+      expect(validateCloudflareEnvironment({ ...valid, [key]: "" }).length).toBeGreaterThan(0);
   });
   test("rejects local/placeholder URLs and invalid Solana deployment settings", () => {
     for (const [key, value] of [
@@ -61,12 +54,17 @@ describe("Workers deployment guard", () => {
       ["NEXT_PUBLIC_API_URL", "https://api-solana.probabl.trade/path"],
       ["NEXT_PUBLIC_SOLANA_RPC_URL", "http://api.devnet.solana.com"],
       ["NEXT_PUBLIC_SOLANA_PROGRAM_ID", "not-an-address"],
+      ["NEXT_PUBLIC_SOLANA_PROGRAM_ID", "CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3"],
       ["NEXT_PUBLIC_SOLANA_CONFIG", "11111111111111111111111111111111"],
+      ["NEXT_PUBLIC_SOLANA_ADDRESS_LOOKUP_TABLES", "not-an-address"],
+      [
+        "NEXT_PUBLIC_SOLANA_ADDRESS_LOOKUP_TABLES",
+        "4jotxTZdn4GnN5PgmeVwT3oB5YxPDBNBVgdrNyCTMiqk,4jotxTZdn4GnN5PgmeVwT3oB5YxPDBNBVgdrNyCTMiqk",
+      ],
       ["NEXT_PUBLIC_LOG_LEVEL", "trace"],
     ]) {
       expect(
-        validateCloudflareEnvironment({ ...valid, [key as string]: value })
-          .length,
+        validateCloudflareEnvironment({ ...valid, [key as string]: value }).length,
       ).toBeGreaterThan(0);
     }
   });

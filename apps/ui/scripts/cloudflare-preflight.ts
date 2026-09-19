@@ -1,3 +1,4 @@
+import { PROGRAM_ID } from "@conditional-stocks/solana-client";
 import { loadEnvConfig } from "@next/env";
 import { PublicKey } from "@solana/web3.js";
 
@@ -11,28 +12,69 @@ export function validateCloudflareEnvironment(env: Environment): string[] {
       const url = new URL(env[key] ?? "");
       const hostname = url.hostname;
       if (
-        url.protocol !== "https:" || url.username || url.password || url.hash ||
-        !hostname.includes(".") || hostname === "localhost" ||
-        hostname.endsWith(".localhost") || hostname.endsWith(".local") ||
+        url.protocol !== "https:" ||
+        url.username ||
+        url.password ||
+        url.hash ||
+        !hostname.includes(".") ||
+        hostname === "localhost" ||
+        hostname.endsWith(".localhost") ||
+        hostname.endsWith(".local") ||
         /(^|\.)(example\.(com|org|net)|example|invalid|test)$/.test(hostname) ||
-        /^[\d.]+$/.test(hostname) || hostname.startsWith("[") ||
+        /^[\d.]+$/.test(hostname) ||
+        hostname.startsWith("[") ||
         (key !== "NEXT_PUBLIC_SOLANA_RPC_URL" && (url.pathname !== "/" || url.search))
-      ) throw new Error("invalid");
+      )
+        throw new Error("invalid");
     } catch {
       errors.push(`${key} must be a public HTTPS URL`);
     }
   }
-  for (const key of ["NEXT_PUBLIC_SOLANA_GENESIS_HASH", "NEXT_PUBLIC_SOLANA_PROGRAM_ID", "NEXT_PUBLIC_SOLANA_CONFIG"]) {
+  for (const key of [
+    "NEXT_PUBLIC_SOLANA_GENESIS_HASH",
+    "NEXT_PUBLIC_SOLANA_PROGRAM_ID",
+    "NEXT_PUBLIC_SOLANA_CONFIG",
+  ]) {
     try {
       const value = env[key] ?? "";
-      if (!value || new PublicKey(value).toBase58() !== value || new PublicKey(value).equals(PublicKey.default))
+      if (
+        !value ||
+        new PublicKey(value).toBase58() !== value ||
+        new PublicKey(value).equals(PublicKey.default)
+      )
         throw new Error("invalid");
     } catch {
       errors.push(`${key} must be a nonzero Solana public key`);
     }
   }
-  if (env.NEXT_PUBLIC_LOG_LEVEL &&
-    !["debug", "info", "warn", "error", "silent"].includes(env.NEXT_PUBLIC_LOG_LEVEL))
+  const lookupTables = (env.NEXT_PUBLIC_SOLANA_ADDRESS_LOOKUP_TABLES ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (
+    lookupTables.length === 0 ||
+    lookupTables.length > 8 ||
+    new Set(lookupTables).size !== lookupTables.length ||
+    lookupTables.some((value) => {
+      try {
+        return new PublicKey(value).equals(PublicKey.default);
+      } catch {
+        return true;
+      }
+    })
+  )
+    errors.push(
+      "NEXT_PUBLIC_SOLANA_ADDRESS_LOOKUP_TABLES must contain 1-8 unique nonzero Solana addresses",
+    );
+  if (
+    env.NEXT_PUBLIC_SOLANA_PROGRAM_ID &&
+    env.NEXT_PUBLIC_SOLANA_PROGRAM_ID !== PROGRAM_ID.toBase58()
+  )
+    errors.push("NEXT_PUBLIC_SOLANA_PROGRAM_ID does not match the compiled Solana client");
+  if (
+    env.NEXT_PUBLIC_LOG_LEVEL &&
+    !["debug", "info", "warn", "error", "silent"].includes(env.NEXT_PUBLIC_LOG_LEVEL)
+  )
     errors.push("NEXT_PUBLIC_LOG_LEVEL is invalid");
   return errors;
 }
@@ -44,6 +86,8 @@ if (import.meta.main) {
     console.error(`Cloudflare deployment configuration is incomplete:\n${errors.join("\n")}`);
     process.exitCode = 1;
   } else {
-    console.info("Public Solana configuration passed. Configure runtime API_URL separately in Cloudflare.");
+    console.info(
+      "Public Solana configuration passed. Configure runtime API_URL separately in Cloudflare.",
+    );
   }
 }

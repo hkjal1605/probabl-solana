@@ -33,6 +33,7 @@ import {
 import { createActionScope } from "../src/lib/trading/action-scope";
 import { marketPriceBound, quantityForSpend } from "../src/lib/trading/entry";
 import { previewOrder } from "../src/lib/trading/order";
+import { MarketDetailPageSkeleton } from "../src/modules/MarketDetailPageModule/components/MarketDetailPageSkeleton";
 import { MarketsPageSkeleton } from "../src/modules/MarketsPageModule/components/MarketsPageSkeleton";
 import { FEATURED_MARKETS } from "../src/modules/MarketsPageModule/featured-markets";
 import { mergeOrderPages } from "../src/services/orders";
@@ -67,6 +68,14 @@ describe("markets loading state", () => {
     expect(html).toContain('aria-busy="true"');
     expect(html.match(/data-variant="market"/g)).toHaveLength(6);
     expect(html.match(/data-slot="skeleton"/g)?.length).toBeGreaterThan(30);
+    expect(html).not.toContain("Loading...");
+  });
+  test("reserves the complete market workspace without fallback loading copy", () => {
+    const html = renderToStaticMarkup(createElement(MarketDetailPageSkeleton));
+    expect(html).toContain('aria-label="Loading market"');
+    for (const region of ["stats", "chart", "book", "ticket", "information"])
+      expect(html).toContain(`market-workspace-${region}`);
+    expect(html.match(/data-slot="skeleton"/g)?.length).toBeGreaterThan(50);
     expect(html).not.toContain("Loading...");
   });
 });

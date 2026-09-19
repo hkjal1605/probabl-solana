@@ -24,14 +24,15 @@ const required = (name: string) => {
   if (!value) throw new Error(`${name} is required`);
   return value;
 };
+const addressLookupTables = required("SOLANA_ADDRESS_LOOKUP_TABLES")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 const client = new SolanaClient({
   rpcUrl: required("SOLANA_RPC_URL"),
   config: required("SOLANA_CONFIG"),
   genesisHash: required("SOLANA_GENESIS_HASH"),
-  addressLookupTables: (process.env.SOLANA_ADDRESS_LOOKUP_TABLES ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean),
+  addressLookupTables,
   ...(process.env.SOLANA_PROGRAM_ID ? { programId: process.env.SOLANA_PROGRAM_ID } : {}),
 });
 const db = createSolanaDatabase({
@@ -48,7 +49,7 @@ const delegateSigner = tradingSigner(
   process.env.TRADING_DELEGATE_ADDRESS,
 );
 
-await client.assertNetwork();
+await Promise.all([client.assertNetwork(), client.lookupTables()]);
 await db.verify();
 
 const app = new Hono();

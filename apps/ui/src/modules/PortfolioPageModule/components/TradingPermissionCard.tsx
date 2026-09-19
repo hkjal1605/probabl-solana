@@ -1,7 +1,7 @@
 "use client";
 
-import { formatTokenAmount, parseTokenAmount } from "@conditional-stocks/domain";
-import { DELEGATE_TRADE, envelope, key, U64_MAX } from "@conditional-stocks/solana-client";
+import { formatTokenAmount } from "@conditional-stocks/domain";
+import { envelope, key } from "@conditional-stocks/solana-client";
 import { useState } from "react";
 import { useWallet } from "@/components/providers/WalletProvider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -24,6 +24,7 @@ import {
   useTradingPermission,
 } from "@/hooks/useTradingPermission";
 import { shortAddress } from "@/lib/format/display";
+import { tradingPermissionApproval } from "@/lib/trading/permission";
 import { solana } from "@/lib/trading/rpc";
 
 export function TradingPermissionCard() {
@@ -57,23 +58,18 @@ export function TradingPermissionCard() {
         grant
       )
         throw new Error("Trading approval is not available");
-      const maxOrderQuote = parseTokenAmount(perOrder.trim(), permission.quoteDecimals);
-      const totalQuote = parseTokenAmount(total.trim(), permission.quoteDecimals);
-      if (maxOrderQuote <= 0n || totalQuote < maxOrderQuote || totalQuote > U64_MAX)
-        throw new Error("Set a positive per-order limit and a larger lifetime limit");
       await wallet.ensureNetwork();
       assertCurrent();
       const client = solana();
-      const instruction = client.approveDelegate(key(wallet.account), key(permission.delegate), {
-        market: null,
-        expiresAt: BigInt(Math.floor(Date.now() / 1000) + 90 * 86_400),
-        maxOrderQuote,
-        totalQuote,
-        maxFeeBps: 100,
-        permissions: DELEGATE_TRADE,
+      const transaction = tradingPermissionApproval({
+        client,
+        owner: wallet.account,
+        permission,
+        perOrder,
+        total,
       });
       assertCurrent();
-      const signature = await wallet.sendTransaction(envelope([instruction], client.program));
+      const signature = await wallet.sendTransaction(transaction);
       setOpen(false);
       toast.add({
         type: "success",
