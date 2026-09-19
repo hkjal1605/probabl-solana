@@ -93,8 +93,13 @@ export async function resetRuntimeStorage(connectionString: string, database: st
       ])
         await client.query(`DROP SCHEMA IF EXISTS ${identifier(schema)} CASCADE`);
       for (const definition of Object.values(runtime)) {
+        // RDS's administrator can create and grant schemas but is deliberately
+        // unable to SET ROLE to the isolated runtime users. Keep the empty
+        // namespace administrator-owned; every table created by a migration is
+        // still owned by that runtime user.
+        await client.query(`CREATE SCHEMA ${identifier(definition.schema)}`);
         await client.query(
-          `CREATE SCHEMA ${identifier(definition.schema)} AUTHORIZATION ${identifier(definition.role)}`,
+          `GRANT USAGE, CREATE ON SCHEMA ${identifier(definition.schema)} TO ${identifier(definition.role)}`,
         );
         await client.query(
           `ALTER ROLE ${identifier(definition.role)} IN DATABASE ${identifier(database)}
