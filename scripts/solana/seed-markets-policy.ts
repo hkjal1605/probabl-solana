@@ -12,9 +12,9 @@ export interface SeedMarket {
 export const DEVNET_MARKET_SEED: readonly SeedMarket[] = [
   {
     category: "Macro",
-    gammaMarketId: "2589813",
-    slug: "will-the-fed-increase-interest-rates-by-25-bps-after-the-october-2026-meeting-20260617190324032",
-    question: "Will the Fed increase interest rates by 25 bps after the October 2026 meeting?",
+    gammaMarketId: "690215",
+    slug: "will-the-feds-lower-bound-reach-2pt75-or-lower-before-2027-448-727-854",
+    question: "Will the Fed’s lower bound reach 2.75% or lower before 2027?",
   },
   {
     category: "Macro",
