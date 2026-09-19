@@ -177,9 +177,19 @@ export function createPolymarketQueries(pool: Pool) {
       async (tx) => {
         const existing = await subscription(record.conditionId, tx);
         if (existing) {
-          if (canonicalStringify(existing) !== canonicalStringify(record))
+          if (
+            existing.conditionId.toLowerCase() !== record.conditionId.toLowerCase() ||
+            existing.gammaMarketId !== record.gammaMarketId ||
+            existing.yesTokenId !== record.yesTokenId
+          )
             throw new Error(`immutable subscription conflict for ${record.conditionId}`);
-          return existing;
+          if (existing.metadataSnapshotId === record.metadataSnapshotId) return existing;
+          const updated = { ...existing, metadataSnapshotId: record.metadataSnapshotId };
+          await tx.query(
+            "UPDATE operations.polymarket_subscriptions SET payload=$2 WHERE condition_id=$1",
+            [record.conditionId.toLowerCase(), canonicalStringify(updated)],
+          );
+          return updated;
         }
         await tx.query(
           "INSERT INTO operations.polymarket_subscriptions(condition_id,payload) VALUES($1,$2)",

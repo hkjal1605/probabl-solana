@@ -4,6 +4,25 @@ import { testDatabase } from "@conditional-stocks/db/polymarket/testing";
 import { PolymarketIngestor } from "../src/service.ts";
 import { conditionId, environment, FakeSource } from "./helpers.ts";
 
+test("tracking advances mutable metadata while preserving the outcome mapping", async () => {
+  const fixture = await testDatabase();
+  const store = createPolymarketQueries(fixture.database);
+  const original = {
+    conditionId,
+    gammaMarketId: "42",
+    metadataSnapshotId: "snapshot-1",
+    yesTokenId: "111",
+  };
+  expect(await store.addSubscription(original)).toEqual(original);
+  const updated = { ...original, metadataSnapshotId: "snapshot-2" };
+  expect(await store.addSubscription(updated)).toEqual(updated);
+  expect(await store.subscription(conditionId)).toEqual(updated);
+  await expect(
+    store.addSubscription({ ...updated, yesTokenId: "different-outcome-token" }),
+  ).rejects.toThrow("immutable subscription conflict");
+  await store.close();
+});
+
 test("Polymarket source data survives an ingestor restart independently of an exchange", async () => {
   const fixture = await testDatabase();
   const store = createPolymarketQueries(fixture.database);
@@ -30,7 +49,9 @@ test("Polymarket source data survives an ingestor restart independently of an ex
       isStale: true,
       bestBidX6: "500000",
     });
-    expect((await restarted.metadata(metadata.snapshotId))?.normalized.conditionId).toBe(conditionId);
+    expect((await restarted.metadata(metadata.snapshotId))?.normalized.conditionId).toBe(
+      conditionId,
+    );
     await restarted.start();
     expect((await restarted.probability(conditionId)).quality).toBe("valid");
     await restarted.stop();

@@ -17,6 +17,7 @@ import {
   initializeMarketVaults,
   lifecycleTransaction,
 } from "@conditional-stocks/solana-client/admin";
+import { assertEvidenceIntegrity } from "@conditional-stocks/solana-client/evidence";
 import bs58 from "bs58";
 import type { EvidenceView } from "../../apps/admin-ui/src/lib/admin-api.ts";
 import {
@@ -26,6 +27,7 @@ import {
   loadBatchMints,
   type MarketSource,
 } from "../../apps/admin-ui/src/lib/market-batch.ts";
+import { canonicalStringify } from "../../packages/market-data/src/index.ts";
 import { parseDeployer } from "./devnet-policy.ts";
 import { DEVNET_MARKET_SEED, validateMarketSeed } from "./seed-markets-policy.ts";
 
@@ -49,9 +51,14 @@ interface MarketRecord {
   packetHash?: string;
   reconciled?: true;
 }
+interface EventTiming {
+  tradingCutoff: string;
+  tradingOpen: string;
+}
 interface SeedState {
   apiOrigin: string;
   config: string;
+  events: Record<string, EventTiming>;
   pending?: PendingTransaction;
   program: string;
   records: Record<string, MarketRecord>;
@@ -121,6 +128,7 @@ const blank = (): SeedState => ({
   config: CONFIG,
   wallet: wallet.publicKey.toBase58(),
   apiOrigin,
+  events: {},
   records: {},
 });
 let state = blank();
@@ -134,10 +142,13 @@ if (existsSync(statePath)) {
     state.config !== CONFIG ||
     state.wallet !== wallet.publicKey.toBase58() ||
     state.apiOrigin !== apiOrigin ||
+    (state.events !== undefined &&
+      (!state.events || typeof state.events !== "object" || Array.isArray(state.events))) ||
     !state.records ||
     typeof state.records !== "object"
   )
     throw new Error("Market seed state belongs to another deployment");
+  state.events ??= {};
 }
 const save = () => {
   const temporary = `${statePath}.${process.pid}.tmp`;
@@ -297,6 +308,46 @@ async function sendReviewed(transaction: AdminTransaction, label: string) {
   return signature;
 }
 
+// A market address commits to its trading window. Recover the timing from any
+// already-created market before building plans so an interrupted run cannot
+// silently derive a second address from a newer `Date.now()` value.
+if (state.pending) {
+  const label = state.pending.label;
+  const signature = await settlePending(label);
+  if (signature && label.endsWith(":create")) {
+    const marketId = label.slice(0, -":create".length);
+    const record = state.records[marketId];
+    if (!record) throw new Error(`Pending creation has no journal record: ${marketId}`);
+    record.creationSignature = signature;
+    save();
+  }
+}
+for (const [marketId, record] of Object.entries(state.records)) {
+  if (!record.packetHash) continue;
+  const existing = await client.connection.getAccountInfo(key(marketId), "confirmed");
+  if (!existing) continue;
+  const evidence = await api<EvidenceView>(
+    `/v1/admin/evidence/${record.packetHash}`,
+    undefined,
+    session.token,
+  );
+  if (evidence.envelope.packet.kind !== "market-creation")
+    throw new Error(`Seed record ${marketId} does not reference creation evidence`);
+  const packet = evidence.envelope.packet;
+  const recovered = {
+    tradingOpen: packet.config.tradingOpen,
+    tradingCutoff: packet.config.tradingCutoff,
+  };
+  const prior = state.events[packet.polymarket.gammaMarketId];
+  if (
+    prior &&
+    (prior.tradingOpen !== recovered.tradingOpen || prior.tradingCutoff !== recovered.tradingCutoff)
+  )
+    throw new Error(`Conflicting live timing for Polymarket ${packet.polymarket.gammaMarketId}`);
+  state.events[packet.polymarket.gammaMarketId] = recovered;
+}
+save();
+
 const verified = await loadBatchMints(client, baseMints);
 if (verified.deployment.marketAdmin !== wallet.publicKey.toBase58())
   throw new Error("Verified market administrator changed");
@@ -307,6 +358,35 @@ const reviewChecklist = {
   "rules-and-dates": true,
   "source-and-raw-hash": true,
 };
+
+function assertResumedPacket(plan: ReturnType<typeof buildBatchPlans>[number], view: EvidenceView) {
+  assertEvidenceIntegrity(view.envelope);
+  const actual = view.envelope.packet;
+  const expected = plan.envelope.packet;
+  if (actual.kind !== "market-creation" || expected.kind !== "market-creation")
+    throw new Error("Stored seed evidence is not market-creation evidence");
+  const {
+    metadataRawHash: _actualRawHash,
+    metadataSnapshotId: _actualSnapshotId,
+    ...actualPolymarket
+  } = actual.polymarket;
+  const {
+    metadataRawHash: _expectedRawHash,
+    metadataSnapshotId: _expectedSnapshotId,
+    ...expectedPolymarket
+  } = expected.polymarket;
+  if (
+    canonicalStringify(actual.config) !== canonicalStringify(expected.config) ||
+    canonicalStringify(actual.deployment) !== canonicalStringify(expected.deployment) ||
+    canonicalStringify(actualPolymarket) !== canonicalStringify(expectedPolymarket) ||
+    canonicalStringify(actual.sourceUrls) !== canonicalStringify(expected.sourceUrls) ||
+    canonicalStringify(actual.attachments) !== canonicalStringify(expected.attachments) ||
+    actual.preparer !== expected.preparer ||
+    evidenceTransaction(view.envelope, "create-market", verified.deployment).expectedMarketId !==
+      plan.expectedMarketId
+  )
+    throw new Error("Stored seed evidence differs from the pinned market plan");
+}
 
 for (const [eventIndex, seed] of DEVNET_MARKET_SEED.entries()) {
   const source = await api<MarketSource>(
@@ -322,6 +402,15 @@ for (const [eventIndex, seed] of DEVNET_MARKET_SEED.entries()) {
   )
     throw new Error(`Polymarket source changed or closed: ${seed.slug}`);
   const now = Math.floor(Date.now() / 1000);
+  let timing = state.events[seed.gammaMarketId];
+  if (!timing) {
+    timing = {
+      tradingOpen: String(now - 5),
+      tradingCutoff: String(Math.floor(Date.parse(source.normalized.endTime) / 1000)),
+    };
+    state.events[seed.gammaMarketId] = timing;
+  }
+  save();
   const plans = buildBatchPlans({
     rows: verified.bases.map((mint) => ({
       mint,
@@ -330,8 +419,8 @@ for (const [eventIndex, seed] of DEVNET_MARKET_SEED.entries()) {
     quote: verified.quote,
     source,
     shared: {
-      tradingOpen: String(now - 5),
-      tradingCutoff: String(Math.floor(Date.parse(source.normalized.endTime) / 1000)),
+      tradingOpen: timing.tradingOpen,
+      tradingCutoff: timing.tradingCutoff,
       metadataUri: source.normalized.canonicalUrl,
       sourceUrls: source.normalized.canonicalUrl,
     },
@@ -359,7 +448,7 @@ for (const [eventIndex, seed] of DEVNET_MARKET_SEED.entries()) {
         undefined,
         session.token,
       );
-      assertBatchPacket(plan, packet);
+      assertResumedPacket(plan, packet);
     }
     if (packet.status === "rejected") throw new Error(`Evidence was rejected for ${id}`);
     if (packet.status === "prepared")
