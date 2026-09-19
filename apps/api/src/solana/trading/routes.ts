@@ -49,7 +49,7 @@ export function mountTrading(
         signer: delegateSigner,
         owner,
         order,
-        snapshot: readIndex,
+        snapshot: (queries) => indexedSnapshot(queries, client, domain),
         prepare,
       }),
     );

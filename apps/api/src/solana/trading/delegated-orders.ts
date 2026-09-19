@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { SolanaDatabase } from "@conditional-stocks/db/solana";
+import type { SolanaDatabase, SolanaQueries } from "@conditional-stocks/db/solana";
 import {
   activeDelegation,
   address,
@@ -162,7 +162,7 @@ export async function submitDelegatedOrder(input: {
   signer: Keypair;
   owner: string;
   order: OrderWire;
-  snapshot: () => Promise<Snapshot>;
+  snapshot: (queries: Pick<SolanaQueries, "snapshot">) => Promise<Snapshot>;
   prepare: (
     order: OrderWire,
     snapshot?: Snapshot,
@@ -183,7 +183,8 @@ export async function submitDelegatedOrder(input: {
   return db.locked(`delegated:${domain}:${owner}`, async (queries) => {
     let submission = await queries.delegatedSubmission(domain, orderHash);
     if (!submission) {
-      let snapshot = await input.snapshot();
+      const readLockedSnapshot = () => input.snapshot(queries);
+      let snapshot = await readLockedSnapshot();
       let built: Awaited<ReturnType<SolanaClient["prepareTransaction"]>> | undefined;
       for (let attempt = 0; attempt <= MAX_STALE_REPLANS; attempt++) {
         const market = snapshot.markets.get(order.marketId);
@@ -226,7 +227,7 @@ export async function submitDelegatedOrder(input: {
         if (!failure.retryable) throw new Error(failure.message);
         if (attempt === MAX_STALE_REPLANS)
           throw new Error("The order book kept changing. Please review the latest quote.");
-        snapshot = await waitForIndexedSlot(input.snapshot, simulation.context.slot);
+        snapshot = await waitForIndexedSlot(readLockedSnapshot, simulation.context.slot);
         built = undefined;
       }
       if (!built) throw new Error("Unable to build a current delegated order");
