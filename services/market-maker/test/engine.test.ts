@@ -75,21 +75,30 @@ test("funding allocates shared credit once and deposits only each market's remai
       }
     },
   } as unknown as Executor;
-  const engine = new Engine(
-    client,
-    maker,
-    { ...config, markets: policies },
-    "https://example.com",
-    initialState("test"),
-    () => {},
-    executor,
-    async () => reference,
-  );
+  const state = initialState("test"),
+    engine = new Engine(
+      client,
+      maker,
+      { ...config, markets: policies },
+      "https://example.com",
+      state,
+      () => {},
+      executor,
+      async () => reference,
+    );
   engine.view = async () => s;
   engine.validateMarket = async (_s, p) => s.markets.get(p.market)!;
   // Whole-asset credits must not appear in each market's conditional risk inventory.
   for (const p of policies) expect(inventory(s, maker, p.market)).toEqual([0n, 0n, 0n, 0n, 0n, 0n]);
   await engine.fund();
+  for (const p of policies)
+    expect(state.markets[p.market]).toMatchObject({
+      fundStarted: true,
+      fundComplete: true,
+      spot: String(reference.spot),
+      probability: String(reference.probability),
+      observedAt: reference.observedAt,
+    });
   expect(deposits).toEqual([20n, 100n]);
   expect(allocations).toEqual(policies.flatMap((p) => [p.market, p.market]));
   expect([...s.credits.values()].map((c) => c.available.toString())).toEqual(["0", "0"]);
@@ -306,4 +315,53 @@ test("partial funding is journaled before sending and cannot automatically top u
   expect(sends).toBe(1);
   await expect(engine.fund()).rejects.toThrow("Funding already attempted");
   expect(sends).toBe(1);
+});
+
+test("static placement refreshes and journals its bounded reference before signing", async () => {
+  const s = book(),
+    state = initialState("test");
+  state.markets[id] = { fundStarted: true, fundComplete: true };
+  s.wallets.set(walletAddress(key(id), owner, s.program).toBase58(), {
+    balances: [0, 0, 100000000, 100000000, 100000000, 100000000].map(bn),
+  } as WalletAccount);
+  let references = 0,
+    saves = 0,
+    placements = 0;
+  const client = {
+    program: s.program,
+    deployment: { genesisHash: "test" },
+    placement: () => ({ kind: "placement" }),
+  } as unknown as SolanaClient;
+  const executor = {
+    reconcilePending: async () => {},
+    send: async (_instructions: unknown[], _maintenance: boolean, valid: () => boolean) => {
+      expect(valid()).toBe(true);
+      placements++;
+    },
+  } as unknown as Executor;
+  const engine = new Engine(
+    client,
+    owner,
+    config,
+    "https://example.com",
+    state,
+    () => saves++,
+    executor,
+    async () => {
+      references++;
+      return reference;
+    },
+  );
+  engine.view = async () => s;
+  engine.validateMarket = async () => market;
+  await engine.staticCycle();
+  expect(references).toBe(1);
+  expect(placements).toBe(4);
+  expect(saves).toBe(1);
+  expect(state.markets[id]).toMatchObject({
+    fundComplete: true,
+    spot: String(reference.spot),
+    probability: String(reference.probability),
+    observedAt: reference.observedAt,
+  });
 });

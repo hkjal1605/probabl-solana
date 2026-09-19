@@ -450,6 +450,19 @@ export class Engine {
       try {
         const before = await this.view(),
           market = await this.validateMarket(before, p);
+        stage = "reference-feeds";
+        const reference = await this.readReference(
+            this.origin,
+            this.client.deployment.genesisHash,
+            market,
+            p,
+            this.settings,
+          ),
+          record = this.state.markets[p.market] ?? (this.state.markets[p.market] = {});
+        record.spot = String(reference.spot);
+        record.probability = String(reference.probability);
+        record.observedAt = reference.observedAt;
+        this.save();
         const held = inventory(before, this.owner, p.market);
         const target = units(p.baseInventory, market.decimals[0]!);
         const needed = target - min(held[2]!, held[3]!);
@@ -459,21 +472,14 @@ export class Engine {
         }
         for (let step = 0; step < 4 * this.settings.quoteLevels; step++) {
           const s = await this.view(),
-            m = await this.validateMarket(s, p),
-            record = this.state.markets[p.market];
-          if (!record?.fundComplete || !record.spot || !record.probability)
-            throw new Error("Market lacks funded inventory or an observed reference");
+            m = await this.validateMarket(s, p);
+          if (!record.fundComplete) throw new Error("Market lacks funded inventory");
           const existing = owned(s, this.owner, p.market).filter(
             ([, o]) => big(o.terms.expiry) > BigInt(Math.floor(Date.now() / 1000)),
           );
           const desired = quotes({
             market: m,
-            reference: {
-              spot: BigInt(record.spot),
-              probability: BigInt(record.probability),
-              spread: 0n,
-              observedAt: Date.now(),
-            },
+            reference,
             gapBps: p.gapBps,
             balances: inventory(s, this.owner, p.market),
             targetBase: units(p.baseInventory, m.decimals[0]!),
@@ -565,7 +571,11 @@ export class Engine {
             price: q.price,
             quantity: q.quantity,
           });
-          await this.executor.send([this.client.placement(order, plan, m)]);
+          await this.executor.send(
+            [this.client.placement(order, plan, m)],
+            false,
+            () => !this.stopped && Date.now() - reference.observedAt <= this.settings.maxFeedAgeMs,
+          );
         }
         log("static-market-complete", { market: p.market });
       } catch (error) {
@@ -654,13 +664,16 @@ export class Engine {
         owned(s, this.owner, p.market).length
       )
         throw new Error("Funding requires an empty dedicated market wallet");
-      await this.readReference(
+      const reference = await this.readReference(
         this.origin,
         this.client.deployment.genesisHash,
         m,
         p,
         this.settings,
       );
+      record.spot = String(reference.spot);
+      record.probability = String(reference.probability);
+      record.observedAt = reference.observedAt;
       record.fundStarted = true;
       this.save(); // Never automatically top up losses, including after restart.
       for (const collateral of [0, 1]) {
