@@ -65,7 +65,10 @@ export function useOrderTicket({ market }: { market: MarketView }) {
   const [quantity, setQuantity] = useState(""),
     [maxFeeBps, setMaxFeeBps] = useState("0"),
     [price, setPrice] = useState(initialMarketPrice);
-  const context = [
+  // Only user-controlled/signed inputs belong to the action identity. Indexed
+  // position blocks advance in the background while a submission is in flight;
+  // treating those updates as an action change used to cancel valid orders.
+  const actionContext = [
     wallet.account,
     market.id,
     branch,
@@ -78,22 +81,31 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     permission?.active,
     permission?.delegate,
     permission?.grant?.expiresAt,
-    positions.data?.blockNumber,
   ].join(":");
-  const revision = useRef({ context, version: 0 });
-  if (revision.current.context !== context)
-    revision.current = { context, version: revision.current.version + 1 };
-  const [review, setReview] = useState<{ context: string; value: Preparation } | null>(null);
-  const preparation = review?.context === context ? review.value : null;
-  const setPreparation = (value: Preparation | null) =>
-    setReview(value ? { context, value } : null);
+  // Balance snapshots still invalidate an idle review so funding sufficiency is
+  // recalculated, but they must not invalidate an already-started submission.
+  const reviewContext = [actionContext, positions.data?.blockNumber].join(":");
+  const revision = useRef({ context: reviewContext, version: 0 });
+  if (revision.current.context !== reviewContext)
+    revision.current = { context: reviewContext, version: revision.current.version + 1 };
+  const [review, setReview] = useState<{
+    actionContext: string;
+    reviewContext: string;
+    value: Preparation;
+  } | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewNonce, setReviewNonce] = useState(0);
   const [completedContext, setCompletedContext] = useState<string | null>(null);
   const [submissionCount, setSubmissionCount] = useState(0);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
-  const { busy, run } = useAsyncAction(context);
+  const { busy, run } = useAsyncAction(actionContext);
+  const preparation =
+    review?.actionContext === actionContext && (busy || review.reviewContext === reviewContext)
+      ? review.value
+      : null;
+  const setPreparation = (value: Preparation | null) =>
+    setReview(value ? { actionContext, reviewContext, value } : null);
   const { busy: permissionBusy, run: runPermissionAction } = useAsyncAction(
     [wallet.account, permission?.delegate].join(":"),
   );
@@ -190,12 +202,16 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       positions.isDataFresh &&
       Boolean(permission?.active) &&
       market.lifecycle === "open" &&
-      completedContext !== context,
+      completedContext !== actionContext,
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: Signed input identity and explicit refresh restart the debounce; streamed market objects do not.
   useEffect(() => {
     let active = true;
     const version = revision.current.version;
+    // Freeze the reviewed order once submission begins. Background SSE/indexer
+    // updates may refresh balances, but the API and program remain authoritative
+    // for the submitted order and will reject insufficient funds atomically.
+    if (busy) return;
     setReview(null);
     setReviewError(null);
     setReviewing(canReview);
@@ -218,7 +234,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       active = false;
       clearTimeout(timer);
     };
-  }, [context, canReview, reviewNonce]);
+  }, [reviewContext, canReview, reviewNonce, busy]);
   useEffect(() => {
     if (!preparation || busy) return;
     const remaining = Number(preparation.plan.deadline) * 1000 - Date.now();
@@ -244,9 +260,15 @@ export function useOrderTicket({ market }: { market: MarketView }) {
   }, [preparation, busy]);
   const prepare = () =>
     run(async (assertCurrent) => {
+      const version = revision.current.version;
+      const assertReviewCurrent = () => {
+        assertCurrent();
+        if (revision.current.version !== version)
+          throw new Error("Order inputs or balances changed. Review the action again.");
+      };
       setReviewError(null);
       setPreparation(null);
-      await prepareAction(assertCurrent);
+      await prepareAction(assertReviewCurrent);
     });
   const submitPreparation = async (current: Preparation, assertCurrent: () => void) => {
     if (!wallet.account || !readiness.ready || !permission?.active)
@@ -280,7 +302,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
         response.signature.slice(0, 10) +
         "… Vault balances update after indexing.",
     });
-    setCompletedContext(context);
+    setCompletedContext(actionContext);
     setPreparation(null);
     setQuantity("");
     setTif("ioc");
