@@ -14,7 +14,7 @@ export async function testDatabase() {
   const disposable = await disposableSolanaDatabase(url);
   cleanups.push(disposable.close);
   const database = createPolymarketDatabase(disposable.connectionString);
-  await initializePolymarketStorage(database);
+  await initializePolymarketStorage(database, { createSchema: true });
   return {
     database,
     connectionString: disposable.connectionString,
