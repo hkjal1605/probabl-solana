@@ -220,14 +220,21 @@ async function settlePending(label: string): Promise<string | null> {
       save();
       return null;
     }
-    const returned = await client.connection.sendRawTransaction(
-      Buffer.from(pending.raw, "base64"),
-      {
-        maxRetries: 5,
-        skipPreflight: false,
-      },
-    );
-    if (returned !== pending.signature) throw new Error("RPC returned a different signature");
+    try {
+      const returned = await client.connection.sendRawTransaction(
+        Buffer.from(pending.raw, "base64"),
+        {
+          maxRetries: 5,
+          skipPreflight: false,
+        },
+      );
+      if (returned !== pending.signature) throw new Error("RPC returned a different signature");
+    } catch (error) {
+      // A provider can lag getSignatureStatuses yet reject the identical bytes
+      // as already landed. Only this exact idempotent response may continue to
+      // confirmation; every other submission error remains fatal.
+      if (!(error instanceof Error) || !/already been processed/i.test(error.message)) throw error;
+    }
   }
   const confirmation = await client.connection.confirmTransaction(
     {
@@ -275,7 +282,19 @@ async function sendReviewed(transaction: AdminTransaction, label: string) {
     skipPreflight: false,
   });
   if (returned !== signature) throw new Error("RPC returned a different signature");
-  return (await settlePending(label)) ?? signature;
+  const confirmation = await client.connection.confirmTransaction(
+    {
+      signature,
+      blockhash: built.blockhash,
+      lastValidBlockHeight: built.lastValidBlockHeight,
+    },
+    "finalized",
+  );
+  if (confirmation.value.err)
+    throw new Error(`${label} failed: ${JSON.stringify(confirmation.value.err)}`);
+  delete state.pending;
+  save();
+  return signature;
 }
 
 const verified = await loadBatchMints(client, baseMints);
