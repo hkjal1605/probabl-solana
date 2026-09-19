@@ -1,4 +1,4 @@
-import { address, unsigned, U64_MAX } from "@conditional-stocks/solana-client";
+import { address, U64_MAX, unsigned } from "@conditional-stocks/solana-client";
 
 export const BPS = 10_000n;
 export const PROB = 1_000_000n;
@@ -40,6 +40,7 @@ export interface MarketPolicy {
 }
 export interface Settings {
   markets: MarketPolicy[];
+  allowStaleDevnetSpot: boolean;
   quoteLevels: number;
   levelSpacingBps: number;
   halfSpreadBps: number;
@@ -65,6 +66,7 @@ export function settings(input: unknown): Settings {
   if (!raw || !Array.isArray(raw.markets) || raw.markets.length > 50)
     throw new Error("Configure at most 50 explicitly budgeted markets");
   const result: Settings = {
+    allowStaleDevnetSpot: false,
     quoteLevels: 1,
     levelSpacingBps: 25,
     halfSpreadBps: 60,
@@ -97,7 +99,7 @@ export function settings(input: unknown): Settings {
     ttlSeconds: [30, 86400],
     pollMs: [1000, 60000],
     cutoffBufferSeconds: [30, 86400],
-    maxFeedAgeMs: [1000, 120000],
+    maxFeedAgeMs: [1000, 900000],
     maxProbabilitySpreadX6: [1, 200000],
     probabilityFloorX6: [1, 100000],
     jumpBps: [1, 5000],
@@ -111,6 +113,8 @@ export function settings(input: unknown): Settings {
     if (typeof value !== "number" || !Number.isInteger(value) || value < low || value > high)
       throw new Error(`Invalid ${field}`);
   }
+  if (typeof result.allowStaleDevnetSpot !== "boolean")
+    throw new Error("Invalid allowStaleDevnetSpot");
   if (
     result.ttlSeconds * 1000 < result.pollMs * 3 ||
     result.maxHalfSpreadBps < result.halfSpreadBps ||

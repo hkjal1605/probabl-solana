@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import { SOLANA_DEVNET_GENESIS } from "@conditional-stocks/shared/spot-prices";
-import { reference, apiOrigin, json } from "../src/feeds";
-import { feeds, market, policy, config } from "./fixtures";
+import { settings } from "../src/config";
+import { apiOrigin, json, reference } from "../src/feeds";
+import { config, feeds, market, policy } from "./fixtures";
+
 test("price normalization honors both quote USD price and explicitly reviewed raw-unit multipliers", () => {
   const f = feeds();
   const r = reference(f.source, f.prices, SOLANA_DEVNET_GENESIS, market, policy, config, f.now);
@@ -56,6 +58,30 @@ test("missing, duplicate, substituted and stale spot quotes cannot price orders"
       reference(f.source, f.prices, SOLANA_DEVNET_GENESIS, market, policy, config, f.now),
     ).toThrow();
   }
+});
+test("an explicit Devnet-only policy may use a recently fetched unchanged Jupiter quote", () => {
+  const f = feeds();
+  f.prices.prices[0]!.status = "stale";
+  f.prices.prices[0]!.priceTimestamp -= 300;
+  const devnet = settings({
+    markets: [policy],
+    allowStaleDevnetSpot: true,
+    maxFeedAgeMs: 600000,
+  });
+  expect(
+    reference(f.source, f.prices, SOLANA_DEVNET_GENESIS, market, policy, devnet, f.now).spot,
+  ).toBe(10n ** 18n);
+  expect(() =>
+    reference(
+      f.source,
+      f.prices,
+      SOLANA_DEVNET_GENESIS,
+      market,
+      policy,
+      { ...devnet, allowStaleDevnetSpot: false },
+      f.now,
+    ),
+  ).toThrow();
 });
 test("reference HTTP transport rejects unsafe origins, failure responses and oversized bodies", async () => {
   for (const url of [

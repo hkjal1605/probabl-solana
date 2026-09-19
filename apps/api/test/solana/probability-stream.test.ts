@@ -15,6 +15,7 @@ test("probability API shares the canonical condition cache and retains original 
     conditionId: condition,
     observedAtMs: "1800000000000",
     quality: "valid",
+    isStale: false,
     midpointX6: "280000",
   };
   const cache = new RedisCache(
@@ -69,5 +70,26 @@ test("mismatched upstream conditions never enter Redis", async () => {
   );
   const probabilities = new CachedProbability(cache, async () => ({ conditionId: "wrong" }));
   await expect(probabilities.get(`0x${"11".repeat(32)}`)).rejects.toThrow("mismatch");
+  expect(writes).toBe(0);
+});
+
+test("stale probability observations never enter Redis", async () => {
+  let writes = 0;
+  const condition = `0x${"22".repeat(32)}`;
+  const cache = new RedisCache(
+    {
+      get: async () => null,
+      set: async () => {
+        writes++;
+      },
+    },
+    "test",
+  );
+  const probabilities = new CachedProbability(cache, async () => ({
+    conditionId: condition,
+    isStale: true,
+    quality: "stale",
+  }));
+  await expect(probabilities.get(condition)).rejects.toThrow("not currently valid");
   expect(writes).toBe(0);
 });

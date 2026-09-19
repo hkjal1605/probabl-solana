@@ -1,10 +1,11 @@
-import { hex, WAD, type MarketAccount } from "@conditional-stocks/solana-client";
 import {
-  spotMapping,
+  SOLANA_DEVNET_GENESIS,
   SOLANA_MAINNET_GENESIS,
   type SpotPricesResponse,
+  spotMapping,
 } from "@conditional-stocks/shared/spot-prices";
-import { decimal, PROB, type MarketPolicy, type Settings } from "./config.ts";
+import { hex, type MarketAccount, WAD } from "@conditional-stocks/solana-client";
+import { decimal, type MarketPolicy, PROB, type Settings } from "./config.ts";
 import type { Reference } from "./strategy.ts";
 
 export function apiOrigin(input: string) {
@@ -139,10 +140,13 @@ export function reference(
     const rows = response.prices.filter((v) => v.mint === mint),
       mapping = spotMapping(genesis, mint);
     const price = rows[0];
+    const statusAccepted =
+      price?.status === "available" ||
+      (price?.status === "stale" && s.allowStaleDevnetSpot && genesis === SOLANA_DEVNET_GENESIS);
     if (
       rows.length !== 1 ||
       !price ||
-      price.status !== "available" ||
+      !statusAccepted ||
       !mapping.sourceMint ||
       price.sourceMint !== mapping.sourceMint ||
       typeof price.priceUsd !== "number" ||

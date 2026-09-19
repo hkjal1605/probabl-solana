@@ -102,7 +102,7 @@ export async function mountSolanaAdmin(
   let lastCacheWarning = 0;
   const probabilityCache = new RedisCache(
     process.env.REDIS_URL ?? "redis://127.0.0.1:6379",
-    `probabl:probability:v1:${domain}`,
+    `probabl:probability:v2:${domain}`,
     () => {
       if (Date.now() - lastCacheWarning > 30_000) {
         lastCacheWarning = Date.now();

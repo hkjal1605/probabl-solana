@@ -1,7 +1,7 @@
+import type { Hex } from "@conditional-stocks/market-data";
 import type { RedisCache } from "@conditional-stocks/shared/redis-cache";
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import type { Hex } from "@conditional-stocks/market-data";
 
 export const PROBABILITY_CACHE_TTL_SECONDS = 60;
 export class CachedProbability {
@@ -21,6 +21,13 @@ export class CachedProbability {
         tick.conditionId !== canonical
       )
         throw new Error("Probability condition mismatch");
+      if (
+        !("quality" in tick) ||
+        tick.quality !== "valid" ||
+        !("isStale" in tick) ||
+        tick.isStale !== false
+      )
+        throw new Error("Probability is not currently valid");
       return tick;
     });
   }
