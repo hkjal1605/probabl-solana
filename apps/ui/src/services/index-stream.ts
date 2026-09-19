@@ -1,6 +1,8 @@
 let healthyUntil = 0;
-import type { PositionView, WholeBalanceView } from "../types/api";
+
 import { assertMarketUnits } from "@conditional-stocks/domain";
+import type { PositionView, WholeBalanceView } from "../types/api";
+
 const address = (v: unknown): v is string =>
   typeof v === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v);
 const amount = (v: unknown, bits = 64) =>
@@ -25,7 +27,15 @@ export function parseStreamWallet(value: any, owner: string): StreamWallet {
     typeof value.balances !== "object"
   )
     throw new Error("Invalid streamed wallet");
+  const balances: Record<string, WholeBalanceView> = {};
   for (const [mint, balance] of Object.entries(value.balances) as [string, any][]) {
+    const hasAvailable = balance?.vaultAvailable !== undefined;
+    const hasReserved = balance?.reserved !== undefined;
+    // During an additive indexer rollout, an older image may omit both custody
+    // fields. Preserve its independently verified external wallet balance, but
+    // fail closed for protocol funds. One missing field is always malformed.
+    const vaultAvailable = hasAvailable ? balance.vaultAvailable : "0";
+    const reserved = hasReserved ? balance.reserved : "0";
     if (
       !address(mint) ||
       balance.account !== owner ||
@@ -34,11 +44,15 @@ export function parseStreamWallet(value: any, owner: string): StreamWallet {
       balance.decimals < 0 ||
       balance.decimals > 255 ||
       !amount(balance.canonicalBalance) ||
+      hasAvailable !== hasReserved ||
+      !amount(vaultAvailable) ||
+      !amount(reserved) ||
       !amount(balance.blockNumber) ||
       !balance.creditBalances ||
       Object.entries(balance.creditBalances).some(([id, n]) => !address(id) || !amount(n))
     )
       throw new Error("Invalid streamed balance");
+    balances[mint] = { ...balance, vaultAvailable, reserved };
   }
   for (const p of value.positions) {
     if (
@@ -50,7 +64,7 @@ export function parseStreamWallet(value: any, owner: string): StreamWallet {
       throw new Error("Invalid streamed position");
     assertMarketUnits(p);
   }
-  return value;
+  return { ...value, balances };
 }
 export const setIndexStreamHealthy = (until: number) => {
   healthyUntil = until;

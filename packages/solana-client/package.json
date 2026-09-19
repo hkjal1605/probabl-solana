@@ -9,7 +9,6 @@
   "dependencies": {
     "pg": "8.23.0",
     "@conditional-stocks/market-data": "workspace:*",
-    "viem": "2.56.3",
     "buffer": "6.0.3",
     "@coral-xyz/anchor": "0.32.1",
     "@solana/web3.js": "1.98.4",

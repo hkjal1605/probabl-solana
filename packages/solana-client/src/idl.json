@@ -1,5 +1,5 @@
 {
-  "address": "CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3",
+  "address": "8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg",
   "metadata": {
     "name": "conditional_stocks",
     "version": "0.1.0",
@@ -49,6 +49,133 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "approve_delegate",
+      "discriminator": [
+        68,
+        6,
+        248,
+        64,
+        195,
+        222,
+        182,
+        223
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "delegate"
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          },
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "trader",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  97,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "delegate"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "optional": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "limits",
+          "type": {
+            "defined": {
+              "name": "DelegateLimits"
+            }
+          }
+        }
+      ]
     },
     {
       "name": "cancel",
@@ -134,9 +261,114 @@
               }
             ]
           }
+        },
+        {
+          "name": "delegation",
+          "optional": true
         }
       ],
       "args": []
+    },
+    {
+      "name": "cancel_orders",
+      "discriminator": [
+        238,
+        225,
+        95,
+        158,
+        227,
+        103,
+        8,
+        194
+      ],
+      "accounts": [
+        {
+          "name": "actor",
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "docs": [
+            "only this owner. Delegated cancellation cannot withdraw or reclaim rent."
+          ],
+          "writable": true,
+          "relations": [
+            "wallet",
+            "trader"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "trader",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  97,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.config",
+                "account": "Market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "delegation",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "order_count",
+          "type": "u8"
+        }
+      ]
     },
     {
       "name": "claim_fees",
@@ -230,6 +462,57 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "compact_market",
+      "discriminator": [
+        143,
+        42,
+        160,
+        21,
+        1,
+        102,
+        97,
+        128
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          },
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true
+        }
+      ],
+      "args": []
     },
     {
       "name": "configure",
@@ -559,6 +842,142 @@
       ]
     },
     {
+      "name": "deposit_pool",
+      "discriminator": [
+        187,
+        244,
+        122,
+        76,
+        155,
+        46,
+        239,
+        194
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.config",
+                "account": "AssetPool"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "credit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "external",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "minimum_credit",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "initialize",
       "discriminator": [
         175,
@@ -641,14 +1060,67 @@
           "writable": true
         },
         {
-          "name": "mint"
+          "name": "mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.config",
+                "account": "Market"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
         },
         {
           "name": "vault",
-          "writable": true
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
         },
         {
-          "name": "token_program"
+          "name": "token_program",
+          "relations": [
+            "pool"
+          ]
         },
         {
           "name": "system_program",
@@ -707,6 +1179,199 @@
           "type": "u8"
         }
       ]
+    },
+    {
+      "name": "initialize_credit",
+      "discriminator": [
+        191,
+        158,
+        169,
+        202,
+        155,
+        230,
+        2,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.config",
+                "account": "AssetPool"
+              },
+              {
+                "kind": "account",
+                "path": "pool.mint",
+                "account": "AssetPool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "credit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_pool",
+      "discriminator": [
+        95,
+        180,
+        10,
+        172,
+        84,
+        174,
+        232,
+        40
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
     },
     {
       "name": "initialize_wallet",
@@ -929,6 +1594,7 @@
       "accounts": [
         {
           "name": "owner",
+          "writable": true,
           "signer": true,
           "relations": [
             "wallet"
@@ -989,7 +1655,93 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "underlying_vault"
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.config",
+                "account": "Market"
+              },
+              {
+                "kind": "account",
+                "path": "market.mints [usize :: from(collateral != 0)]",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "credit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "underlying_vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -1075,9 +1827,15 @@
       ],
       "accounts": [
         {
-          "name": "owner",
+          "name": "authority",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "owner",
+          "docs": [
+            "owner signature or canonical, bounded TradingDelegate in the handler."
+          ]
         },
         {
           "name": "config",
@@ -1122,10 +1880,111 @@
           "address": "11111111111111111111111111111111"
         },
         {
-          "name": "base_vault"
+          "name": "base_pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "market.mints [0]",
+                "account": "Market"
+              }
+            ]
+          }
         },
         {
-          "name": "quote_vault"
+          "name": "quote_pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "market.mints [1]",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "base_vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "base_pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quote_pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "delegation",
+          "writable": true,
+          "optional": true
         }
       ],
       "args": [
@@ -1144,6 +2003,14 @@
               "name": "Plan"
             }
           }
+        },
+        {
+          "name": "participants",
+          "type": "u8"
+        },
+        {
+          "name": "delegations",
+          "type": "u8"
         }
       ]
     },
@@ -1214,6 +2081,7 @@
       "accounts": [
         {
           "name": "owner",
+          "writable": true,
           "signer": true,
           "relations": [
             "wallet"
@@ -1274,7 +2142,93 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "underlying_vault"
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.config",
+                "account": "Market"
+              },
+              {
+                "kind": "account",
+                "path": "market.mints [usize :: from(collateral != 0)]",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "credit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "underlying_vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -1365,6 +2319,216 @@
       ]
     },
     {
+      "name": "retire_orders",
+      "discriminator": [
+        255,
+        202,
+        194,
+        21,
+        65,
+        147,
+        219,
+        242
+      ],
+      "accounts": [
+        {
+          "name": "actor",
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "docs": [
+            "only this owner. Delegated cancellation cannot withdraw or reclaim rent."
+          ],
+          "writable": true,
+          "relations": [
+            "wallet",
+            "trader"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true,
+          "relations": [
+            "wallet"
+          ]
+        },
+        {
+          "name": "wallet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  119,
+                  97,
+                  108,
+                  108,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "trader",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  97,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.config",
+                "account": "Market"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "delegation",
+          "optional": true
+        }
+      ],
+      "args": [
+        {
+          "name": "order_count",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "revoke_all_delegates",
+      "discriminator": [
+        172,
+        235,
+        155,
+        140,
+        75,
+        252,
+        251,
+        22
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "trader"
+          ]
+        },
+        {
+          "name": "trader",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  116,
+                  114,
+                  97,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "trader.config",
+                "account": "Trader"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "revoke_delegate",
+      "discriminator": [
+        142,
+        66,
+        98,
+        126,
+        102,
+        60,
+        92,
+        163
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "delegation"
+          ]
+        },
+        {
+          "name": "delegation",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  101,
+                  108,
+                  101,
+                  103,
+                  97,
+                  116,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "delegation.config",
+                "account": "TradingDelegate"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "account",
+                "path": "delegation.delegate",
+                "account": "TradingDelegate"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "split",
       "discriminator": [
         124,
@@ -1379,6 +2543,7 @@
       "accounts": [
         {
           "name": "owner",
+          "writable": true,
           "signer": true,
           "relations": [
             "wallet"
@@ -1439,7 +2604,93 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "underlying_vault"
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market.config",
+                "account": "Market"
+              },
+              {
+                "kind": "account",
+                "path": "market.mints [usize :: from(collateral != 0)]",
+                "account": "Market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "credit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "underlying_vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -1710,9 +2961,171 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "withdraw_pool",
+      "discriminator": [
+        190,
+        43,
+        148,
+        248,
+        68,
+        5,
+        215,
+        136
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool.config",
+                "account": "AssetPool"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "credit",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116,
+                  45,
+                  99,
+                  114,
+                  101,
+                  100,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "external",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "minimum_received",
+          "type": "u64"
+        }
+      ]
     }
   ],
   "accounts": [
+    {
+      "name": "AssetCredit",
+      "discriminator": [
+        66,
+        139,
+        119,
+        26,
+        153,
+        155,
+        150,
+        62
+      ]
+    },
+    {
+      "name": "AssetPool",
+      "discriminator": [
+        81,
+        48,
+        2,
+        215,
+        147,
+        255,
+        152,
+        112
+      ]
+    },
     {
       "name": "Config",
       "discriminator": [
@@ -1766,6 +3179,19 @@
       ]
     },
     {
+      "name": "TradingDelegate",
+      "discriminator": [
+        179,
+        217,
+        13,
+        37,
+        115,
+        95,
+        137,
+        44
+      ]
+    },
+    {
       "name": "Wallet",
       "discriminator": [
         24,
@@ -1791,6 +3217,71 @@
         217,
         240,
         213
+      ]
+    },
+    {
+      "name": "DelegateApproved",
+      "discriminator": [
+        180,
+        218,
+        19,
+        23,
+        104,
+        176,
+        112,
+        123
+      ]
+    },
+    {
+      "name": "DelegateRevoked",
+      "discriminator": [
+        10,
+        200,
+        133,
+        29,
+        238,
+        207,
+        193,
+        124
+      ]
+    },
+    {
+      "name": "DelegatesRevoked",
+      "discriminator": [
+        29,
+        79,
+        119,
+        94,
+        174,
+        73,
+        93,
+        57
+      ]
+    },
+    {
+      "name": "OrderRetired",
+      "discriminator": [
+        138,
+        44,
+        241,
+        19,
+        75,
+        70,
+        199,
+        63
+      ]
+    },
+    {
+      "name": "PoolChange",
+      "discriminator": [
+        241,
+        7,
+        155,
+        154,
+        56,
+        57,
+        0,
+        101
       ]
     },
     {
@@ -1902,9 +3393,80 @@
       "code": 6018,
       "name": "FractionalRedemption",
       "msg": "Redemption would discard a fractional raw unit; retain or combine the odd claim"
+    },
+    {
+      "code": 6019,
+      "name": "InvalidDelegation",
+      "msg": "Invalid trading delegation, scope, recipient or limits"
+    },
+    {
+      "code": 6020,
+      "name": "DelegationInactive",
+      "msg": "Trading delegation was revoked, expired or globally invalidated"
+    },
+    {
+      "code": 6021,
+      "name": "DelegateBudget",
+      "msg": "Delegated order exceeds its per-order or remaining allowance"
     }
   ],
   "types": [
+    {
+      "name": "AssetCredit",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "available",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AssetPool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "liability",
+            "type": "u64"
+          },
+          {
+            "name": "decimals",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
     {
       "name": "Change",
       "type": {
@@ -1981,6 +3543,110 @@
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DelegateApproved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "delegation",
+            "type": "pubkey"
+          },
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "delegate",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "epoch",
+            "type": "u64"
+          },
+          {
+            "name": "limits",
+            "type": {
+              "defined": {
+                "name": "DelegateLimits"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DelegateLimits",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "max_order_quote",
+            "type": "u64"
+          },
+          {
+            "name": "total_quote",
+            "type": "u64"
+          },
+          {
+            "name": "max_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "permissions",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DelegateRevoked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "delegation",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DelegatesRevoked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "epoch",
+            "type": "u64"
           }
         ]
       }
@@ -2158,6 +3824,13 @@
             "type": "pubkey"
           },
           {
+            "name": "delegate",
+            "docs": [
+              "Zero for owner-signed orders; otherwise the immutable grant's signing key."
+            ],
+            "type": "pubkey"
+          },
+          {
             "name": "terms",
             "type": {
               "defined": {
@@ -2196,6 +3869,30 @@
           {
             "name": "bump",
             "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderRetired",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market",
+            "type": "pubkey"
+          },
+          {
+            "name": "account",
+            "type": "pubkey"
+          },
+          {
+            "name": "data",
+            "docs": [
+              "Complete final account image, including discriminator. Finalized replay",
+              "reconstructs historical orders even after their account rent is returned."
+            ],
+            "type": "bytes"
           }
         ]
       }
@@ -2287,6 +3984,33 @@
                 }
               }
             }
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolChange",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "kind",
+            "docs": [
+              "0 deposit (net received), 1 withdrawal (gross debited)."
+            ],
+            "type": "u8"
           }
         ]
       }
@@ -2458,6 +4182,72 @@
           {
             "name": "minimum_nonce",
             "type": "u64"
+          },
+          {
+            "name": "delegation_epoch",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TradingDelegate",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "config",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "delegate",
+            "type": "pubkey"
+          },
+          {
+            "name": "market",
+            "docs": [
+              "Zero explicitly grants all markets in this config; otherwise one market."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "epoch",
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "max_order_quote",
+            "docs": [
+              "Raw quote-token units, charged at the submitted limit on BOTH sides."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "remaining_quote",
+            "type": "u64"
+          },
+          {
+            "name": "max_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "permissions",
+            "type": "u8"
+          },
+          {
+            "name": "revoked",
+            "type": "bool"
           },
           {
             "name": "bump",

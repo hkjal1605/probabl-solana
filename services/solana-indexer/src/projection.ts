@@ -9,6 +9,13 @@ import {
   walletAddress,
   marketAddress,
   traderAddress,
+  delegationAddress,
+  activeDelegation,
+  poolAddress,
+  assetCreditAddress,
+  type AssetPoolAccount,
+  type AssetCreditAccount,
+  type TradingDelegateAccount,
   type ConfigAccount,
   type MarketAccount,
   type OrderAccount,
@@ -28,6 +35,9 @@ export interface Snapshot {
   orders: Map<string, OrderAccount>;
   wallets: Map<string, WalletAccount>;
   traders: Map<string, TraderAccount>;
+  pools: Map<string, AssetPoolAccount>;
+  credits: Map<string, AssetCreditAccount>;
+  delegations?: Map<string, TradingDelegateAccount>;
 }
 export async function snapshot(
   client: SolanaClient,
@@ -38,8 +48,12 @@ export async function snapshot(
     commitment,
     withContext: true,
   });
-  return decodeSnapshot(client, response.context.slot,
-    response.value.map((a) => ({ address: a.pubkey.toBase58(), data: a.account.data.toString("base64") })).sort((a, b) => a.address.localeCompare(b.address)),
+  return decodeSnapshot(
+    client,
+    response.context.slot,
+    response.value
+      .map((a) => ({ address: a.pubkey.toBase58(), data: a.account.data.toString("base64") }))
+      .sort((a, b) => a.address.localeCompare(b.address)),
   );
 }
 
@@ -49,9 +63,13 @@ export function decodeSnapshot(
   slot: number,
   rawAccounts: { address: string; data: string }[],
 ): Snapshot {
-  const response = { context: { slot }, value: rawAccounts.map((a) => ({
-    pubkey: new PublicKey(a.address), account: { data: Buffer.from(a.data, "base64") },
-  })) };
+  const response = {
+    context: { slot },
+    value: rawAccounts.map((a) => ({
+      pubkey: new PublicKey(a.address),
+      account: { data: Buffer.from(a.data, "base64") },
+    })),
+  };
   const byKey = new Map(response.value.map((a) => [a.pubkey.toBase58(), a.account]));
   const configInfo = byKey.get(client.config.toBase58());
   if (!configInfo) throw new Error("Deployment config is missing");
@@ -66,12 +84,38 @@ export function decodeSnapshot(
     orders: new Map(),
     wallets: new Map(),
     traders: new Map(),
+    pools: new Map(),
+    credits: new Map(),
+    delegations: new Map(),
   };
   const decoded = response.value.map(({ pubkey, account }) => ({
     id: pubkey.toBase58(),
     data: coder.accounts.decodeAny(account.data),
   }));
   for (const { id, data } of decoded) {
+    if (data && "liability" in data && "token_program" in data) {
+      const pool = data as AssetPoolAccount;
+      if (pool.config.equals(client.config)) {
+        if (poolAddress(client.config, pool.mint, client.program).toBase58() !== id)
+          throw new Error("Invalid asset pool PDA");
+        result.pools.set(id, pool);
+      }
+    }
+    if (data && "remaining_quote" in data && "delegate" in data) {
+      const grant = data as TradingDelegateAccount;
+      if (grant.config.equals(client.config)) {
+        if (
+          delegationAddress(
+            client.config,
+            grant.owner,
+            grant.delegate,
+            client.program,
+          ).toBase58() !== id
+        )
+          throw new Error("Invalid delegation PDA");
+        result.delegations!.set(id, grant);
+      }
+    }
     if (data && "minimum_nonce" in data && "config" in data) {
       const t = data as TraderAccount;
       if (t.config.equals(client.config)) {
@@ -89,6 +133,15 @@ export function decodeSnapshot(
     }
   }
   for (const { id, data } of decoded) {
+    if (data && "available" in data && "pool" in data) {
+      const credit = data as AssetCreditAccount;
+      if (result.pools.has(credit.pool.toBase58())) {
+        if (assetCreditAddress(credit.pool, credit.owner, client.program).toBase58() !== id)
+          throw new Error("Invalid asset credit PDA");
+        result.credits.set(id, credit);
+      }
+      continue;
+    }
     if (!data || !("market" in data) || !result.markets.has((data.market as PublicKey).toBase58()))
       continue;
     if ("terms" in data) {
@@ -158,6 +211,14 @@ export function liveOrder(
   const m = s.markets.get(o.market.toBase58()),
     w = s.wallets.get(walletAddress(o.market, o.owner, s.program).toBase58());
   const trader = s.traders.get(o.owner.toBase58());
+  if (!o.delegate.equals(PublicKey.default)) {
+    if (!m || !trader) return false;
+    const grant = s.delegations?.get(
+      delegationAddress(m.config, o.owner, o.delegate, s.program).toBase58(),
+    );
+    if (!grant || !activeDelegation(grant, big(trader.delegation_epoch), o.market, now))
+      return false;
+  }
   return Boolean(
     m &&
       w &&

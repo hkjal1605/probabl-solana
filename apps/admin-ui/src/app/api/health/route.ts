@@ -2,7 +2,7 @@ import { SOLANA_API_ORIGIN } from "@conditional-stocks/shared/endpoints";
 import { serviceOrigin } from "@/lib/upstream";
 
 export async function GET() {
-  // Read overrides per request, like the gateway/indexer proxies. The public
+  // Read overrides per request, like the Solana/indexer proxies. The public
   // deployment multiplexes health routes; /health alone identifies the API.
   const apiOrigin = process.env.API_URL ?? SOLANA_API_ORIGIN;
   const indexerOrigin =
@@ -15,7 +15,7 @@ export async function GET() {
     process.env.POLYMARKET_INGESTOR_URL ??
     (isPublicOrigin(apiOrigin) ? SOLANA_API_ORIGIN : "");
   const services = [
-    { name: "API gateway", url: apiOrigin, path: "/ready" },
+    { name: "Solana API", url: apiOrigin, path: "/ready" },
     {
       name: "Chain indexer",
       // Optional separate origin for private health checks (empty disables the probe).

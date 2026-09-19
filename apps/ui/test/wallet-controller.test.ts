@@ -197,6 +197,20 @@ test("connect and sign once, then refresh: trusted reconnect restores the same t
   expect(() => assertRequestSession(token)).not.toThrow();
 });
 
+test("explicit wallet selection overrides a previously saved provider", async () => {
+  const f = setup();
+  rememberWallet(f.shared, "phantom", owner.toBase58());
+  const solflare = { ...f.p, publicKey: other };
+  solflare.connect = async () => ({ publicKey: other });
+  f.sources.solflare = solflare;
+  f.controller.start(f.events);
+  await tick();
+  await f.controller.connect("solflare");
+  expect(f.controller.getSnapshot().account).toBe(other.toBase58());
+  expect(rememberedWallet(f.shared)?.kind).toBe("solflare");
+  expect(f.calls.connect).toEqual([{ onlyIfTrusted: true }]);
+});
+
 test("expired authentication still restores the wallet, but cannot authenticate requests until a new signature", async () => {
   const f = setup(true);
   persistWalletSession(
@@ -429,7 +443,10 @@ test("main UI pins wallet fees before signing and preserves the reviewed funding
   const f = setup(true);
   const client = new SolanaClient({ ...deployment, rpcUrl: "http://127.0.0.1:8899" });
   client.assertNetwork = async () => {};
-  client.connection.getLatestBlockhash = async () => ({ blockhash: other.toBase58(), lastValidBlockHeight: 100 });
+  client.connection.getLatestBlockhash = async () => ({
+    blockhash: other.toBase58(),
+    lastValidBlockHeight: 100,
+  });
   client.connection.sendRawTransaction = f.client.connection.sendRawTransaction;
   client.connection.confirmTransaction = f.client.connection.confirmTransaction;
   f.deps.client = () => client;
@@ -451,17 +468,33 @@ test("main UI pins wallet fees before signing and preserves the reviewed funding
     }
     return new VersionedTransaction(message.compileToV0Message());
   };
-  const old = await client.prepareTransaction(owner, funding);
+  const old = {
+    transaction: new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: owner,
+        recentBlockhash: other.toBase58(),
+        instructions,
+      }).compileToV0Message(),
+    ),
+  };
   const changed = await f.p.signTransaction(old.transaction);
-  expect(Buffer.from(changed.message.serialize()).equals(Buffer.from(old.transaction.message.serialize()))).toBe(false);
+  expect(
+    Buffer.from(changed.message.serialize()).equals(
+      Buffer.from(old.transaction.message.serialize()),
+    ),
+  ).toBe(false);
   expect(rewrites).toBe(1);
   f.controller.start(f.events);
   await tick();
   const autoFeeSign = f.p.signTransaction;
   f.p.signTransaction = async (tx) => {
     const message = TransactionMessage.decompile(tx.message);
-    expect(ComputeBudgetInstruction.decodeSetComputeUnitLimit(message.instructions[0]!).units).toBe(400_000);
-    expect(ComputeBudgetInstruction.decodeSetComputeUnitPrice(message.instructions[1]!).microLamports).toBe(0n);
+    expect(ComputeBudgetInstruction.decodeSetComputeUnitLimit(message.instructions[0]!).units).toBe(
+      400_000,
+    );
+    expect(
+      ComputeBudgetInstruction.decodeSetComputeUnitPrice(message.instructions[1]!).microLamports,
+    ).toBe(0n);
     // Compilation unions account privileges across instructions and the fee payer.
     expect(message.instructions.slice(2).map(wireInstruction)).toEqual(
       TransactionMessage.decompile(old.transaction.message).instructions.map(wireInstruction),
@@ -490,9 +523,7 @@ test("request-time expiry blocks background tabs before fetch; API 401 invalidat
     const expiry = f.controller.getSnapshot().sessionExpiresAt;
     if (expiry === null) throw new Error("Expected a restored session");
     Date.now = () => expiry;
-    await expect(requestJson("/v1/orders/prepare", { token, body: {} })).rejects.toThrow(
-      "expired",
-    );
+    await expect(requestJson("/v1/orders/prepare", { token, body: {} })).rejects.toThrow("expired");
     expect(calls).toBe(0);
     expect(f.controller.getSnapshot().sessionToken).toBeNull();
     expect(f.controller.getSnapshot().account).toBe(owner.toBase58());

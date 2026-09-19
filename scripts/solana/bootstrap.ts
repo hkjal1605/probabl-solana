@@ -4,10 +4,12 @@ import { pathToFileURL } from "node:url";
 import { resolve, sep } from "node:path";
 import {
   Connection,
+  PublicKey,
   Keypair,
   SystemProgram,
   TransactionMessage,
   VersionedTransaction,
+  AddressLookupTableProgram,
   type TransactionInstruction,
 } from "@solana/web3.js";
 import {
@@ -27,6 +29,12 @@ import {
   marketAddress,
   claimAddress,
   vaultAddress,
+  walletAddress,
+  poolAddress,
+  poolVaultAddress,
+  assetCreditAddress,
+  unwrap,
+  budgetedInstructions,
   digest,
   bn,
   hex,
@@ -34,6 +42,8 @@ import {
   planOrder,
   type OrderWire,
 } from "@conditional-stocks/solana-client";
+
+import { initializeMarketVaults } from "@conditional-stocks/solana-client/admin";
 
 const rpc = process.env.SOLANA_RPC_URL ?? "http://127.0.0.1:8899";
 if (!["127.0.0.1", "localhost"].includes(new URL(rpc).hostname))
@@ -56,9 +66,7 @@ for (const signer of [admin, alice, bob])
     "confirmed",
   );
 const tokenProgram =
-  process.env.SOLANA_TEST_TOKEN_2022 === "1"
-    ? TOKEN_2022_PROGRAM_ID
-    : TOKEN_PROGRAM_ID;
+  process.env.SOLANA_TEST_TOKEN_2022 === "1" ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
 const client = new SolanaClient({
   rpcUrl: rpc,
   config: configAddress(admin.publicKey).toBase58(),
@@ -74,20 +82,14 @@ const send = async (
       new TransactionMessage({
         payerKey: payer.publicKey,
         recentBlockhash: latest.blockhash,
-        instructions,
+        instructions: budgetedInstructions(instructions, client.program),
       }).compileToV0Message(),
     );
   transaction.sign([payer, ...others]);
-  const signature = await connection.sendRawTransaction(
-    transaction.serialize(),
-    {
-      skipPreflight: false,
-    },
-  );
-  const confirmed = await connection.confirmTransaction(
-    { signature, ...latest },
-    "confirmed",
-  );
+  const signature = await connection.sendRawTransaction(transaction.serialize(), {
+    skipPreflight: false,
+  });
+  const confirmed = await connection.confirmTransaction({ signature, ...latest }, "confirmed");
   if (confirmed.value.err) throw new Error(JSON.stringify(confirmed.value.err));
   return signature;
 };
@@ -113,13 +115,7 @@ async function mockMint(bps: number) {
         1_000_000n,
         tokenProgram,
       ),
-      createInitializeMintInstruction(
-        mint.publicKey,
-        6,
-        admin.publicKey,
-        null,
-        tokenProgram,
-      ),
+      createInitializeMintInstruction(mint.publicKey, 6, admin.publicKey, null, tokenProgram),
     ],
     admin,
     [mint],
@@ -207,37 +203,12 @@ for (let example = 0; example < 2; example++) {
       },
     ),
   ]);
-  for (let asset = 0; asset < 6; asset++)
-    await send([
-      client.ix(
-        asset < 2 ? "initialize_asset" : "initialize_claim",
-        { asset },
-        {
-          payer: admin.publicKey,
-          market,
-          mint: asset < 2 ? [base, quote][asset]! : claimAddress(market, asset),
-          vault: vaultAddress(market, asset),
-          token_program: asset < 2 ? tokenProgram : TOKEN_PROGRAM_ID,
-          system_program: SystemProgram.programId,
-        },
-      ),
-    ]);
+  for (const tx of await initializeMarketVaults(client, String(market), String(admin.publicKey)))
+    await send(unwrap(tx));
   for (const owner of [alice, bob])
-    await send([
-      client.initializeWallet(market, owner.publicKey, admin.publicKey),
-    ]);
+    await send([client.initializeWallet(market, owner.publicKey, admin.publicKey)]);
   await send(
-    [
-      (
-        await client.depositForCredit(
-          market,
-          alice.publicKey,
-          base,
-          0,
-          100_000_000n,
-        )
-      ).instruction,
-    ],
+    [(await client.depositForCredit(market, alice.publicKey, base, 0, 100_000_000n)).instruction],
     alice,
   );
   await send([
@@ -277,6 +248,50 @@ for (let example = 0; example < 2; example++) {
   }
   markets.push(market.toBase58());
 }
+// Shared frozen address table keeps single-fill packets within Solana's limit.
+const [createTable, table] = AddressLookupTableProgram.createLookupTable({
+  authority: admin.publicKey,
+  payer: admin.publicKey,
+  recentSlot: await connection.getSlot("finalized"),
+});
+await send([createTable]);
+const addresses = [
+  ...new Map(
+    [
+      client.config,
+      client.program,
+      ...[base, quote],
+      ...[base, quote].flatMap((mint) => {
+        const pool = poolAddress(client.config, mint);
+        return [
+          pool,
+          poolVaultAddress(pool),
+          ...[alice, bob].map((o) => assetCreditAddress(pool, o.publicKey)),
+        ];
+      }),
+      ...markets.flatMap((id) => {
+        const m = new PublicKey(id);
+        return [
+          m,
+          ...[alice, bob].map((o) => walletAddress(m, o.publicKey)),
+          ...[2, 3, 4, 5].flatMap((a) => [claimAddress(m, a), vaultAddress(m, a)]),
+        ];
+      }),
+    ].map((a) => [String(a), a]),
+  ).values(),
+];
+for (let i = 0; i < addresses.length; i += 20)
+  await send([
+    AddressLookupTableProgram.extendLookupTable({
+      lookupTable: table,
+      authority: admin.publicKey,
+      payer: admin.publicKey,
+      addresses: addresses.slice(i, i + 20),
+    }),
+  ]);
+await send([
+  AddressLookupTableProgram.freezeLookupTable({ lookupTable: table, authority: admin.publicKey }),
+]);
 // Generated local fixtures contain no source credentials. Protect test private keys
 // even though they hold only validator SOL and mock SPL tokens.
 for (const [name, pair] of [
@@ -284,15 +299,12 @@ for (const [name, pair] of [
   ["alice", alice],
   ["bob", bob],
 ] as const)
-  await Bun.write(
-    new URL(name + ".json", destination),
-    JSON.stringify([...pair.secretKey]),
-    {
-      mode: 0o600,
-    },
-  );
+  await Bun.write(new URL(name + ".json", destination), JSON.stringify([...pair.secretKey]), {
+    mode: 0o600,
+  });
 const env = {
   SOLANA_RPC_URL: rpc,
+  SOLANA_ADDRESS_LOOKUP_TABLES: String(table),
   SOLANA_CONFIG: client.config.toBase58(),
   SOLANA_GENESIS_HASH: client.deployment.genesisHash,
   API_AUTH_ORIGINS:
@@ -319,6 +331,7 @@ await Bun.write(
   JSON.stringify(
     {
       rpcUrl: rpc,
+      addressLookupTables: [String(table)],
       config: client.config.toBase58(),
       genesisHash: client.deployment.genesisHash,
       programId: client.program.toBase58(),

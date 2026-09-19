@@ -1,47 +1,47 @@
 /** Devnet staging only. No default wallet, automatic upgrades, EC2 deployment,
  * unlimited faucets, or live markets. All mutation requires --execute. */
 import { readFile } from "node:fs/promises";
-import { resolve, join } from "node:path";
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
-import bs58 from "bs58";
-import { pacedUpload } from "./devnet-upload.ts";
+import { join, resolve } from "node:path";
 import { configAddress } from "@conditional-stocks/solana-client";
-import {
-  ASSETS,
-  DEVNET_GENESIS,
-  DEVNET_RPC,
-  PROGRAM_ID,
-  NATIVE_MINT,
-  LOADER,
-  assertDevnet,
-  devnetRpc,
-  parseDeployer,
-  readProgram,
-  verifyBuffer,
-  uploadTransport,
-  verifyProgramData,
-  sha256,
-  validatePlanIdentity,
-  type DeploymentPlan,
-} from "./devnet-policy.ts";
-import {
-  deploymentDirectory,
-  keyFile,
-  privateDirectory,
-  locked,
-  readJson,
-  writeJson,
-  writePrivate,
-  withTemporarySigner,
-} from "./devnet-store.ts";
+import { Connection, type Keypair, PublicKey } from "@solana/web3.js";
+import bs58 from "bs58";
 import {
   assetPlan,
+  type ChainContext,
   initializeAssets,
   initializeConfig,
   verifyAsset,
   verifyConfiguration,
-  type ChainContext,
 } from "./devnet-chain.ts";
+import {
+  ASSETS,
+  assertDevnet,
+  DEVNET_GENESIS,
+  DEVNET_RPC,
+  type DeploymentPlan,
+  devnetRpc,
+  LOADER,
+  NATIVE_MINT,
+  PROGRAM_ID,
+  parseDeployer,
+  readProgram,
+  sha256,
+  uploadTransport,
+  validatePlanIdentity,
+  verifyBuffer,
+  verifyProgramData,
+} from "./devnet-policy.ts";
+import {
+  deploymentDirectory,
+  keyFile,
+  locked,
+  privateDirectory,
+  readJson,
+  withTemporarySigner,
+  writeJson,
+  writePrivate,
+} from "./devnet-store.ts";
+import { pacedUpload } from "./devnet-upload.ts";
 
 const ARTIFACT = "target/deploy/conditional_stocks.so";
 type Event = Record<string, unknown> & { step: string; at: string };
@@ -51,12 +51,8 @@ interface Journal {
 }
 export async function artifactIdentity() {
   const artifact = await readFile(ARTIFACT),
-    sdkIdl = JSON.parse(
-      await readFile("packages/solana-client/src/idl.json", "utf8"),
-    );
-  const generated = JSON.parse(
-    await readFile("target/idl/conditional_stocks.json", "utf8"),
-  );
+    sdkIdl = JSON.parse(await readFile("packages/solana-client/src/idl.json", "utf8"));
+  const generated = JSON.parse(await readFile("target/idl/conditional_stocks.json", "utf8"));
   if (
     artifact.length < 64 ||
     !artifact.subarray(0, 4).equals(Buffer.from([127, 69, 76, 70])) ||
@@ -75,14 +71,10 @@ export async function artifactIdentity() {
     "programs/conditional-stocks/Cargo.toml",
     "crates/protocol-core/Cargo.toml",
   ];
-  for (const glob of [
-    "programs/conditional-stocks/src/*.rs",
-    "crates/protocol-core/src/*.rs",
-  ])
+  for (const glob of ["programs/conditional-stocks/src/*.rs", "crates/protocol-core/src/*.rs"])
     for (const path of new Bun.Glob(glob).scanSync(".")) paths.push(path);
   const sourceSha256: Record<string, string> = {};
-  for (const path of paths.sort())
-    sourceSha256[path] = sha256(await readFile(path));
+  for (const path of paths.sort()) sourceSha256[path] = sha256(await readFile(path));
   return {
     artifact,
     identity: {
@@ -97,6 +89,7 @@ export async function prepare(
   directory: string,
   owner: PublicKey,
   programPath: string,
+  reuseExistingAssets = false,
 ) {
   const { identity } = await artifactIdentity();
   if (!(await keyFile(programPath, false)).publicKey.equals(PROGRAM_ID))
@@ -122,12 +115,7 @@ export async function prepare(
     const mint =
       spec.kind === "native"
         ? NATIVE_MINT
-        : (
-            await keyFile(
-              join(directory, "mints", spec.symbol + ".json"),
-              !existing,
-            )
-          ).publicKey;
+        : (await keyFile(join(directory, "mints", spec.symbol + ".json"), !existing)).publicKey;
     assets.push(assetPlan(spec, mint, owner));
   }
   const plan: DeploymentPlan = {
@@ -139,6 +127,7 @@ export async function prepare(
     config: configAddress(owner).toBase58(),
     ...identity,
     assets,
+    ...(reuseExistingAssets ? { reuseExistingAssets: true as const } : {}),
   };
   if (existing && JSON.stringify(existing) !== JSON.stringify(plan))
     throw new Error("Prepared mint addresses or fixture parameters changed");
@@ -159,9 +148,7 @@ export async function loadPlan(directory: string, owner: PublicKey) {
     plan.artifactBytes !== artifact.length ||
     JSON.stringify(plan.sourceSha256) !== JSON.stringify(identity.sourceSha256)
   )
-    throw new Error(
-      "Prepared artifact, IDL or source changed; refusing deployment",
-    );
+    throw new Error("Prepared artifact, IDL or source changed; refusing deployment");
   const signers = new Map<string, Keypair>();
   for (const spec of ASSETS) {
     const signer =
@@ -170,36 +157,21 @@ export async function loadPlan(directory: string, owner: PublicKey) {
         : await keyFile(join(directory, "mints", spec.symbol + ".json"), false);
     if (signer) signers.set(spec.symbol, signer);
     if (
-      JSON.stringify(
-        assetPlan(spec, signer?.publicKey ?? NATIVE_MINT, owner),
-      ) !== JSON.stringify(plan.assets.find((a) => a.symbol === spec.symbol))
+      JSON.stringify(assetPlan(spec, signer?.publicKey ?? NATIVE_MINT, owner)) !==
+      JSON.stringify(plan.assets.find((a) => a.symbol === spec.symbol))
     )
       throw new Error("Prepared mint identity or policy differs");
   }
   return { plan, artifact, signers };
 }
-export async function programStatus(
-  connection: Connection,
-  artifact: Buffer,
-  owner: PublicKey,
-) {
-  const address = readProgram(
-    await connection.getAccountInfo(PROGRAM_ID, "finalized"),
-  );
+export async function programStatus(connection: Connection, artifact: Buffer, owner: PublicKey) {
+  const address = readProgram(await connection.getAccountInfo(PROGRAM_ID, "finalized"));
   if (!address) return null;
-  if (
-    !address.equals(
-      PublicKey.findProgramAddressSync([PROGRAM_ID.toBuffer()], LOADER)[0],
-    )
-  )
+  if (!address.equals(PublicKey.findProgramAddressSync([PROGRAM_ID.toBuffer()], LOADER)[0]))
     throw new Error("ProgramData PDA mismatch");
   return {
     address: address.toBase58(),
-    ...verifyProgramData(
-      await connection.getAccountInfo(address, "finalized"),
-      artifact,
-      owner,
-    ),
+    ...verifyProgramData(await connection.getAccountInfo(address, "finalized"), artifact, owner),
   };
 }
 export async function fundingPlan(
@@ -207,10 +179,7 @@ export async function fundingPlan(
   plan: DeploymentPlan,
   bufferAddress?: PublicKey,
 ) {
-  const programExists = !!(await connection.getAccountInfo(
-    PROGRAM_ID,
-    "finalized",
-  ));
+  const programExists = !!(await connection.getAccountInfo(PROGRAM_ID, "finalized"));
   // Loader-v3 drains the authorized buffer to the payer BEFORE funding
   // ProgramData. Budget the larger allocation, not both simultaneously.
   // The Program account is created first, so always retain its separate rent.
@@ -218,12 +187,8 @@ export async function fundingPlan(
     prepaidBufferLamports = 0;
   if (!programExists) {
     const allocationRent = Math.max(
-      await connection.getMinimumBalanceForRentExemption(
-        plan.artifactBytes + 45,
-      ),
-      await connection.getMinimumBalanceForRentExemption(
-        plan.artifactBytes + 37,
-      ),
+      await connection.getMinimumBalanceForRentExemption(plan.artifactBytes + 45),
+      await connection.getMinimumBalanceForRentExemption(plan.artifactBytes + 37),
     );
     if (bufferAddress)
       prepaidBufferLamports = verifyBuffer(
@@ -240,9 +205,7 @@ export async function fundingPlan(
     (await connection.getMinimumBalanceForRentExemption(256)) * 8;
   const wrap = BigInt(plan.assets.find((a) => a.symbol === "SOL")!.initialRaw);
   const required = BigInt(programRent + fixtureRent) + wrap + 100_000_000n;
-  const balance = BigInt(
-    await connection.getBalance(new PublicKey(plan.deployer), "finalized"),
-  );
+  const balance = BigInt(await connection.getBalance(new PublicKey(plan.deployer), "finalized"));
   return {
     currentLamports: balance.toString(),
     conservativeRequiredLamports: required.toString(),
@@ -283,11 +246,7 @@ export async function journalContext(
     if (!step.startsWith("asset:") && step !== "config") continue;
     const sent = [...events]
       .reverse()
-      .find(
-        (e) =>
-          typeof e.signature === "string" ||
-          typeof e.signedTransaction === "string",
-      );
+      .find((e) => typeof e.signature === "string" || typeof e.signedTransaction === "string");
     if (!sent) continue;
     const signature =
       typeof sent.signature === "string"
@@ -313,8 +272,7 @@ export async function journalContext(
       completed.add(step);
     } else if (
       status ||
-      (await connection.getBlockHeight("finalized")) <=
-        Number(sent.lastValidBlockHeight)
+      (await connection.getBlockHeight("finalized")) <= Number(sent.lastValidBlockHeight)
     ) {
       throw new Error(
         "Prior transaction is still pending; wait and rerun without deleting journal.json",
@@ -334,23 +292,17 @@ export async function deployProgram(
   artifact: Buffer,
 ) {
   await ctx.assertNetwork();
-  if (await programStatus(ctx.connection, artifact, ctx.deployer.publicKey))
-    return;
+  if (await programStatus(ctx.connection, artifact, ctx.deployer.publicKey)) return;
   const program = await keyFile(programPath, false),
     buffer = await keyFile(join(directory, "buffer.json"), false);
-  if (!program.publicKey.equals(PROGRAM_ID))
-    throw new Error("Wrong program signer");
-  const info = await ctx.connection.getAccountInfo(
-    buffer.publicKey,
-    "finalized",
-  );
+  if (!program.publicKey.equals(PROGRAM_ID)) throw new Error("Wrong program signer");
+  const info = await ctx.connection.getAccountInfo(buffer.publicKey, "finalized");
   verifyBuffer(info, artifact.length, ctx.deployer.publicKey);
   const transport = uploadTransport(
     ctx.connection.rpcEndpoint,
     process.env.DEVNET_UPLOAD_TRANSPORT,
   );
-  if (process.env.DEVNET_UPLOAD_TRANSPORT === "rpc-paced")
-    await pacedUpload(ctx, buffer, artifact);
+  if (process.env.DEVNET_UPLOAD_TRANSPORT === "rpc-paced") await pacedUpload(ctx, buffer, artifact);
   await ctx.record("program", {
     status: "submitting",
     program: PROGRAM_ID.toBase58(),
@@ -394,9 +346,7 @@ export async function deployProgram(
         stdout: "pipe",
         stderr: "pipe",
         env: Object.fromEntries(
-          Object.entries(process.env).filter(
-            ([k]) => k !== "DEVNET_DEPLOYER_PRIVATE_KEY",
-          ),
+          Object.entries(process.env).filter(([k]) => k !== "DEVNET_DEPLOYER_PRIVATE_KEY"),
         ),
       },
     );
@@ -445,11 +395,7 @@ export async function deployProgram(
   // CLI confirms at confirmed; wait for read-back at finalized without guessing.
   for (let attempt = 0; attempt < 60; attempt++) {
     await ctx.assertNetwork();
-    const status = await programStatus(
-      ctx.connection,
-      artifact,
-      ctx.deployer.publicKey,
-    );
+    const status = await programStatus(ctx.connection, artifact, ctx.deployer.publicKey);
     if (status) {
       await ctx.record("program", { status: "finalized", ...status });
       return;
@@ -482,9 +428,7 @@ export async function exportEnvironment(
   const browserRpc = devnetRpc(env.DEVNET_BROWSER_RPC_URL ?? DEVNET_RPC);
   const api = serviceOrigin(env.DEVNET_API_URL ?? "http://127.0.0.1:3000"),
     indexer = serviceOrigin(env.DEVNET_INDEXER_URL ?? "http://127.0.0.1:42069");
-  const origins = (
-    env.DEVNET_UI_ORIGINS ?? "http://localhost:3001,http://localhost:3002"
-  )
+  const origins = (env.DEVNET_UI_ORIGINS ?? "http://localhost:3001,http://localhost:3002")
     .split(",")
     .map(serviceOrigin)
     .join(",");
@@ -541,9 +485,7 @@ export async function main(args = process.argv.slice(2)) {
     flags.some((f) => f !== "--execute") ||
     (["airdrop", "deploy"].includes(command) && !flags.includes("--execute"))
   )
-    throw new Error(
-      "Network mutation requires an explicit deploy/airdrop --execute command",
-    );
+    throw new Error("Network mutation requires an explicit deploy/airdrop --execute command");
   const deployer = parseDeployer(process.env.DEVNET_DEPLOYER_PRIVATE_KEY),
     rpc = devnetRpc(process.env.DEVNET_RPC_URL);
   const connection = new Connection(rpc, {
@@ -553,11 +495,13 @@ export async function main(args = process.argv.slice(2)) {
   await assertDevnet(connection);
   const directory = await deploymentDirectory(process.env.DEVNET_OUTPUT_DIR);
   const programPath =
-    process.env.DEVNET_PROGRAM_KEYPAIR ??
-    "target/deploy/conditional_stocks-keypair.json";
+    process.env.DEVNET_PROGRAM_KEYPAIR ?? "target/deploy/conditional_stocks-keypair.json";
   await locked(directory, async () => {
     if (command === "prepare") {
-      const plan = await prepare(directory, deployer.publicKey, programPath);
+      const reuse = process.env.DEVNET_REUSE_EXISTING_ASSETS;
+      if (reuse !== undefined && reuse !== "0" && reuse !== "1")
+        throw new Error("DEVNET_REUSE_EXISTING_ASSETS must be 0 or 1");
+      const plan = await prepare(directory, deployer.publicKey, programPath, reuse === "1");
       console.info(
         JSON.stringify(
           {
@@ -577,10 +521,7 @@ export async function main(args = process.argv.slice(2)) {
     if (command === "airdrop") {
       // One bounded request, never rotate wallets or retry a faucet limit.
       await assertDevnet(connection);
-      const signature = await connection.requestAirdrop(
-        deployer.publicKey,
-        2_000_000_000,
-      );
+      const signature = await connection.requestAirdrop(deployer.publicKey, 2_000_000_000);
       console.info(
         JSON.stringify({
           airdropRequested: signature,
@@ -591,16 +532,9 @@ export async function main(args = process.argv.slice(2)) {
       );
       return;
     }
-    const { plan, artifact, signers } = await loadPlan(
-      directory,
-      deployer.publicKey,
-    );
+    const { plan, artifact, signers } = await loadPlan(directory, deployer.publicKey);
     if (command === "plan") {
-      const existing = await programStatus(
-        connection,
-        artifact,
-        deployer.publicKey,
-      );
+      const existing = await programStatus(connection, artifact, deployer.publicKey);
       console.info(
         JSON.stringify(
           {
@@ -618,12 +552,8 @@ export async function main(args = process.argv.slice(2)) {
       );
       return;
     }
-    const { ctx, completed } = await journalContext(
-      connection,
-      deployer,
-      directory,
-      plan,
-      () => assertDevnet(connection),
+    const { ctx, completed } = await journalContext(connection, deployer, directory, plan, () =>
+      assertDevnet(connection),
     );
     if (command === "deploy") {
       // Check program identity before any allocation, even if funds are short.
@@ -642,15 +572,12 @@ export async function main(args = process.argv.slice(2)) {
       await initializeConfig(ctx, plan);
     }
     await ctx.assertNetwork();
-    const program = await programStatus(
-      connection,
-      artifact,
-      deployer.publicKey,
-    );
+    const program = await programStatus(connection, artifact, deployer.publicKey);
     if (!program) throw new Error("Program is not deployed");
     await verifyConfiguration(ctx, plan);
     const assets = [];
-    for (const asset of plan.assets) assets.push(await verifyAsset(ctx, asset));
+    for (const asset of plan.assets)
+      assets.push(await verifyAsset(ctx, asset, plan.reuseExistingAssets === true));
     // A prior CLI success can outlive a rate-limited read-back. Record final
     // verification on both deploy and verify paths without resubmitting it.
     await ctx.record("program", { status: "finalized", ...program });
@@ -691,10 +618,8 @@ if (import.meta.main)
     // explicit messages; redact the env key and endpoint if nested libraries echo them.
     const secret = process.env.DEVNET_DEPLOYER_PRIVATE_KEY,
       rpc = process.env.DEVNET_RPC_URL;
-    let message =
-      error instanceof Error ? error.message : "Devnet pipeline failed";
-    for (const value of [secret, rpc])
-      if (value) message = message.replaceAll(value, "[REDACTED]");
+    let message = error instanceof Error ? error.message : "Devnet pipeline failed";
+    for (const value of [secret, rpc]) if (value) message = message.replaceAll(value, "[REDACTED]");
     message = message.replace(/https?:\/\/[^\s"']+/g, "[RPC endpoint]");
     console.error(message);
     process.exitCode = 1;

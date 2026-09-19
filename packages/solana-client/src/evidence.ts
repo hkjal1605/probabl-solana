@@ -1,10 +1,27 @@
-import { type Address, getAddress, type Hex, isAddress, isHex, keccak256 } from "viem";
+import { keccak_256 } from "@noble/hashes/sha3";
+import { bytesToHex } from "@noble/hashes/utils";
+import { type Hex, isHex32 } from "@conditional-stocks/market-data";
 import { address as solanaAddress, digest, hex, unsigned, U128_MAX } from "./protocol.ts";
 
 export interface EvidenceDeployment {
   genesisHash: string;
   programId: string;
   config: string;
+}
+type Address = `0x${string}`;
+
+/** Preserve the official Polygon source address's EIP-55 canonical spelling. */
+function polygonAddress(value: unknown, name: string): Address {
+  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(value))
+    throw new MarketDataError("INVALID_EVIDENCE", `${name} is not an address`);
+  const lower = value.slice(2).toLowerCase();
+  const hash = bytesToHex(keccak_256(new TextEncoder().encode(lower)));
+  const checksum = `0x${[...lower].map((char, index) =>
+    /[a-f]/.test(char) && Number.parseInt(hash[index]!, 16) >= 8 ? char.toUpperCase() : char,
+  ).join("")}` as Address;
+  if (value !== value.toLowerCase() && value !== `0x${value.slice(2).toUpperCase()}` && value !== checksum)
+    throw new MarketDataError("INVALID_EVIDENCE", `${name} has an invalid checksum`);
+  return checksum;
 }
 
 import {
@@ -121,15 +138,10 @@ export interface EvidenceEnvelope<T extends CreationEvidencePacket | ResolutionE
   packetHash: Hex;
 }
 
-const address = (value: unknown, name: string): Address => {
-  if (typeof value !== "string" || !isAddress(value)) {
-    throw new MarketDataError("INVALID_EVIDENCE", `${name} is not an address`);
-  }
-  return getAddress(value);
-};
+const address = polygonAddress;
 
 const hex32 = (value: unknown, name: string): Hex => {
-  if (typeof value !== "string" || !isHex(value, { strict: true }) || value.length !== 66) {
+  if (!isHex32(value)) {
     throw new MarketDataError("INVALID_EVIDENCE", `${name} must be bytes32`);
   }
   return value.toLowerCase() as Hex;
@@ -389,7 +401,7 @@ export const assertEvidenceIntegrity = <
   ) {
     throw new MarketDataError(
       "INVALID_EVIDENCE",
-      "Legacy EVM evidence cannot authorize a Solana transaction",
+      "Unsupported evidence schema cannot authorize a Solana transaction",
       409,
     );
   }
@@ -410,7 +422,8 @@ export const assertEvidenceIntegrity = <
   }
 };
 
-export const attachmentContentHash = (bytes: Uint8Array): Hex => keccak256(bytes);
+export const attachmentContentHash = (bytes: Uint8Array): Hex =>
+  `0x${bytesToHex(keccak_256(bytes))}`;
 
 function validateDeployment(value: EvidenceDeployment): EvidenceDeployment {
   return {

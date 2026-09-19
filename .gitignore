@@ -17,16 +17,10 @@ output/atomic-tmp/
 !.env.example
 !.env.devnet.example
 
-packages/contracts/cache/
-packages/contracts/out/
-packages/contracts/broadcast/
-packages/contracts/lib/
-
 .DS_Store
 coverage/
 lcov.info
 .data/
-.ponder/
 global-bundle.pem
 probabl-server-keypair.pem
 target/

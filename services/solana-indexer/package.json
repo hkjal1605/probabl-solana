@@ -4,13 +4,16 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    "./projection": "./src/projection.ts"
+    "./custody": "./src/custody.ts",
+    "./projection": "./src/projection.ts",
+    "./retired-orders": "./src/retired-orders.ts"
   },
   "scripts": {
     "start": "bun src/main.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@conditional-stocks/db": "workspace:*",
     "@conditional-stocks/shared": "workspace:*",
     "@conditional-stocks/solana-client": "workspace:*",
     "@solana/web3.js": "1.98.4",

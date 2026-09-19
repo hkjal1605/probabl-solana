@@ -69,8 +69,8 @@ function MarketControl({ market }: { market: Market }) {
   const [reason, setReason] = useState("");
   const [payload, setPayload] = useState<string | null>(null);
   const build = () => {
-    if (!adminConfig.marketRegistry) {
-      toast.error("Market registry address is not configured");
+    if (!adminConfig.programId) {
+      toast.error("Solana program ID is not configured");
       return;
     }
     const transaction = lifecycleTransaction(

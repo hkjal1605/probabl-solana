@@ -15,6 +15,7 @@ use anchor_spl::token::{
     self,
     spl_token::state::{Account as RawAccount, AccountState, Mint as RawMint},
 };
+use conditional_stocks::pool::{pool_address, pool_vault, AssetCredit, AssetPool};
 use conditional_stocks::{
     accounts, instruction,
     state::{Config, Market, OrderTerms, Plan, Roles, Terms, Trader, Wallet},
@@ -65,11 +66,20 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
         Pubkey::find_program_address(&[b"wallet", market_key.as_ref(), owner.as_ref()], &ID);
     let (trader_key, trader_bump) =
         Pubkey::find_program_address(&[b"trader", config_key.as_ref(), owner.as_ref()], &ID);
-    let vaults: Vec<_> = (0..6)
+    let mut vaults: Vec<_> = (0..6)
         .map(|a| Pubkey::find_program_address(&[b"vault", market_key.as_ref(), &[a]], &ID).0)
         .collect();
     let mut mints = [Pubkey::new_unique(); 6];
     mints[1] = Pubkey::new_unique();
+    let pools = [
+        pool_address(&config_key, &mints[0]),
+        pool_address(&config_key, &mints[1]),
+    ];
+    let credits = pools.map(|p| {
+        Pubkey::find_program_address(&[b"asset-credit", p.as_ref(), owner.as_ref()], &ID).0
+    });
+    vaults[0] = pool_vault(&pools[0]);
+    vaults[1] = pool_vault(&pools[1]);
     for (i, mint) in mints.iter_mut().enumerate().skip(2) {
         *mint = Pubkey::find_program_address(&[b"claim", market_key.as_ref(), &[i as u8]], &ID).0;
     }
@@ -100,6 +110,7 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
     market.vaults_initialized = 63;
     market.state = protocol_core::OPEN;
     market.credits = [100; 6];
+    market.credits[..2].fill(0);
     market.backing = [100, 100];
     market.terms = Terms {
         condition: [1; 32],
@@ -121,7 +132,7 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
     let wallet = Wallet {
         market: market_key,
         owner,
-        balances: [100; 6],
+        balances: [0, 0, 100, 100, 100, 100],
         open_notional: 0,
         bump: wallet_bump,
     };
@@ -129,6 +140,7 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
         config: config_key,
         owner,
         minimum_nonce: 0,
+        delegation_epoch: 0,
         bump: trader_bump,
     };
     let mut baseline = vec![
@@ -137,6 +149,36 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
         (wallet_key, serialized(&wallet)),
         (trader_key, serialized(&trader)),
     ];
+    for asset in 0..2 {
+        baseline.push((
+            pools[asset],
+            serialized(&AssetPool {
+                config: config_key,
+                mint: mints[asset],
+                token_program: token::ID,
+                decimals: 6,
+                liability: 200,
+                bump: Pubkey::find_program_address(
+                    &[b"pool", config_key.as_ref(), mints[asset].as_ref()],
+                    &ID,
+                )
+                .1,
+            }),
+        ));
+        baseline.push((
+            credits[asset],
+            serialized(&AssetCredit {
+                pool: pools[asset],
+                owner,
+                available: 100,
+                bump: Pubkey::find_program_address(
+                    &[b"asset-credit", pools[asset].as_ref(), owner.as_ref()],
+                    &ID,
+                )
+                .1,
+            }),
+        ));
+    }
     for asset in 0..6 {
         baseline.push((
             mints[asset],
@@ -152,7 +194,7 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
             vaults[asset],
             token_data(RawAccount {
                 mint: mints[asset],
-                owner: market_key,
+                owner: if asset < 2 { pools[asset] } else { market_key },
                 amount: if asset < 2 { 200 } else { 100 },
                 state: AccountState::Initialized,
                 ..RawAccount::default()
@@ -173,6 +215,7 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
     }
     let mut context = program.start_with_context().await;
     let position_accounts = accounts::Positions {
+        system_program: anchor_lang::system_program::ID,
         owner,
         market: market_key,
         wallet: wallet_key,
@@ -182,6 +225,8 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
         no_vault: vaults[3],
         token_program: token::ID,
         underlying_vault: vaults[0],
+        pool: pools[0],
+        credit: credits[0],
     }
     .to_account_metas(None);
     for fault in 0..2 {
@@ -268,6 +313,8 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
                 }
             } else {
                 let mut accounts = accounts::Place {
+                    authority: owner,
+                    delegation: None,
                     owner,
                     config: config_key,
                     market: market_key,
@@ -276,6 +323,8 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
                     system_program: anchor_lang::system_program::ID,
                     base_vault: vaults[0],
                     quote_vault: vaults[1],
+                    base_pool: pools[0],
+                    quote_pool: pools[1],
                 }
                 .to_account_metas(None);
                 for asset in 2..6 {
@@ -284,10 +333,13 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
                 }
                 accounts.push(AccountMeta::new(wallet_key, false));
                 accounts.push(AccountMeta::new_readonly(trader_key, false));
+                accounts.push(AccountMeta::new(credits[0], false));
                 Instruction {
                     program_id: ID,
                     accounts,
                     data: instruction::Place {
+                        delegations: 0,
+                        participants: 1,
                         terms: OrderTerms {
                             recipient: owner,
                             salt,

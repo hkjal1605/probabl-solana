@@ -5,7 +5,7 @@ const pubkey=()=>PublicKey.unique().toBase58(),account=pubkey();
 const config={rpcUrl:"http://127.0.0.1:8899",config:pubkey(),genesisHash:pubkey(),programId:PROGRAM_ID.toBase58()};
 const order={maker:account,recipient:account,marketId:pubkey(),salt:"0x"+"22".repeat(32),quantity:"1000000",
   limitPriceRawX18:"5000000000000000000",expiry:"2000",nonce:"1",maxFeeBps:0,branch:0,side:0,fundingKind:0,tif:0};
-const plan=planOrder({order,candidates:[],now:1500n,step:1n,nextSequence:0n,makerFeeBps:0,takerFeeBps:0}),input={order,plan,account,config,nowSeconds:1500n};
+const plan=planOrder({order,candidates:[],now:1500n,step:1n,nextSequence:0n,makerFeeBps:0,takerFeeBps:0}),input={order,plan,account,config,market:{baseToken:pubkey(),quoteToken:pubkey()},nowSeconds:1500n};
 test("native atomic order binds signer, PDA, raw terms and reviewed plan",()=>{
   const expected=atomicTransaction(input),ix=unwrap(expected.transaction)[0]!,decoded=coder.instruction.decode(ix.data)!;
   expect(decoded.name).toBe("place");expect(ix.keys[0]!.pubkey.toBase58()).toBe(account);expect(ix.keys[0]!.isSigner).toBe(true);

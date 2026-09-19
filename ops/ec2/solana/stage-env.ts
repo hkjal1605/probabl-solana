@@ -43,8 +43,8 @@ for (const name of [
 if (
   common.SOLANA_GENESIS_HASH !==
     "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" ||
-  common.SOLANA_CONFIG !== "A7t71Mf3PbBuvD8jKXCYQxd9oxrf2woLf3kWszT14mxe" ||
-  common.SOLANA_PROGRAM_ID !== "CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3"
+  common.SOLANA_CONFIG !== "6buYkVtSJjaoozCDsPFYrPhp5g1q1oLg2eLp7FpsZ1tF" ||
+  common.SOLANA_PROGRAM_ID !== "8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg"
 )
   throw new Error("Unexpected Solana devnet deployment");
 

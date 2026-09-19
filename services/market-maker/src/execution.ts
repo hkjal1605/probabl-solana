@@ -85,9 +85,10 @@ export class Executor {
       accounts: { encoding: "base64", addresses: [this.wallet.publicKey.toBase58()] },
     });
     const after = simulation.value.accounts?.[0]?.lamports;
-    if (simulation.value.err || !Number.isSafeInteger(after) || after! > balance)
+    if (simulation.value.err || !Number.isSafeInteger(after) || after! < 0)
       throw new Error("Local transaction simulation failed");
-    const cost = BigInt(balance - after!),
+    // Rent refunds never grant extra daily spend allowance.
+    const cost = BigInt(Math.max(0, balance - after!)),
       reserve = cancel ? 1_000_000n : BigInt(this.settings.minSolLamports);
     if (
       BigInt(after!) < reserve ||
@@ -103,7 +104,8 @@ export class Executor {
     this.save();
     const returned = await this.client.connection.sendRawTransaction(
       built.transaction.serialize(),
-      { skipPreflight: false, maxRetries: 2 },
+      // The exact signed bytes have already been simulated above.
+      { skipPreflight: true, maxRetries: 2 },
     );
     if (returned !== signature) throw new Error("Unexpected RPC transaction signature");
     const confirmed = await this.client.connection.confirmTransaction(

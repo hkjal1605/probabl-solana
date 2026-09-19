@@ -23,7 +23,7 @@ export class AdminApiError extends Error {
 
 export async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (
-    !/^\/api\/(?:gateway\/[A-Za-z0-9_/-]+|indexer\/[A-Za-z0-9_/-]+|health)$/.test(path) ||
+    !/^\/api\/(?:solana\/[A-Za-z0-9_/-]+|indexer\/[A-Za-z0-9_/-]+|health)$/.test(path) ||
     path.includes("//") ||
     path.includes("..")
   )
@@ -76,7 +76,7 @@ export async function adminRequest<T>(
   headers.set("authorization", `Bearer ${token}`);
   if (init.body) headers.set("content-type", "application/json");
   try {
-    return await requestJson<T>(`/api/gateway/${path}`, { ...init, headers });
+    return await requestJson<T>(`/api/solana/${path}`, { ...init, headers });
   } catch (error) {
     if (error instanceof AdminApiError && error.status === 401 && typeof window !== "undefined")
       window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT, { detail: token }));

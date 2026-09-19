@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { NextRequest } from "next/server";
 import { upstreamUrl } from "../src/lib/upstream";
-import { GET as gatewayGet } from "../src/app/api/gateway/[...path]/route";
+import { GET as solanaGet } from "../src/app/api/solana/[...path]/route";
 import { GET as indexerGet } from "../src/app/api/indexer/[...path]/route";
 
 const original = {
@@ -17,7 +17,7 @@ afterEach(() => {
   }
 });
 
-test("admin defaults use the deployed API for both gateway and indexer", async () => {
+test("admin defaults use the deployed Solana API and indexer", async () => {
   delete process.env.API_URL;
   delete process.env.INDEXER_URL;
   expect(upstreamUrl("api")).toBe("https://api-solana.probabl.trade");
@@ -29,8 +29,8 @@ test("admin defaults use the deployed API for both gateway and indexer", async (
     redirects.push(init?.redirect);
     return Response.json({});
   }) as typeof fetch;
-  const gateway = await gatewayGet(
-    new NextRequest("http://localhost:3002/api/gateway/admin/evidence"),
+  const gateway = await solanaGet(
+    new NextRequest("http://localhost:3002/api/solana/admin/evidence"),
     {
       params: Promise.resolve({ path: ["admin", "evidence"] }),
     },

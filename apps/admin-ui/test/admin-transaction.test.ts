@@ -111,7 +111,10 @@ function autoFeeWallet(owner: Keypair) {
 
 test("reproduces the old create-market mismatch and pins fees before admin simulation/signing", async () => {
   const f = fixture();
-  const old = await f.client.prepareTransaction(f.owner.publicKey, f.transaction);
+  const old = { transaction: new VersionedTransaction(new TransactionMessage({
+    payerKey: f.owner.publicKey, recentBlockhash: f.latest.blockhash,
+    instructions: unwrap(f.transaction, f.client.program),
+  }).compileToV0Message()) };
   const wallet = autoFeeWallet(f.owner);
   await expect(signReviewedTransaction(old.transaction, wallet.sign)).rejects.toThrow(
     "No transaction was sent",
@@ -245,7 +248,10 @@ test("admin fee pinning never accepts remote fee instructions and checks packet 
     ],
     f.client.program,
   );
-  const plain = await f.client.prepareTransaction(f.owner.publicKey, oversized);
+  const plain = { transaction: new VersionedTransaction(new TransactionMessage({
+    payerKey: f.owner.publicKey, recentBlockhash: f.latest.blockhash,
+    instructions: unwrap(oversized, f.client.program),
+  }).compileToV0Message()) };
   expect(plain.transaction.serialize().length).toBeLessThanOrEqual(1232);
   await expect(preflightAdmin(f.client, { ...f.transaction, ...oversized })).rejects.toThrow(
     "packet limit",

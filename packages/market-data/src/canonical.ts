@@ -1,4 +1,9 @@
-import { type Hex, keccak256, toBytes } from "viem";
+import { keccak_256 } from "@noble/hashes/sha3";
+import { bytesToHex } from "@noble/hashes/utils";
+
+export type Hex = `0x${string}`;
+export const isHex32 = (value: unknown): value is Hex =>
+  typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value);
 
 export type JsonValue =
   | boolean
@@ -54,7 +59,8 @@ export const canonicalize = (value: unknown): JsonValue => canonicalValue(value,
 
 export const canonicalStringify = (value: unknown): string => JSON.stringify(canonicalize(value));
 
-export const hashCanonical = (value: unknown): Hex => keccak256(toBytes(canonicalStringify(value)));
+export const hashCanonical = (value: unknown): Hex =>
+  `0x${bytesToHex(keccak_256(new TextEncoder().encode(canonicalStringify(value))))}`;
 
 export const object = (value: unknown, name: string): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

@@ -12,6 +12,88 @@ import { Engine, inventory, quoteChange, passiveOrder, owned } from "../src/engi
 import { initialState } from "../src/state";
 import type { Executor } from "../src/execution";
 import { config, market, policy, reference, book, owner, id, order } from "./fixtures";
+import { custodyFixture } from "../../solana-indexer/test/custody-fixture";
+
+test("funding allocates shared credit once and deposits only each market's remaining shortfall", async () => {
+  const { s, owner: maker, base, quote: quoteMint } = custodyFixture();
+  for (const wallet of s.wallets.values()) wallet.balances = Array.from({ length: 6 }, () => bn(0));
+  const policies = [...s.markets.keys()].map((market) => ({
+    ...policy,
+    market,
+    baseMint: String(base),
+    quoteMint: String(quoteMint),
+    baseInventory: "0.00006",
+    quoteInventory: "0.00015",
+  }));
+  const deposits: bigint[] = [],
+    allocations: string[] = [];
+  const available = (mint: string) =>
+    [...s.credits.values()].find((c) => String(s.pools.get(String(c.pool))!.mint) === mint)!;
+  const client = {
+    program: s.program,
+    deployment: { genesisHash: "test" },
+    rememberMarket: () => {},
+    depositForCredit: async (
+      _market: unknown,
+      _owner: unknown,
+      mint: unknown,
+      _asset: unknown,
+      amount: bigint,
+    ) => {
+      deposits.push(amount);
+      return {
+        gross: amount,
+        fee: 0n,
+        instruction: { kind: "deposit", mint: String(mint), amount },
+      };
+    },
+    position: (
+      _action: unknown,
+      market: unknown,
+      _owner: unknown,
+      collateral: number,
+      amount: bigint,
+    ) => ({
+      kind: "split",
+      market: String(market),
+      mint: String(s.markets.get(String(market))!.mints[collateral]),
+      amount,
+    }),
+  } as unknown as SolanaClient;
+  const executor = {
+    reconcilePending: async () => {},
+    send: async (instructions: any[]) => {
+      for (const ix of instructions) {
+        const credit = available(ix.mint),
+          previous = BigInt(credit.available.toString());
+        if (ix.kind === "deposit") credit.available = bn(previous + ix.amount);
+        else {
+          expect(previous).toBeGreaterThanOrEqual(ix.amount);
+          credit.available = bn(previous - ix.amount);
+          allocations.push(ix.market);
+        }
+      }
+    },
+  } as unknown as Executor;
+  const engine = new Engine(
+    client,
+    maker,
+    { ...config, markets: policies },
+    "https://example.com",
+    initialState("test"),
+    () => {},
+    executor,
+    async () => reference,
+  );
+  engine.view = async () => s;
+  engine.validateMarket = async (_s, p) => s.markets.get(p.market)!;
+  // Whole-asset credits must not appear in each market's conditional risk inventory.
+  for (const p of policies) expect(inventory(s, maker, p.market)).toEqual([0n, 0n, 0n, 0n, 0n, 0n]);
+  await engine.fund();
+  expect(deposits).toEqual([20n, 100n]);
+  expect(allocations).toEqual(policies.flatMap((p) => [p.market, p.market]));
+  expect([...s.credits.values()].map((c) => c.available.toString())).toEqual(["0", "0"]);
+});
 test("inventory includes escrow once and never includes another wallet", () => {
   const s = book();
   s.wallets.set(walletAddress(key(id), owner, s.program).toBase58(), {
@@ -192,6 +274,8 @@ test("partial funding is journaled before sending and cannot automatically top u
     state = initialState("test");
   let sends = 0;
   const client = {
+    program: s.program,
+    rememberMarket: () => {},
     deployment: { genesisHash: "test" },
     depositForCredit: async () => ({ gross: 100000000n, fee: 0n, instruction: {} }),
     wallet: async () => null,

@@ -37,7 +37,7 @@ test("resolution commits exact payout "+payout.yes+"/"+payout.no,()=>{
   expect(begin.from).toBe(deployment.marketAdmin);expect(resolve.from).toBe(deployment.resolutionAdmin);
   expect((coder.instruction.decode(unwrap(resolve)[0]!.data)!.data as any).yes).toBe(Number(payout.yes));
 });
-test("unsigned review, packet tampering, EVM packets and cross-deployment execution fail closed",()=>{
+test("unsigned review, packet tampering, old-schema packets and cross-deployment execution fail closed",()=>{
   const view=approved(creation());
   for(const status of ["prepared","rejected"]as const)expect(()=>evidenceTransaction({...view,status},"create-market",deployment)).toThrow("approval");
   expect(()=>evidenceTransaction({...view,reviews:[]},"create-market",deployment)).toThrow("approval");

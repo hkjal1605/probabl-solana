@@ -61,8 +61,8 @@ async function main() {
         env = parseEnv(original);
       if (
         env.SOLANA_GENESIS_HASH !== "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" ||
-        env.SOLANA_PROGRAM_ID !== "CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3" ||
-        env.SOLANA_CONFIG !== "A7t71Mf3PbBuvD8jKXCYQxd9oxrf2woLf3kWszT14mxe"
+        env.SOLANA_PROGRAM_ID !== "8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg" ||
+        env.SOLANA_CONFIG !== "6buYkVtSJjaoozCDsPFYrPhp5g1q1oLg2eLp7FpsZ1tF"
       )
         throw new Error("Unexpected deployment identity");
       return { service, path, original, next: replaceRpcSetting(original, rpc) };

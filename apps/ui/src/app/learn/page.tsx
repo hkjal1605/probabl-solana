@@ -80,7 +80,7 @@ export default function LearnPage() {
           </p>
         </section>
       </div>
-      <Button variant="default" size="lg" render={<Link href="/markets" />} nativeButton={false}>
+      <Button variant="default" size="lg" render={<Link href="/" />} nativeButton={false}>
         Explore markets →
       </Button>
     </Page>

@@ -5,7 +5,6 @@ import { CheckCircle2, FileSearch, Gavel, LoaderCircle } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
-import { isAddress, zeroAddress } from "viem";
 import { QueryStatus } from "@/components/data/QueryStatus";
 import { useAdmin } from "@/components/providers/AdminProvider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -41,6 +40,8 @@ interface Snapshot {
   rawHash: string;
   snapshotId: string;
 }
+const isPolygonAddress = (value: string) => /^0x[0-9a-fA-F]{40}$/.test(value);
+const zeroAddress = "0x0000000000000000000000000000000000000000";
 export function ResolutionForm() {
   const admin = useAdmin();
   const marketsQuery = useQuery({
@@ -97,9 +98,8 @@ export function ResolutionForm() {
           "The source has no resolution status. Fetch verifiable final evidence before preparing a payout.",
         );
       if (
-        !isAddress(polygonCtf) ||
-        polygonCtf.toLowerCase() === zeroAddress ||
-        polygonCtf.toLowerCase() === adminConfig.conditionalTokens.toLowerCase()
+        !isPolygonAddress(polygonCtf) ||
+        polygonCtf.toLowerCase() === zeroAddress
       )
         throw new Error(
           "Enter the Polygon source Conditional Tokens address, not the local deployment",
@@ -319,7 +319,7 @@ export function ResolutionForm() {
                 !marketId ||
                 !officialUrl ||
                 !sourceReference ||
-                !isAddress(polygonCtf) ||
+                !isPolygonAddress(polygonCtf) ||
                 !snapshot.normalized.resolutionStatus ||
                 marketsQuery.isError
               }

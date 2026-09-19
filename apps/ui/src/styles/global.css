@@ -208,6 +208,13 @@
   outline-offset: 3px;
 }
 
+/* The avatar menu uses its neutral focused-row background instead of a green outline. */
+.account-menu-trigger:is(button, [tabindex]):focus-visible,
+.account-menu:is([tabindex]):focus-visible,
+.account-menu :is(a, button, [tabindex]):not(input, textarea):focus-visible {
+  outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -239,6 +246,13 @@
 }
 
 @layer utilities {
+  .scrollbars-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbars-hidden::-webkit-scrollbar {
+    display: none;
+  }
   html:has(.page-scrollbars-hidden),
   body:has(.page-scrollbars-hidden),
   .page-scrollbars-hidden,

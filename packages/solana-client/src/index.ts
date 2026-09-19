@@ -3,3 +3,5 @@ export * from "./planner.ts";
 export * from "./transactions.ts";
 export * from "./tokens.ts";
 export * from "./claims.ts";
+export * from "./resources.ts";
+export * from "./delegation.ts";

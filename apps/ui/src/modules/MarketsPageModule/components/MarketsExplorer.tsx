@@ -76,22 +76,24 @@ export function MarketsExplorer({
     a.ticker.localeCompare(b.ticker),
   );
   return (
-    <Page variant="terminal" className="page-scrollbars-hidden pt-5">
+    <Page
+      variant="terminal"
+      className="page-scrollbars-hidden max-w-[1350px] px-4 pt-5 lg:px-6"
+    >
       {featured && <FeaturedMarketBanner markets={featured} />}
-      <div className="mb-4 overflow-x-auto">
+      <section
+        aria-label="Market filters"
+        className="mb-4 flex min-h-8 items-center gap-4 overflow-x-auto"
+      >
         <Segmented
           label="Market category"
           variant="category"
+          className="shrink-0"
           value={filters.category}
           options={["All", "Macro", "Earnings", "Policy", "Other"]}
           onChange={(category) => setFilters({ category })}
         />
-      </div>
-      <section
-        aria-label="Market filters"
-        className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2"
-      >
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <Select
             value={filters.lifecycle}
             items={{
@@ -133,14 +135,14 @@ export function MarketsExplorer({
               </SelectGroup>
             </SelectContent>
           </Select>
+          <Segmented
+            label="Market view"
+            variant="compact"
+            value={filters.view}
+            options={["Feed", "Matrix"]}
+            onChange={(view) => setFilters({ view })}
+          />
         </div>
-        <Segmented
-          label="Market view"
-          variant="compact"
-          value={filters.view}
-          options={["Feed", "Matrix"]}
-          onChange={(view) => setFilters({ view })}
-        />
       </section>
       {query.isInitialError && (
         <DataError

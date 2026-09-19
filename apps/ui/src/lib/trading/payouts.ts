@@ -7,6 +7,7 @@ import {
 } from "@conditional-stocks/solana-client";
 type WithdrawalInput = {
   credit: {
+    scope: "global" | "market";
     beneficiary: string;
     asset: string;
     tokenId: string;
@@ -25,18 +26,21 @@ export function payoutWithdrawal(
   const { credit, amount } = input;
   if (
     credit.beneficiary !== input.account ||
-    !credit.marketId ||
+    (credit.scope === "market" ? !credit.marketId : credit.scope !== "global" || Boolean(credit.marketId)) ||
     amount <= 0n ||
     amount > BigInt(credit.amount)
   )
     throw new Error("Invalid payout beneficiary or amount");
   const asset = Number(credit.tokenId);
-  if (!Number.isInteger(asset) || asset < 0 || asset > 5)
+  if (credit.scope === "market" && (!Number.isInteger(asset) || asset < 2 || asset > 5))
     throw new Error("Invalid asset index");
   const client = new SolanaClient(input.config);
+  if (credit.scope === "global") return envelope(client.withdrawPool(
+    key(input.account), key(credit.asset), amount, key(input.recipient), quote?.program, quote?.received,
+  ), client.program);
   return envelope(
     client.withdraw(
-      key(credit.marketId),
+      key(credit.marketId!),
       key(input.account),
       key(credit.asset),
       asset,

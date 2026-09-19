@@ -11,6 +11,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "viem": "2.56.3"
+    "@noble/hashes": "1.8.0"
   }
 }

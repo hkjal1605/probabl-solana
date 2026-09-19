@@ -14,7 +14,7 @@ import {
   bn,
   coder,
   claimAddress,
-  vaultAddress,
+  poolAddress, poolVaultAddress,
   unwrap,
   envelope,
   type MarketAccount,
@@ -32,8 +32,11 @@ test("local placement preparation budgets CPI guards without accepting remote pr
   const placement = (count: number) =>
     new TransactionInstruction({
       programId: f.client.program,
-      keys: [],
+      // Layout-only fixture for budgeting, not executable account identities.
+      keys: Array.from({ length: 22 + count }, (_, i) => ({ pubkey: i === 11 ? f.client.program : f.owner, isSigner: false, isWritable: i !== 11 })),
       data: coder.instruction.encode("place", {
+        participants: 1,
+        delegations: 0,
         terms: {
           recipient: f.owner,
           salt: Array(32).fill(0),
@@ -66,7 +69,7 @@ test("local placement preparation budgets CPI guards without accepting remote pr
     const instructions = TransactionMessage.decompile(
       tx.transaction.message,
     ).instructions;
-    expect(instructions).toHaveLength(legs ? 2 : 1);
+    expect(instructions).toHaveLength(3);
     expect(instructions.at(-1)!.data.equals(original)).toBe(true);
     if (legs) {
       expect(
@@ -75,7 +78,7 @@ test("local placement preparation budgets CPI guards without accepting remote pr
       expect(
         ComputeBudgetInstruction.decodeSetComputeUnitLimit(instructions[0]!)
           .units,
-      ).toBe(200_000 + 100_000 * legs);
+      ).toBe(106_000 + 11_000 * legs + 32_000);
     }
     const pinned = await f.client.prepareTransaction(f.owner, envelope([ix]), {
       pinWalletFees: true,
@@ -86,7 +89,7 @@ test("local placement preparation budgets CPI guards without accepting remote pr
     expect(pinnedInstructions).toHaveLength(3);
     expect(
       ComputeBudgetInstruction.decodeSetComputeUnitLimit(pinnedInstructions[0]!).units,
-    ).toBe(200_000 + 100_000 * legs);
+    ).toBe(106_000 + 11_000 * legs + (legs ? 32_000 : 0));
     expect(
       ComputeBudgetInstruction.decodeSetComputeUnitPrice(pinnedInstructions[1]!).microLamports,
     ).toBe(0n);
@@ -100,7 +103,9 @@ test("local placement preparation budgets CPI guards without accepting remote pr
     ComputeBudgetInstruction.decodeSetComputeUnitLimit(
       TransactionMessage.decompile(capped.transaction.message).instructions[0]!,
     ).units,
-  ).toBe(1_400_000);
+  ).toBe(2 * (106_000 + 88_000 + 32_000));
+  await expect(f.client.prepareTransaction(f.owner, envelope(Array.from({ length: 8 }, () => placement(8)))))
+    .rejects.toThrow("compute budget exceeds");
   await expect(
     f.client.prepareTransaction(f.owner, envelope([placement(9)])),
   ).rejects.toThrow("compute plan");
@@ -180,6 +185,7 @@ function clientFixture() {
     genesisHash: "test",
   });
   const state = {
+    config: client.config,
     state: 6,
     payouts: [1, 1],
     mints: [
@@ -188,6 +194,7 @@ function clientFixture() {
       ...Array.from({ length: 4 }, (_, i) => claimAddress(market, i + 2)),
     ],
   } as MarketAccount;
+  client.rememberMarket(market, state);
   client.market = async () => state;
   client.wallet = async () =>
     ({ balances: [0, 0, 1, 1, 0, 0].map(bn) }) as WalletAccount;
@@ -223,7 +230,7 @@ test("reviewed recovery bytes fund only burned claims and bind the read-only und
   ]);
   for (const ix of ixs.slice(1)) {
     const underlying = ix.keys.at(-1)!;
-    expect(underlying.pubkey.equals(vaultAddress(f.market, 0))).toBe(true);
+    expect(underlying.pubkey.equals(poolVaultAddress(poolAddress(f.client.config, f.state.mints[0]!)))).toBe(true);
     expect(underlying.isWritable).toBe(false);
     expect(underlying.isSigner).toBe(false);
   }

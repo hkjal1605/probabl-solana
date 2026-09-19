@@ -17,6 +17,7 @@ import {
   SystemProgram,
   claimAddress,
   vaultAddress,
+  poolAddress, poolVaultAddress,
   TOKEN_PROGRAM_ID,
 } from "./protocol.ts";
 import {
@@ -182,9 +183,14 @@ export async function initializeMarketVaults(
     result: AdminTransaction[] = [];
   for (let asset = 0; asset < 6; asset++)
     if (!(m.vaults_initialized & (1 << asset))) {
+      const mint = m.mints[asset]!;
+      const pool = asset < 2 ? poolAddress(client.config, mint, client.program) : null;
+      const tokenProgram = asset < 2 ? (await supportedMint(client.connection, mint)).program : TOKEN_PROGRAM_ID;
+      const initialize = pool && !(await client.connection.getAccountInfo(pool)) ? [client.initializePool(mint, key(payer), tokenProgram)] : [];
       result.push({
         ...envelope(
           [
+            ...initialize,
             client.ix(
               asset < 2 ? "initialize_asset" : "initialize_claim",
               { asset },
@@ -195,12 +201,9 @@ export async function initializeMarketVaults(
                   asset < 2
                     ? m.mints[asset]!
                     : claimAddress(market, asset, client.program),
-                vault: vaultAddress(market, asset, client.program),
-                token_program:
-                  asset < 2
-                    ? (await supportedMint(client.connection, m.mints[asset]!))
-                        .program
-                    : TOKEN_PROGRAM_ID,
+                ...(pool ? { pool } : {}),
+                vault: pool ? poolVaultAddress(pool, client.program) : vaultAddress(market, asset, client.program),
+                token_program: tokenProgram,
                 system_program: SystemProgram.programId,
               },
             ),

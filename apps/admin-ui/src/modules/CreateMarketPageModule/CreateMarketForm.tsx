@@ -1,12 +1,12 @@
 "use client";
 
 import { canonicalStringify } from "@conditional-stocks/market-data";
+import { formatTokenAmount } from "@conditional-stocks/domain";
 import { key, SolanaClient } from "@conditional-stocks/solana-client";
 import { FileSearch, LoaderCircle, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { formatUnits } from "viem";
 import { useAdmin } from "@/components/providers/AdminProvider";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +43,7 @@ const label = (value: string) =>
   value.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
 const amount = (value: string, decimals: number) => {
   if (!/^[0-9]{1,39}$/.test(value)) return "Enter a raw integer";
-  const result = formatUnits(BigInt(value), decimals);
+  const result = formatTokenAmount(BigInt(value), decimals);
   return result.length > 55 ? "Check this mint's precision carefully" : result;
 };
 

@@ -1,7 +1,14 @@
 "use client";
 
 import { formatTokenAmount, parseTokenAmount } from "@conditional-stocks/domain";
-import { key, type SolanaClient } from "@conditional-stocks/solana-client";
+import {
+  claimAddress,
+  envelope,
+  key,
+  type SolanaClient,
+  verifyEnvelope,
+} from "@conditional-stocks/solana-client";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { Combine } from "lucide-react";
 import { useState } from "react";
 import { useWallet } from "@/components/providers/WalletProvider";
@@ -22,7 +29,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { toast } from "@/components/ui/toast";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useConfirmation } from "@/hooks/useConfirmation";
+import { usePositions } from "@/hooks/useProtocolData";
 import { readClaimMarket, solana, transactionReceipt } from "@/lib/trading/rpc";
+import { api } from "@/services/protocol-api-service";
 import { refreshStores } from "@/stores/createResourceStore";
 import type { MarketView, PositionView } from "@/types/api";
 
@@ -38,8 +47,9 @@ export function PositionActions({
   disabled?: boolean;
 }) {
   const wallet = useWallet();
+  const walletData = usePositions();
   const [open, setOpen] = useState(false),
-    [kind, setKind] = useState<"Split" | "Merge" | "Redeem">(
+    [kind, setKind] = useState<"Deposit" | "Split" | "Merge" | "Redeem">(
       position.redeemable ? "Redeem" : "Merge",
     );
   const [collateral, setCollateral] = useState<"Stock" | "Cash">("Stock"),
@@ -55,9 +65,42 @@ export function PositionActions({
   const reviewed = review?.scope === scope ? review : null;
   const decimals = collateral === "Stock" ? market.baseTokenDecimals : market.quoteTokenDecimals,
     symbol = collateral === "Stock" ? market.ticker : "USDC";
-  const yes = BigInt(collateral === "Stock" ? position.stockYes : position.quoteYes),
-    no = BigInt(collateral === "Stock" ? position.stockNo : position.quoteNo);
-  const available = kind === "Merge" ? (yes < no ? yes : no) : branch === "YES" ? yes : no;
+  const vaultClaim = (asset: number) => {
+    const mint = String(claimAddress(key(market.id), asset, solana().program));
+    return BigInt(
+      walletData.data?.owner === wallet.account
+        ? (walletData.data.balances[mint]?.creditBalances?.[market.id] ?? "0")
+        : "0",
+    );
+  };
+  const externalClaim = (asset: number) => {
+    const mint = String(claimAddress(key(market.id), asset, solana().program));
+    return BigInt(
+      walletData.data?.owner === wallet.account
+        ? (walletData.data.balances[mint]?.canonicalBalance ?? "0")
+        : "0",
+    );
+  };
+  const yes = vaultClaim(collateral === "Stock" ? 2 : 4),
+    no = vaultClaim(collateral === "Stock" ? 3 : 5);
+  const wholeMint = collateral === "Stock" ? market.baseToken : market.quoteToken;
+  const wholeAvailable = BigInt(
+    walletData.data?.owner === wallet.account
+      ? (walletData.data.balances[wholeMint]?.vaultAvailable ?? "0")
+      : "0",
+  );
+  const available =
+    kind === "Merge"
+      ? yes < no
+        ? yes
+        : no
+      : kind === "Deposit"
+        ? externalClaim(
+            collateral === "Stock" ? (branch === "YES" ? 2 : 3) : branch === "YES" ? 4 : 5,
+          )
+        : branch === "YES"
+          ? yes
+          : no;
   const redeemable = position.redeemable;
   const allClaims = kind === "Redeem" && branch === "All";
   let raw = 0n;
@@ -68,11 +111,16 @@ export function PositionActions({
   }
   const valid =
     !disabled &&
+    walletData.isDataFresh &&
     (allClaims
       ? yes + no > 0n
       : raw > 0n &&
         raw < 1n << 64n &&
-        (kind === "Split" ? market.lifecycle === "open" : raw <= available)) &&
+        (kind === "Split"
+          ? market.lifecycle === "open" && raw <= wholeAvailable
+          : kind === "Deposit"
+            ? branch !== "All" && raw <= available
+            : raw <= available)) &&
     (kind !== "Redeem" || redeemable);
   const edit = (action: () => void) => {
     setReview(null);
@@ -124,14 +172,72 @@ export function PositionActions({
       const transaction =
         kind === "Redeem"
           ? reviewed.transaction!
-          : await solana().positionTransaction(
-              kind === "Split" ? "split" : kind === "Merge" ? "merge" : "redeem",
-              key(market.id),
-              key(wallet.account),
-              collateral === "Stock" ? 0 : 1,
-              raw,
-              branch === "YES" ? 0 : 1,
-            );
+          : kind === "Deposit"
+            ? await (async () => {
+                const asset =
+                  collateral === "Stock" ? (branch === "YES" ? 2 : 3) : branch === "YES" ? 4 : 5;
+                const client = solana(),
+                  owner = key(wallet.account!),
+                  marketKey = key(market.id),
+                  mint = claimAddress(marketKey, asset, client.program);
+                const token = wallet.sessionToken ?? (await wallet.authenticate());
+                assertCurrent();
+                const prepared = await api.prepare<{ transaction: ReturnType<typeof envelope> }>(
+                  "vault/deposit/prepare",
+                  {
+                    scope: "market",
+                    marketId: market.id,
+                    asset: String(mint),
+                    tokenId: String(asset),
+                    amount: String(raw),
+                  },
+                  token,
+                );
+                const deposit = client.deposit(
+                  marketKey,
+                  owner,
+                  mint,
+                  asset,
+                  raw,
+                  TOKEN_PROGRAM_ID,
+                );
+                const direct = envelope([deposit], client.program);
+                const initialized = envelope(
+                  [client.initializeWallet(marketKey, owner), deposit],
+                  client.program,
+                );
+                try {
+                  verifyEnvelope(direct, prepared);
+                } catch {
+                  verifyEnvelope(initialized, prepared);
+                }
+                return prepared.transaction;
+              })()
+            : kind === "Split"
+              ? (() => {
+                  const client = solana();
+                  client.rememberMarket(key(market.id), canonical);
+                  return envelope(
+                    [
+                      client.position(
+                        "split",
+                        key(market.id),
+                        key(wallet.account!),
+                        collateral === "Stock" ? 0 : 1,
+                        raw,
+                      ),
+                    ],
+                    client.program,
+                  );
+                })()
+              : await solana().positionTransaction(
+                  "merge",
+                  key(market.id),
+                  key(wallet.account),
+                  collateral === "Stock" ? 0 : 1,
+                  raw,
+                  branch === "YES" ? 0 : 1,
+                );
       const approval = false;
       assertCurrent();
       const fees = transaction.issuerTransfers?.filter((t) => BigInt(t.fee) > 0n) ?? [];
@@ -216,8 +322,13 @@ export function PositionActions({
               disabled={busy}
               label="Claim action"
               value={kind}
-              options={["Split", "Merge", "Redeem"]}
-              onChange={(value) => edit(() => setKind(value))}
+              options={["Deposit", "Split", "Merge", "Redeem"]}
+              onChange={(value) =>
+                edit(() => {
+                  setKind(value);
+                  if (value === "Deposit") setBranch("YES");
+                })
+              }
               className="w-full"
             />
             <Segmented
@@ -229,18 +340,20 @@ export function PositionActions({
               className="w-full"
             />
             <p className="text-sm font-medium leading-6 text-muted-foreground">
-              {kind === "Split"
-                ? `1 whole ${symbol} → 1 YES + 1 NO claim. Your wallet authorizes exact funding.`
-                : kind === "Merge"
-                  ? `1 YES + 1 NO claim → 1 whole ${symbol}.`
-                  : "Recover matching YES/NO pairs first, then redeem the excess at the finalized payout. INVALID recovery keeps any unmatched raw claim instead of rounding away its value. Losing claims pay zero."}
+              {kind === "Deposit"
+                ? `Move external ${symbol}-${branch} claims into this market vault before trading or redeeming them. Available in wallet: ${formatTokenAmount(available, decimals)} ${symbol}.`
+                : kind === "Split"
+                  ? `1 deposited ${symbol} → 1 YES + 1 NO claim. Available in vault: ${formatTokenAmount(wholeAvailable, decimals)} ${symbol}.`
+                  : kind === "Merge"
+                    ? `1 YES + 1 NO claim → 1 whole ${symbol}.`
+                    : "Recover matching YES/NO pairs first, then redeem the excess at the finalized payout. INVALID recovery keeps any unmatched raw claim instead of rounding away its value. Losing claims pay zero."}
             </p>
-            {kind === "Redeem" && (
+            {(kind === "Redeem" || kind === "Deposit") && (
               <Segmented
                 disabled={busy}
-                label="Redeem branch"
+                label={kind === "Deposit" ? "Deposit branch" : "Redeem branch"}
                 value={branch}
-                options={["All", "YES", "NO"]}
+                options={kind === "Deposit" ? ["YES", "NO"] : ["All", "YES", "NO"]}
                 onChange={(value) => edit(() => setBranch(value))}
               />
             )}

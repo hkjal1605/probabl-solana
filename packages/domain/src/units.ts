@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION } from "./types.ts";
+export const PROTOCOL_VERSION = 2;
 
 export const PRICE_FORMAT = "raw-unit-ratio-x18" as const;
 export const MAX_TOKEN_DECIMALS = 36;

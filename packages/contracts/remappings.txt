@@ -1,2 +1,0 @@
-@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/
-@gnosis.pm/conditional-tokens-contracts/=node_modules/@gnosis.pm/conditional-tokens-contracts/

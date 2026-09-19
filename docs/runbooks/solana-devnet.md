@@ -44,7 +44,7 @@ bun run devnet:rehearse
 Keep `target/deploy/conditional_stocks-keypair.json` securely backed up and private
 (`chmod 600`); its public key must match the compiled program ID:
 
-`CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3`
+`8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg`
 
 This is a **different key** from the wallet you put in `.env.devnet`. The program
 signer establishes the program address; your wallet pays fees and becomes its
@@ -67,6 +67,14 @@ bun run devnet:plan
 bun run devnet:deploy --execute
 bun run devnet:verify
 ```
+
+To deploy a fresh program while reusing an already verified set of these mock
+mint identities, preserve their private mint signer files under the new output
+directory and prepare once with `DEVNET_REUSE_EXISTING_ASSETS=1`. This explicit
+mode never creates, mints, wraps, or tops up an asset. It still verifies every
+mint's address, token program, decimals, authority, Token-2022 extension policy,
+metadata, and deployer token account before program configuration is initialized.
+The default mode retains the stricter one-time issuance checks.
 
 `prepare` checks the network, build/IDL/program identity and signer, then writes
 stable mint addresses, a resumable buffer key and a hashed deployment plan. It
@@ -267,8 +275,8 @@ On EC2, use a separate server-owned env file for `DATABASE_URL` (with the server
 certificate path), evidence persistence/
 `EVIDENCE_PUBLIC_BASE_URL`, and any optional reference-data service secrets. The
 generated files are overwritten on verification, so do not append server secrets
-to them. Run native `start:api` and `start:indexer`, not the copied legacy EVM
-deployment scripts. Keep the deployer private key off EC2 and out of the UI.
+to them. Run native `start:api` and `start:indexer`. Keep the deployer private
+key off EC2 and out of the UI.
 
 The UI must be built/run with `ui.env`'s `NEXT_PUBLIC_*` values and use a browser
 wallet set to Devnet. This step provisions balances; it does not by itself test

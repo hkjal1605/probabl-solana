@@ -4,7 +4,7 @@ import { coder,unwrap,PROGRAM_ID } from "@conditional-stocks/solana-client";
 import { payoutWithdrawal,verifyPayoutResponse } from "../src/lib/trading/payouts";
 const account=PublicKey.unique().toBase58(),recipient=PublicKey.unique().toBase58(),marketId=PublicKey.unique().toBase58(),asset=PublicKey.unique().toBase58();
 const config={rpcUrl:"http://127.0.0.1:8899",config:PublicKey.unique().toBase58(),genesisHash:"test"};
-const credit={beneficiary:account,asset,marketId,tokenId:"2",amount:"100"};
+const credit={scope:"market" as const,beneficiary:account,asset,marketId,tokenId:"2",amount:"100"};
 test("SPL withdrawal commits exact amount, beneficiary PDA, mint and receiving account",()=>{
  const tx=payoutWithdrawal({credit,amount:50n,recipient,account,config});
  const instructions=unwrap(tx);

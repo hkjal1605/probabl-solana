@@ -262,7 +262,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       check();
       if (!addresses.includes(owner)) throw new Error("This wallet has no operator role.");
       const challenge = await requestJson<{ challengeId: string; message: string }>(
-        "/api/gateway/auth/challenge",
+        "/api/solana/auth/challenge",
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -278,7 +278,7 @@ export function AdminProvider({ children }: { children: ReactNode }) {
       check();
       const issuedAt = Date.now();
       const result = await requestJson<{ token: string; expiresAtMs?: unknown }>(
-        "/api/gateway/auth/verify",
+        "/api/solana/auth/verify",
         {
           method: "POST",
           headers: { "content-type": "application/json" },

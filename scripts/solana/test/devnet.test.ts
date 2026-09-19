@@ -1,78 +1,55 @@
-import { describe, test, expect } from "bun:test";
-import {
-  mkdtemp,
-  lstat,
-  readFile,
-  symlink,
-  chmod,
-  unlink,
-  rmdir,
-} from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { describe, expect, test } from "bun:test";
+import { chmod, lstat, mkdtemp, readFile, rmdir, symlink, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import bs58 from "bs58";
+import { dirname, join } from "node:path";
+import { configAddress } from "@conditional-stocks/solana-client";
 import {
-  Connection,
+  decodeMintToCheckedInstruction,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
+import {
+  type AccountInfo,
+  type Connection,
   Keypair,
   PublicKey,
   SystemProgram,
-  type AccountInfo,
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
-import {
-  TOKEN_PROGRAM_ID,
-  TOKEN_2022_PROGRAM_ID,
-  decodeMintToCheckedInstruction,
-} from "@solana/spl-token";
-import { configAddress } from "@conditional-stocks/solana-client";
-import {
-  bufferWrite,
-  missingChunks,
-  UPLOAD_CHUNK_BYTES,
-} from "../devnet-upload.ts";
+import bs58 from "bs58";
+import { exportEnvironment, fundingPlan, journalContext, main, programStatus } from "../devnet.ts";
+import { assetInstructions, assetPlan, type ChainContext, sendStep } from "../devnet-chain.ts";
 import {
   ASSETS,
+  assertDevnet,
   DEVNET_GENESIS,
   DEVNET_RPC,
-  LOADER,
-  PROGRAM_ID,
-  NATIVE_MINT,
-  rawAmount,
-  parseDeployer,
+  type DeploymentPlan,
   devnetRpc,
-  assertDevnet,
+  LOADER,
+  NATIVE_MINT,
+  PROGRAM_ID,
+  parseDeployer,
+  rawAmount,
   readProgram,
-  verifyProgramData,
-  verifyBuffer,
+  sha256,
   uploadTransport,
   validatePlanIdentity,
-  sha256,
-  type DeploymentPlan,
+  verifyBuffer,
+  verifyProgramData,
 } from "../devnet-policy.ts";
 import {
-  privateDirectory,
   deploymentDirectory,
   keyFile,
-  writePrivate,
-  writeJson,
-  readJson,
   locked,
+  privateDirectory,
+  readJson,
   withTemporarySigner,
+  writeJson,
+  writePrivate,
 } from "../devnet-store.ts";
-import {
-  assetPlan,
-  assetInstructions,
-  sendStep,
-  type ChainContext,
-} from "../devnet-chain.ts";
-import {
-  main,
-  programStatus,
-  journalContext,
-  exportEnvironment,
-  fundingPlan,
-} from "../devnet.ts";
+import { bufferWrite, missingChunks, UPLOAD_CHUNK_BYTES } from "../devnet-upload.ts";
 
 const owner = Keypair.generate();
 function plan(): DeploymentPlan {
@@ -97,10 +74,7 @@ function plan(): DeploymentPlan {
   };
 }
 const temp = () => mkdtemp(join(tmpdir(), "probabl-pipeline-unit-"));
-const account = (
-  data: Buffer,
-  extra: Partial<AccountInfo<Buffer>> = {},
-): AccountInfo<Buffer> => ({
+const account = (data: Buffer, extra: Partial<AccountInfo<Buffer>> = {}): AccountInfo<Buffer> => ({
   data,
   owner: LOADER,
   lamports: 100,
@@ -111,9 +85,7 @@ const account = (
 function programAccount() {
   const data = Buffer.alloc(36);
   data.writeUInt32LE(2);
-  PublicKey.findProgramAddressSync([PROGRAM_ID.toBuffer()], LOADER)[0]
-    .toBuffer()
-    .copy(data, 4);
+  PublicKey.findProgramAddressSync([PROGRAM_ID.toBuffer()], LOADER)[0].toBuffer().copy(data, 4);
   return account(data, { executable: true });
 }
 function programData(artifact = Buffer.from("ELF")) {
@@ -128,13 +100,8 @@ function programData(artifact = Buffer.from("ELF")) {
 
 describe("Devnet policy and private keys", () => {
   test("both key formats round-trip without a default wallet", () => {
-    for (const input of [
-      bs58.encode(owner.secretKey),
-      JSON.stringify([...owner.secretKey]),
-    ])
-      expect(
-        parseDeployer(" " + input + " ").publicKey.equals(owner.publicKey),
-      ).toBe(true);
+    for (const input of [bs58.encode(owner.secretKey), JSON.stringify([...owner.secretKey])])
+      expect(parseDeployer(" " + input + " ").publicKey.equals(owner.publicKey)).toBe(true);
   });
   test("rejects malformed, truncated, non-byte and inconsistent keys without echoing input", () => {
     const changed = [...owner.secretKey];
@@ -172,21 +139,18 @@ describe("Devnet policy and private keys", () => {
       "18446744073709551616",
     ])
       expect(() => rawAmount(amount, amount.length > 19 ? 0 : 9)).toThrow();
-    for (const decimals of [-1, 19, 1.1, NaN])
-      expect(() => rawAmount("1", decimals)).toThrow();
+    for (const decimals of [-1, 19, 1.1, NaN]) expect(() => rawAmount("1", decimals)).toThrow();
   });
   test("only pinned Devnet genesis is accepted", async () => {
     await assertDevnet({ getGenesisHash: async () => DEVNET_GENESIS });
     for (const hash of ["mainnet", "testnet", "localnet", ""])
-      await expect(
-        assertDevnet({ getGenesisHash: async () => hash }),
-      ).rejects.toThrow("non-Devnet");
+      await expect(assertDevnet({ getGenesisHash: async () => hash })).rejects.toThrow(
+        "non-Devnet",
+      );
   });
   test("RPC policy permits HTTPS providers, but never userinfo or a local bypass", () => {
     expect(devnetRpc()).toBe(DEVNET_RPC + "/");
-    expect(devnetRpc("https://rpc.example/path?api-key=secret")).toContain(
-      "api-key=secret",
-    );
+    expect(devnetRpc("https://rpc.example/path?api-key=secret")).toContain("api-key=secret");
     for (const rpc of [
       "http://localhost:8899",
       "https://user:secret@rpc.example",
@@ -196,18 +160,12 @@ describe("Devnet policy and private keys", () => {
       expect(() => devnetRpc(rpc)).toThrow("HTTPS without userinfo");
   });
   test("all mutations need --execute before any wallet or RPC access", async () => {
-    for (const args of [
-      ["deploy"],
-      ["airdrop"],
-      ["upgrade", "--execute"],
-      ["deploy", "--force"],
-    ])
-      await expect(main(args)).rejects.toThrow(
-        "explicit deploy/airdrop --execute",
-      );
+    for (const args of [["deploy"], ["airdrop"], ["upgrade", "--execute"], ["deploy", "--force"]])
+      await expect(main(args)).rejects.toThrow("explicit deploy/airdrop --execute");
   });
   test("plan is bound to wallet, cluster, program and config", () => {
     validatePlanIdentity(plan(), owner.publicKey);
+    validatePlanIdentity({ ...plan(), reuseExistingAssets: true }, owner.publicKey);
     for (const change of [
       { version: 2 },
       { cluster: "mainnet" },
@@ -216,28 +174,21 @@ describe("Devnet policy and private keys", () => {
       { deployer: PublicKey.default.toBase58() },
       { config: PublicKey.default.toBase58() },
       { assets: [] },
+      { reuseExistingAssets: false },
     ])
       expect(() =>
-        validatePlanIdentity(
-          { ...plan(), ...change } as DeploymentPlan,
-          owner.publicKey,
-        ),
+        validatePlanIdentity({ ...plan(), ...change } as DeploymentPlan, owner.publicKey),
       ).toThrow("identity differs");
   });
 });
 
 describe("executable and authority read-back", () => {
   test("public uploads use validator-direct transport; RPC remains explicitly selectable", () => {
-    expect(uploadTransport(DEVNET_RPC)).toEqual([
-      "--use-tpu-client",
-      "--use-quic",
-    ]);
+    expect(uploadTransport(DEVNET_RPC)).toEqual(["--use-tpu-client", "--use-quic"]);
     expect(uploadTransport("http://127.0.0.1:8899")).toEqual(["--use-rpc"]);
     expect(uploadTransport(DEVNET_RPC, "rpc")).toEqual(["--use-rpc"]);
     expect(uploadTransport(DEVNET_RPC, "rpc-paced")).toEqual(["--use-rpc"]);
-    expect(() => uploadTransport(DEVNET_RPC, "invalid")).toThrow(
-      "tpu, rpc or rpc-paced",
-    );
+    expect(() => uploadTransport(DEVNET_RPC, "invalid")).toThrow("tpu, rpc or rpc-paced");
   });
   test("paced writes use canonical loader encoding, bounded offsets and packet size", () => {
     const buffer = Keypair.generate().publicKey,
@@ -262,13 +213,9 @@ describe("executable and authority read-back", () => {
     tx.sign([owner]);
     expect(tx.serialize().length).toBeLessThanOrEqual(1232);
     for (const offset of [-1, 0.1, 2 ** 32, NaN])
-      expect(() => bufferWrite(buffer, owner.publicKey, offset, bytes)).toThrow(
-        "range",
-      );
+      expect(() => bufferWrite(buffer, owner.publicKey, offset, bytes)).toThrow("range");
     for (const length of [0, 901])
-      expect(() =>
-        bufferWrite(buffer, owner.publicKey, 0, Buffer.alloc(length)),
-      ).toThrow("range");
+      expect(() => bufferWrite(buffer, owner.publicKey, 0, Buffer.alloc(length))).toThrow("range");
   });
   test("paced resume compares all bytes including zero regions and final short chunk", () => {
     const artifact = Buffer.alloc(1801),
@@ -280,9 +227,7 @@ describe("executable and authority read-back", () => {
     expect(missingChunks(artifact, uploaded)).toEqual([0, 900, 1800]);
     artifact.copy(uploaded, 0, 0, 900);
     expect(missingChunks(artifact, uploaded)).toEqual([900, 1800]);
-    expect(() => missingChunks(artifact, Buffer.alloc(1800))).toThrow(
-      "length differs",
-    );
+    expect(() => missingChunks(artifact, Buffer.alloc(1800))).toThrow("length differs");
   });
   test("buffer rent credit requires exact loader, size, mutable state and authority", () => {
     const data = Buffer.alloc(137);
@@ -299,21 +244,17 @@ describe("executable and authority read-back", () => {
       { lamports: 0.5 },
       { lamports: Number.MAX_SAFE_INTEGER + 1 },
     ])
-      expect(() =>
-        verifyBuffer(account(data, bad), 100, owner.publicKey),
-      ).toThrow("buffer identity");
-    expect(() =>
-      verifyBuffer(account(data), 100, Keypair.generate().publicKey),
-    ).toThrow("authority");
-    data[4] = 0;
-    expect(() => verifyBuffer(account(data), 100, owner.publicKey)).toThrow(
+      expect(() => verifyBuffer(account(data, bad), 100, owner.publicKey)).toThrow(
+        "buffer identity",
+      );
+    expect(() => verifyBuffer(account(data), 100, Keypair.generate().publicKey)).toThrow(
       "authority",
     );
+    data[4] = 0;
+    expect(() => verifyBuffer(account(data), 100, owner.publicKey)).toThrow("authority");
     data[4] = 1;
     data[0] = 3;
-    expect(() => verifyBuffer(account(data), 100, owner.publicKey)).toThrow(
-      "identity",
-    );
+    expect(() => verifyBuffer(account(data), 100, owner.publicKey)).toThrow("identity");
   });
   test("checks loader and canonical program record", () => {
     expect(readProgram(null)).toBeNull();
@@ -328,9 +269,11 @@ describe("executable and authority read-back", () => {
       expect(() => readProgram(info)).toThrow("canonical");
   });
   test("accepts byte-exact owned executable with zero capacity padding", () => {
-    expect(
-      verifyProgramData(programData(), Buffer.from("ELF"), owner.publicKey),
-    ).toEqual({ slot: "12", bytes: 3, sha256: sha256("ELF") });
+    expect(verifyProgramData(programData(), Buffer.from("ELF"), owner.publicKey)).toEqual({
+      slot: "12",
+      bytes: 3,
+      sha256: sha256("ELF"),
+    });
   });
   test("refuses wrong authority, immutable, truncated, wrong owner and modified bytes", () => {
     const immutable = programData();
@@ -349,18 +292,12 @@ describe("executable and authority read-back", () => {
       { ...programData(), owner: SystemProgram.programId },
       programData(Buffer.from("BAD")),
     ])
-      expect(() =>
-        verifyProgramData(info, Buffer.from("ELF"), owner.publicKey),
-      ).toThrow();
+      expect(() => verifyProgramData(info, Buffer.from("ELF"), owner.publicKey)).toThrow();
+    expect(() => verifyProgramData(programData(), Buffer.alloc(20), owner.publicKey)).toThrow(
+      "differs",
+    );
     expect(() =>
-      verifyProgramData(programData(), Buffer.alloc(20), owner.publicKey),
-    ).toThrow("differs");
-    expect(() =>
-      verifyProgramData(
-        programData(),
-        Buffer.from("ELF"),
-        Keypair.generate().publicKey,
-      ),
+      verifyProgramData(programData(), Buffer.from("ELF"), Keypair.generate().publicKey),
     ).toThrow("authority");
   });
   test("cannot substitute a different ProgramData address", async () => {
@@ -382,9 +319,7 @@ describe("private durable deployment state", () => {
       path = join(directory, "mint.json");
     await expect(keyFile(path, false)).rejects.toThrow("missing");
     const first = await keyFile(path, true);
-    expect((await keyFile(path, true)).publicKey.equals(first.publicKey)).toBe(
-      true,
-    );
+    expect((await keyFile(path, true)).publicKey.equals(first.publicKey)).toBe(true);
     expect((await lstat(path)).mode & 0o777).toBe(0o600);
     await unlink(path);
     await rmdir(directory);
@@ -424,9 +359,7 @@ describe("private durable deployment state", () => {
     const directory = await temp();
     await expect(
       locked(directory, async () => {
-        await expect(locked(directory, async () => {})).rejects.toThrow(
-          "locked",
-        );
+        await expect(locked(directory, async () => {})).rejects.toThrow("locked");
         throw new Error("test failure");
       }),
     ).rejects.toThrow("test failure");
@@ -441,9 +374,7 @@ describe("private durable deployment state", () => {
         saved = path;
         expect((await lstat(path)).mode & 0o777).toBe(0o600);
         expect((await lstat(dirname(path))).mode & 0o777).toBe(0o700);
-        expect(
-          (await keyFile(path, false)).publicKey.equals(owner.publicKey),
-        ).toBe(true);
+        expect((await keyFile(path, false)).publicKey.equals(owner.publicKey)).toBe(true);
         if (fail) throw new Error("test failure");
         return 7;
       });
@@ -502,18 +433,12 @@ describe("fixture construction and transaction journal", () => {
     for (const spec of ASSETS) {
       const mint = spec.kind === "native" ? null : Keypair.generate();
       const built = await assetInstructions(ctx, spec, mint);
-      expect(built.asset.initialRaw).toBe(
-        rawAmount(spec.units, spec.decimals).toString(),
-      );
-      const program =
-        spec.kind === "token2022" ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+      expect(built.asset.initialRaw).toBe(rawAmount(spec.units, spec.decimals).toString());
+      const program = spec.kind === "token2022" ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
       expect(built.asset.program).toBe(program.toBase58());
       const ataInstruction = built.instructions.at(-2)!;
       if (mint) {
-        const decoded = decodeMintToCheckedInstruction(
-          built.instructions.at(-1)!,
-          program,
-        );
+        const decoded = decodeMintToCheckedInstruction(built.instructions.at(-1)!, program);
         expect(decoded.data.amount).toBe(BigInt(built.asset.initialRaw));
         expect(decoded.data.decimals).toBe(spec.decimals);
         expect(ataInstruction.data.length).toBe(0); // Never idempotent, so it cannot refill on retry.
@@ -532,9 +457,7 @@ describe("fixture construction and transaction journal", () => {
       tx.sign(mint ? [owner, mint] : [owner]);
       expect(tx.serialize().length).toBeLessThanOrEqual(1232);
     }
-    await expect(assetInstructions(ctx, ASSETS[0], null)).rejects.toThrow(
-      "Missing mock mint",
-    );
+    await expect(assetInstructions(ctx, ASSETS[0], null)).rejects.toThrow("Missing mock mint");
   });
   test("network guard and durable signed receipt precede any submission", async () => {
     const order: string[] = [];
@@ -573,13 +496,7 @@ describe("fixture construction and transaction journal", () => {
         lamports: 1,
       }),
     ]);
-    expect(order).toEqual([
-      "guard",
-      "submitting",
-      "send",
-      "submitted",
-      "finalized",
-    ]);
+    expect(order).toEqual(["guard", "submitting", "send", "submitted", "finalized"]);
     ctx.assertNetwork = async () => {
       throw new Error("wrong network");
     };
@@ -625,21 +542,11 @@ describe("fixture construction and transaction journal", () => {
         }),
         getBlockHeight: async () => (scenario === "unknown-live" ? 9 : 11),
       } as unknown as Connection;
-      const action = journalContext(
-        connection,
-        owner,
-        directory,
-        prepared,
-        async () => {},
-      );
+      const action = journalContext(connection, owner, directory, prepared, async () => {});
       if (["pending", "unknown-live"].includes(scenario))
         await expect(action).rejects.toThrow("pending");
-      else if (scenario === "expired-SOL")
-        await expect(action).rejects.toThrow("unknown history");
-      else
-        expect((await action).completed.has(step)).toBe(
-          scenario === "finalized",
-        );
+      else if (scenario === "expired-SOL") await expect(action).rejects.toThrow("unknown history");
+      else expect((await action).completed.has(step)).toBe(scenario === "finalized");
       await unlink(join(directory, "journal.json"));
       await rmdir(directory);
     });
@@ -651,13 +558,7 @@ describe("fixture construction and transaction journal", () => {
       events: [],
     });
     await expect(
-      journalContext(
-        {} as Connection,
-        owner,
-        directory,
-        plan(),
-        async () => {},
-      ),
+      journalContext({} as Connection, owner, directory, plan(), async () => {}),
     ).rejects.toThrow("different deployment");
     await unlink(join(directory, "journal.json"));
     await rmdir(directory);
@@ -699,16 +600,11 @@ describe("fixture construction and transaction journal", () => {
     expect(resumed.sufficient).toBe(true);
     connection.getAccountInfo = async (key) =>
       key.equals(buffer) ? account(data, { lamports: 9_000_000_000 }) : null;
-    expect(
-      (await fundingPlan(connection, prepared, buffer))
-        .conservativeRequiredLamports,
-    ).toBe("200000015");
-    connection.getAccountInfo = async (key) =>
-      key.equals(buffer)
-        ? account(data, { owner: SystemProgram.programId })
-        : null;
-    await expect(fundingPlan(connection, prepared, buffer)).rejects.toThrow(
-      "buffer identity",
+    expect((await fundingPlan(connection, prepared, buffer)).conservativeRequiredLamports).toBe(
+      "200000015",
     );
+    connection.getAccountInfo = async (key) =>
+      key.equals(buffer) ? account(data, { owner: SystemProgram.programId }) : null;
+    await expect(fundingPlan(connection, prepared, buffer)).rejects.toThrow("buffer identity");
   });
 });

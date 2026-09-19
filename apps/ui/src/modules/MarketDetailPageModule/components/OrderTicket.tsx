@@ -1,9 +1,12 @@
 "use client";
 
 import { formatTokenAmount } from "@conditional-stocks/domain";
+import { claimAddress, key } from "@conditional-stocks/solana-client";
 import { Repeat2Icon, WalletIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useUiStore } from "@/components/providers/UiStateProvider";
+import { protocolConfig } from "@/config/protocol";
 import {
   Accordion,
   AccordionContent,
@@ -44,6 +47,7 @@ import { marketPriceBound, quantityForSpend } from "@/lib/trading/entry";
 import type { MarketView } from "@/types/api";
 
 export function OrderTicket({ market }: { market: MarketView }) {
+  const router = useRouter();
   const t = useOrderTicket({ market });
   const quantityLabel = formatTokenAmount(BigInt(t.preview.quantityRaw), market.baseTokenDecimals);
   const prefill = useUiStore((s) => s.prefill);
@@ -117,25 +121,15 @@ export function OrderTicket({ market }: { market: MarketView }) {
           : "No payout (active claim only)";
   const prepared = t.preparation;
   const token = t.side === "buy" ? market.quoteToken : market.baseToken;
-  const position = positions.positions.find((p) => p.marketId === market.id);
-  const claim = position
-    ? t.side === "buy"
-      ? t.branch === "YES"
-        ? position.quoteYes
-        : position.quoteNo
-      : t.branch === "YES"
-        ? position.stockYes
-        : position.stockNo
+  const claimAsset = (t.side === "buy" ? 4 : 2) + (t.branch === "YES" ? 0 : 1);
+  const claimMint = String(claimAddress(key(market.id), claimAsset, key(protocolConfig.programId)));
+  const claim = positions.data?.owner === t.wallet.account
+    ? positions.data.balances[claimMint]?.creditBalances?.[market.id] ?? "0"
     : null;
   const wholeBalance = assets.balances.find((a) => a.token === token)?.balance;
   const available =
     t.funding === "whole"
-      ? wholeBalance
-        ? (
-            BigInt(wholeBalance.canonicalBalance) +
-            BigInt(wholeBalance.creditBalances?.[market.id] ?? "0")
-          ).toString()
-        : null
+      ? wholeBalance?.vaultAvailable ?? null
       : claim;
   const balanceError = t.funding === "whole" ? !assets.isDataFresh : !positions.isDataFresh;
   const maxQuantity = () =>
@@ -387,20 +381,19 @@ export function OrderTicket({ market }: { market: MarketView }) {
                         size="lg"
                         disabled={
                           t.busy ||
-                          (Boolean(t.wallet.account) &&
+                          (Boolean(t.wallet.account && t.permission?.active &&
                             (!prepared ||
                               t.reviewing ||
                               t.quoteExpired ||
-                              !prepared.funding.balanceSufficient ||
                               !t.preview.valid ||
                               !t.readiness.ready ||
-                              market.lifecycle !== "open"))
+                              market.lifecycle !== "open")))
                         }
                         onClick={() =>
                           !t.wallet.account
                             ? t.wallet.connect().catch(() => undefined)
-                            : prepared?.funding.approvalCall
-                              ? t.approve()
+                            : !t.permission?.active || (prepared && !prepared.funding.balanceSufficient)
+                              ? router.push("/portfolio")
                               : t.submit()
                         }
                       >
@@ -408,10 +401,12 @@ export function OrderTicket({ market }: { market: MarketView }) {
                           <Spinner />
                         ) : !t.wallet.account ? (
                           "Connect wallet"
-                        ) : prepared?.funding.approvalCall ? (
-                          "Fund order vault"
+                        ) : !t.permission?.active ? (
+                          "Enable trading"
+                        ) : prepared && !prepared.funding.balanceSufficient ? (
+                          "Deposit in Portfolio"
                         ) : (
-                          "Sign and place order"
+                          "Place order"
                         )}
                       </Button>
                       {t.reviewError && (
@@ -530,17 +525,9 @@ export function OrderTicket({ market }: { market: MarketView }) {
                 {!prepared.funding.balanceSufficient && (
                   <Alert variant="destructive">
                     <AlertDescription>
-                      Insufficient canonical funding for this reservation.
+                      Deposit the required amount in Portfolio before placing this order.
                     </AlertDescription>
                   </Alert>
-                )}
-                {BigInt(prepared.funding.transferFee ?? "0") > 0n && (
-                  <p className="text-sm text-warning">
-                    Issuer transfer fee: {prepared.funding.transferFee} raw funding-token units.
-                    Your wallet deposit is {prepared.funding.depositAmount} raw units, including
-                    this fee. Vault credit excludes the fee; withdrawal may incur another issuer
-                    fee.
-                  </p>
                 )}
               </>
             )}

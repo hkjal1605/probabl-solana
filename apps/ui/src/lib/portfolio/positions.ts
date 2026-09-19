@@ -53,16 +53,10 @@ export function conditionalPositionRows(
     }),
   );
 
-  const quoteMarkets = new Map<string, MarketView[]>();
-  for (const market of markets) {
-    const key = `${market.mapping.conditionId}:${market.quoteToken}`;
-    quoteMarkets.set(key, [...(quoteMarkets.get(key) ?? []), market]);
-  }
-  const quoteRows = [...quoteMarkets.entries()].flatMap(([claimKey, claimMarkets]) => {
-    const market = claimMarkets[0];
-    if (!market) return [];
-    const marketIds = new Set(claimMarkets.map((item) => item.id));
-    const position = positions.find((item) => marketIds.has(item.marketId));
+  // Even sibling markets for the same event have distinct quote-claim mints.
+  const quoteRows = markets.flatMap((market) => {
+    const marketIds = new Set([market.id]);
+    const position = positions.find((item) => item.marketId === market.id);
     return ([0, 1] as const).map((branch) => {
       const available = BigInt((branch === 0 ? position?.quoteYes : position?.quoteNo) ?? "0");
       const reserved = reservedClaims(orders, marketIds, branch, 0);
@@ -70,7 +64,7 @@ export function conditionalPositionRows(
         available,
         branch,
         decimals: market.quoteTokenDecimals,
-        key: `quote-${claimKey}-${branch}`,
+        key: `quote-${market.id}-${branch}`,
         kind: "quote" as const,
         market,
         reserved,

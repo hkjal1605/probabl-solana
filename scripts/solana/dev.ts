@@ -1,48 +1,12 @@
 /** Runs services with an isolated owned PostgreSQL cluster. Validator is started
  * separately so shutdown never stops a user's validator or touches another DB. */
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
+import { localSolanaDatabase } from "../../packages/db/src/solana/local";
 
 if (!process.env.SOLANA_CONFIG || !process.env.SOLANA_GENESIS_HASH)
   throw new Error("Run bootstrap, then bun --env-file=.local/solana.env scripts/solana/dev.ts");
-const existingDatabase = process.env.DATABASE_URL;
-if (existingDatabase) {
-  const parsed = new URL(existingDatabase);
-  if (
-    !["postgres:", "postgresql:"].includes(parsed.protocol) ||
-    !["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)
-  )
-    throw new Error("The dev runner accepts only an explicitly configured localhost database");
-}
-const directory = existingDatabase ? null : await mkdtemp(join(tmpdir(), "probabl-solana-dev-")),
-  data = directory ? join(directory, "postgres") : null;
-const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() }),
-  port = probe.port;
-await probe.stop(true);
-const command = (cmd: string, args: string[]) =>
-  new Promise<void>((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: "inherit" });
-    p.once("error", reject);
-    p.once("exit", (code) => (code === 0 ? resolve() : reject(new Error(cmd + " exited " + code))));
-  });
-if (data && directory) {
-  await command("initdb", ["-D", data, "-A", "trust", "-U", "probabl_dev"]);
-  await command("pg_ctl", [
-    "-D",
-    data,
-    "-l",
-    join(directory, "postgres.log"),
-    "-o",
-    "-h 127.0.0.1 -p " + port + " -k " + directory,
-    "start",
-  ]);
-}
-const environment = {
-  ...process.env,
-  DATABASE_URL: existingDatabase ?? "postgresql://probabl_dev@127.0.0.1:" + port + "/postgres",
-};
+const database = await localSolanaDatabase(process.env.DATABASE_URL);
+const environment = { ...process.env, DATABASE_URL: database.connectionString };
 const children: ChildProcess[] = [];
 let stopping = false;
 const terminate = (child: ChildProcess, signal: NodeJS.Signals) => {
@@ -74,32 +38,32 @@ const stop = async () => {
           }),
     ),
   );
-  if (data) {
-    await command("pg_ctl", ["-D", data, "-m", "fast", "stop"]);
-    console.info("Local database and logs remain recoverable at " + directory);
-  } else console.info("Externally managed local database left running and unchanged by shutdown");
+  await database.close();
 };
 process.once("SIGINT", () => void stop());
 process.once("SIGTERM", () => void stop());
-// Source reference-data tables get a full Solana deployment namespace.
-const migration = spawn(
-  process.execPath,
-  ["run", "--filter", "@conditional-stocks/db", "migrate"],
-  { stdio: "inherit", env: environment, detached: true },
-);
-children.push(migration);
-try {
-  await new Promise<void>((resolve, reject) => {
-    migration.once("error", reject);
-    migration.once("exit", (code) =>
-      code === 0 ? resolve() : reject(new Error("Reference database migration failed")),
-    );
+// Schema operations are owned by packages/db, before runtime services start.
+for (const script of ["migrate", "migrate:solana"]) {
+  const migration = spawn(process.execPath, ["run", "--filter", "@conditional-stocks/db", script], {
+    stdio: "inherit",
+    env: environment,
+    detached: true,
   });
-} catch (error) {
-  await stop();
-  throw error;
+  children.push(migration);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      migration.once("error", reject);
+      migration.once("exit", (code) =>
+        code === 0 ? resolve() : reject(new Error(script + " failed")),
+      );
+    });
+  } catch (error) {
+    await stop();
+    throw error;
+  }
+  children.splice(children.indexOf(migration), 1);
+  if (stopping) process.exit(1);
 }
-children.splice(children.indexOf(migration), 1);
 if (stopping) process.exit(1);
 for (const [name, args] of [
   ["indexer", ["services/solana-indexer/src/main.ts"]],

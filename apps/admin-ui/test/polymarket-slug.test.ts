@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { normalizeGammaMarket } from "@conditional-stocks/market-data";
 import { NextRequest } from "next/server";
-import { POST } from "../src/app/api/gateway/[...path]/route";
+import { POST } from "../src/app/api/solana/[...path]/route";
 import { fetchMarketMetadata } from "../src/lib/admin-api";
 import { parseMarketSlug } from "../src/lib/polymarket-slug";
 
@@ -38,7 +38,7 @@ afterEach(() => {
 function request(body: unknown = { marketSlug: slug }, authorization = "Bearer test-session") {
   delete process.env.API_URL;
   return POST(
-    new NextRequest(`http://localhost:3002/api/gateway/${path.join("/")}`, {
+    new NextRequest(`http://localhost:3002/api/solana/${path.join("/")}`, {
       method: "POST",
       headers: { authorization, "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -73,11 +73,11 @@ test("slugs are trimmed and bounded; URLs, traversal and ambiguous input are rej
     expect(() => parseMarketSlug(value)).toThrow("market slug");
 });
 
-test("both forms' shared client sends a slug and operator session to the same-origin gateway", async () => {
+test("both forms' shared client sends a slug and operator session to the Solana API proxy", async () => {
   let calls = 0;
   globalThis.fetch = (async (url, init) => {
     calls++;
-    expect(String(url)).toBe(`/api/gateway/${path.join("/")}`);
+    expect(String(url)).toBe(`/api/solana/${path.join("/")}`);
     expect(JSON.parse(String(init?.body))).toEqual({ marketSlug: slug });
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer test-session");
     expect(init?.method).toBe("POST");
@@ -89,7 +89,7 @@ test("both forms' shared client sends a slug and operator session to the same-or
   expect(calls).toBe(1);
 });
 
-test("gateway resolves the exact slug, forwards only its canonical ID, and returns the saved snapshot", async () => {
+test("Solana API proxy resolves the exact slug and returns the saved snapshot", async () => {
   const calls: string[] = [];
   globalThis.fetch = (async (url, init) => {
     calls.push(String(url));
@@ -140,7 +140,7 @@ test("missing sessions and malformed/ambiguous request bodies fail before any so
     { marketSlug: "a".repeat(3000) },
   ])
     expect((await request(body)).status).toBe(400);
-  const malformed = new NextRequest(`http://localhost/api/gateway/${path.join("/")}`, {
+  const malformed = new NextRequest(`http://localhost/api/solana/${path.join("/")}`, {
     method: "POST",
     headers: { authorization: "Bearer test" },
     body: "{invalid",

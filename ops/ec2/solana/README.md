@@ -3,10 +3,8 @@
 Dedicated host: `ubuntu@ec2-57-183-26-209.ap-northeast-1.compute.amazonaws.com`.
 Checkout: `/home/ubuntu/probabl-solana`. HTTPS origin: `https://api-solana.probabl.trade`.
 Cloudflare DNS-only A record: `api-solana.probabl.trade` → `57.183.26.209`, TTL 300.
-This directory is the **Solana** deployment. The sibling `ops/ec2/` ecosystem,
-environment staging, and HTTPS ingress describe the previous EVM deployment;
-do not run those against this server. The runtime bootstrap and bounded logging
-assets in that directory are deliberately reused.
+This directory owns the Solana deployment. Shared logging and systemd assets
+remain in the parent `ops/ec2/` directory.
 
 ## Services
 
@@ -18,8 +16,8 @@ assets in that directory are deliberately reused.
 
 All three run as `ubuntu`, using Bun in single-instance PM2 fork mode. Redis runs
 as a private system service for the API's 60-second probability cache; see
-[probability caching](../../../docs/runbooks/probability-cache.md). No EVM indexer,
-matching daemon, settlement relayer, frontend, or wallet signer is needed.
+[probability caching](../../../docs/runbooks/probability-cache.md). No matching
+daemon, settlement relayer, frontend, or wallet signer is needed.
 The API and indexer share the public HTTPS origin: Nginx routes `/v1/*`
 to the API and explicit read-only projection paths to the indexer. Public health
 paths are `/health`, `/ready`, `/indexer-health`, `/polymarket-health`.
@@ -93,8 +91,7 @@ curl -fsS http://127.0.0.1:42069/reconciliation
 After reviewing/pulling a release, run `bun install --frozen-lockfile`, apply
 any explicitly required migrations with temporary administrator access, then
 `pm2 startOrRestart ops/ec2/solana/ecosystem.config.cjs` and `pm2 save`.
-Re-run the smoke checks. Do not run the legacy EVM supervision script or
-`solana:dev` against this shared RDS database.
+Re-run the smoke checks. Do not run `solana:dev` against this shared RDS database.
 
 `pm2-ubuntu` and Nginx are enabled at boot. The PM2 systemd cgroup has a 1200 MiB
 memory-high threshold and 1500 MiB maximum on this 2 GiB host. Each application
@@ -179,7 +176,7 @@ The API's public PM2 configuration sets `EVIDENCE_PUBLIC_BASE_URL` to
 Reference: [Cloudflare DNS API](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/create/),
 [Certbot webroot and renewal documentation](https://eff-certbot.readthedocs.io/en/stable/using.html#webroot).
 
-## Deployment verification: 2026-09-13
+## Deployment verification: 2026-09-19
 
 Application checkout: `22b5d98`, plus the new Solana deployment assets transferred
 from the operator checkout. Ubuntu 26.04 x86_64; Node 24.21.0; Bun 1.3.14;
@@ -188,8 +185,8 @@ certificate-verified TLS 1.3, with the application namespace tied to:
 
 ```text
 genesis: EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG
-program: CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3
-config:  A7t71Mf3PbBuvD8jKXCYQxd9oxrf2woLf3kWszT14mxe
+program: 8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg
+config:  6buYkVtSJjaoozCDsPFYrPhp5g1q1oLg2eLp7FpsZ1tF
 ```
 
 Public health/readiness, native projection routes, private-route denial and
@@ -212,3 +209,28 @@ This is still a devnet deployment, not approval for production use.
 The public Solana devnet RPC is rate-limited; configure a suitable
 private/archival RPC if load or retention requires it, without bypassing the
 indexer's fail-closed history/readiness checks.
+
+## Fresh program cutover
+
+The fresh-deployment cutover is intentionally fail-closed. Stop every runtime
+before resetting storage, switch the reviewed public program identifiers without
+touching provider/database credentials, migrate all three isolated schemas, grant
+the API read-only access to the indexer's published snapshot, and only then start
+the supervised services:
+
+```bash
+cd /home/ubuntu/probabl-solana
+pm2 stop probabl-sol-api probabl-sol-indexer probabl-sol-polymarket
+bun ops/ec2/solana/update-deployment.ts --execute
+bun --env-file=.local/ec2/env/api.env packages/db/scripts/migrate-solana.ts
+bun --env-file=.local/ec2/env/indexer.env packages/db/scripts/migrate-solana.ts
+bun --env-file=.local/ec2/env/polymarket.env packages/db/scripts/migrate-polymarket.ts
+bun ops/ec2/solana/grant-indexed-reads.ts
+pm2 startOrRestart ops/ec2/solana/ecosystem.config.cjs --update-env
+pm2 save
+```
+
+The destructive schema reset is performed separately with the guarded
+`packages/db/scripts/reset-devnet.ts --execute` command and an administrator
+connection. It refuses every host, database, user, and TLS mode except the
+reviewed Devnet RDS target.

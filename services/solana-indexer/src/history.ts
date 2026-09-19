@@ -1,12 +1,13 @@
 import { Buffer } from "buffer";
 import { type ConfirmedSignatureInfo, type VersionedTransactionResponse } from "@solana/web3.js";
-import { type Pool } from "pg";
+import type { SolanaDatabase } from "@conditional-stocks/db/solana";
 import { SolanaClient, coder, BN, PublicKey } from "@conditional-stocks/solana-client";
+import type { Snapshot } from "./projection";
 
 export interface HistoricalEvent {
   name: string;
   index: number;
-  market: string;
+  market: string | null;
   data: Record<string, unknown>;
 }
 /** Timestamp metadata is derived only from finalized on-chain creation events. */
@@ -23,6 +24,7 @@ export function creationTimes(rows: { market: string; block_time: string }[]) {
 function jsonValue(value: unknown): unknown {
   if (BN.isBN(value)) return value.toString();
   if (value instanceof PublicKey) return value.toBase58();
+  if (value instanceof Uint8Array) return Array.from(value);
   if (Array.isArray(value)) return value.map(jsonValue);
   if (value && typeof value === "object")
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, jsonValue(v)]));
@@ -83,44 +85,55 @@ export function decodeHistory(
     const event = coder.events.decode(encoded);
     if (!event) throw new Error("Unknown native event schema");
     const data = jsonValue(event.data) as Record<string, unknown>;
-    if (typeof data.market !== "string") throw new Error("Protocol event has no market");
-    events.push({ name: event.name, index, market: data.market, data });
+    const global = [
+      "PoolChange",
+      "DelegateApproved",
+      "DelegateRevoked",
+      "DelegatesRevoked",
+    ].includes(event.name);
+    if (!global && typeof data.market !== "string") throw new Error("Protocol event has no market");
+    events.push({
+      name: event.name,
+      index,
+      market:
+        typeof data.market === "string" && data.market !== PublicKey.default.toBase58()
+          ? data.market
+          : null,
+      data,
+    });
   }
   return { initialized, events };
 }
 
-export async function initializeHistory(db: Pool) {
-  await db.query(`CREATE TABLE IF NOT EXISTS solana_history_cursors (
-    domain text PRIMARY KEY, signature text NOT NULL, slot bigint NOT NULL, snapshot_slot bigint NOT NULL)`);
-  await db.query(`CREATE TABLE IF NOT EXISTS solana_events (
-    domain text NOT NULL, signature text NOT NULL, event_index integer NOT NULL,
-    slot bigint NOT NULL, block_time bigint NOT NULL, name text NOT NULL, market text NOT NULL, data jsonb NOT NULL,
-    PRIMARY KEY(domain, signature, event_index))`);
-  await db.query(
-    `CREATE INDEX IF NOT EXISTS solana_events_market ON solana_events(domain, market, slot DESC)`,
-  );
+/** Program-address history includes every instruction (pool transfers and
+ * cancellations need not reference config). Isolate deployments using canonical
+ * immutable account identities from the same complete program snapshot. */
+export function eventInDeployment(
+  event: HistoricalEvent,
+  client: Pick<SolanaClient, "config">,
+  s: Snapshot,
+) {
+  if (event.name === "PoolChange") return s.pools.has(String(event.data.pool));
+  if (event.name === "DelegateRevoked")
+    return s.delegations?.has(String(event.data.delegation)) ?? false;
+  if (event.name === "DelegateApproved" || event.name === "DelegatesRevoked")
+    return event.data.config === client.config.toBase58();
+  return event.market !== null && s.markets.has(event.market);
 }
 
 /** Finalized-only replay, paginated to a verified checkpoint (or the deployment's
  * initialization). Events and checkpoint commit together. An archival RPC is
  * required after its history ages out; we never silently skip unavailable data. */
 export async function replayHistory(
-  db: Pool,
+  db: SolanaDatabase,
   client: SolanaClient,
   domain: string,
   snapshotSlot: number,
+  deployment: Snapshot,
 ) {
-  const tx = await db.connect();
-  try {
-    await tx.query("BEGIN");
-    await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", ["history:" + domain]);
-    const saved = await tx.query<{ signature: string; slot: string; snapshot_slot: string }>(
-      "SELECT * FROM solana_history_cursors WHERE domain=$1",
-      [domain],
-    );
-    const cursor = saved.rows[0];
+  return db.locked("history:" + domain, async (tx) => {
+    const cursor = await tx.historyCursor(domain);
     if (cursor && BigInt(cursor.snapshot_slot) > BigInt(snapshotSlot)) {
-      await tx.query("COMMIT");
       return;
     }
     if (
@@ -135,7 +148,7 @@ export async function replayHistory(
       reached = false;
     while (!reached) {
       const page = await client.connection.getSignaturesForAddress(
-        client.config,
+        client.program,
         { ...(before ? { before } : {}), limit: 1000 },
         "finalized",
       );
@@ -169,21 +182,18 @@ export async function replayHistory(
       const decoded = decodeHistory(client, response);
       initialized ||= decoded.initialized;
       for (const event of decoded.events) {
+        if (!eventInDeployment(event, client, deployment)) continue;
         if (response.blockTime === null)
           throw new Error("Transaction timestamp unavailable: " + row.signature);
-        await tx.query(
-          `INSERT INTO solana_events VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb) ON CONFLICT DO NOTHING`,
-          [
-            domain,
-            row.signature,
-            event.index,
-            row.slot,
-            response.blockTime,
-            event.name,
-            event.market,
-            JSON.stringify(event.data),
-          ],
-        );
+        await tx.putEvent(domain, {
+          signature: row.signature,
+          event_index: event.index,
+          slot: row.slot,
+          block_time: response.blockTime!,
+          name: event.name,
+          market: event.market,
+          data: event.data,
+        });
       }
     }
     if (!initialized)
@@ -192,16 +202,10 @@ export async function replayHistory(
       );
     const latest = signatures[0] ?? cursor;
     if (!latest) throw new Error("Deployment has no finalized history");
-    await tx.query(
-      `INSERT INTO solana_history_cursors VALUES($1,$2,$3,$4)
-      ON CONFLICT(domain) DO UPDATE SET signature=EXCLUDED.signature,slot=EXCLUDED.slot,snapshot_slot=EXCLUDED.snapshot_slot`,
-      [domain, latest.signature, latest.slot, snapshotSlot],
-    );
-    await tx.query("COMMIT");
-  } catch (error) {
-    await tx.query("ROLLBACK");
-    throw error;
-  } finally {
-    tx.release();
-  }
+    await tx.putHistoryCursor(domain, {
+      signature: latest.signature,
+      slot: String(latest.slot),
+      snapshot_slot: String(snapshotSlot),
+    });
+  });
 }

@@ -145,7 +145,7 @@ describe("shared structured logger", () => {
     expect(build.success).toBe(true);
     const code = await build.outputs[0]?.text();
     expect(code).toBeDefined();
-    for (const forbidden of ["bun:sqlite", "node:", "ponder", 'from "hono"'])
+    for (const forbidden of ["bun:sqlite", "node:", 'from "hono"'])
       expect(code).not.toContain(forbidden);
   });
 });

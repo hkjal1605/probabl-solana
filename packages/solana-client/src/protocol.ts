@@ -11,7 +11,7 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import idlJson from "./idl.json";
 
 export { BN, PublicKey, SystemProgram, TOKEN_PROGRAM_ID };
-export const PROGRAM_ID = new PublicKey("CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3");
+export const PROGRAM_ID = new PublicKey("8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg");
 export const coder = new BorshCoder(idlJson as Idl);
 export const U64_MAX = (1n << 64n) - 1n;
 export const U128_MAX = (1n << 128n) - 1n;
@@ -40,6 +40,19 @@ export function bytes32(value: string | Uint8Array): Buffer {
 export const hex = (value: Uint8Array | number[]): `0x${string}` =>
   `0x${Buffer.from(value).toString("hex")}`;
 export const digest = (value: string) => sha256(new TextEncoder().encode(value));
+const NONCE_BOUND_SALT = Buffer.from("PRBLOv02");
+/** Random identity with a permanently bound nonce, enabling safe rent recovery. */
+export function orderSalt(nonce: bigint, entropy: Uint8Array): `0x${string}` {
+  if (nonce < 0n || nonce > U64_MAX || entropy.length !== 32) throw new Error("Invalid order salt inputs");
+  const salt = Buffer.from(entropy);
+  NONCE_BOUND_SALT.copy(salt);
+  salt.writeBigUInt64LE(nonce, 8);
+  return hex(salt);
+}
+export function boundOrderNonce(salt: string | Uint8Array): bigint | null {
+  const bytes = bytes32(salt);
+  return bytes.subarray(0, 8).equals(NONCE_BOUND_SALT) ? bytes.readBigUInt64LE(8) : null;
+}
 export const pda = (seeds: (Uint8Array | Buffer)[], program = PROGRAM_ID) =>
   PublicKey.findProgramAddressSync(seeds, program)[0];
 export const configAddress = (admin: PublicKey, program = PROGRAM_ID) =>
@@ -50,6 +63,13 @@ export const walletAddress = (market: PublicKey, owner: PublicKey, program = PRO
   pda([Buffer.from("wallet"), market.toBuffer(), owner.toBuffer()], program);
 export const traderAddress = (config: PublicKey, owner: PublicKey, program = PROGRAM_ID) =>
   pda([Buffer.from("trader"), config.toBuffer(), owner.toBuffer()], program);
+export const delegationAddress = (config: PublicKey, owner: PublicKey, delegate: PublicKey, program = PROGRAM_ID) =>
+  pda([Buffer.from("delegate"), config.toBuffer(), owner.toBuffer(), delegate.toBuffer()], program);
+export interface TradingDelegateAccount {
+  config: PublicKey; owner: PublicKey; delegate: PublicKey; market: PublicKey;
+  epoch: BN; expires_at: BN; max_order_quote: BN; remaining_quote: BN;
+  max_fee_bps: number; permissions: number; revoked: boolean; bump: number;
+}
 export const orderAddress = (
   market: PublicKey,
   owner: PublicKey,
@@ -60,6 +80,14 @@ export const claimAddress = (market: PublicKey, asset: number, program = PROGRAM
   pda([Buffer.from("claim"), market.toBuffer(), Buffer.from([asset])], program);
 export const vaultAddress = (market: PublicKey, asset: number, program = PROGRAM_ID) =>
   pda([Buffer.from("vault"), market.toBuffer(), Buffer.from([asset])], program);
+export const poolAddress = (config: PublicKey, mint: PublicKey, program = PROGRAM_ID) =>
+  pda([Buffer.from("pool"), config.toBuffer(), mint.toBuffer()], program);
+export const poolVaultAddress = (pool: PublicKey, program = PROGRAM_ID) =>
+  pda([Buffer.from("pool-vault"), pool.toBuffer()], program);
+export const assetCreditAddress = (pool: PublicKey, owner: PublicKey, program = PROGRAM_ID) =>
+  pda([Buffer.from("asset-credit"), pool.toBuffer(), owner.toBuffer()], program);
+export interface AssetPoolAccount { config: PublicKey; mint: PublicKey; token_program: PublicKey; liability: BN; decimals: number; bump: number }
+export interface AssetCreditAccount { pool: PublicKey; owner: PublicKey; available: BN; bump: number }
 
 export interface Roles {
   market_admin: PublicKey;
@@ -127,6 +155,7 @@ export interface TraderAccount {
   config: PublicKey;
   owner: PublicKey;
   minimum_nonce: BN;
+  delegation_epoch: BN;
   bump: number;
 }
 export interface OrderTerms {
@@ -145,6 +174,7 @@ export interface OrderTerms {
 export interface OrderAccount {
   market: PublicKey;
   owner: PublicKey;
+  delegate: PublicKey;
   terms: OrderTerms;
   remaining: BN;
   filled: BN;
@@ -157,6 +187,8 @@ export interface OrderAccount {
 }
 export interface OrderWire {
   maker: string;
+  /** Signing key only; maker remains the beneficial owner of funds/positions. */
+  delegate?: string;
   recipient: string;
   marketId: string;
   salt: string;
@@ -187,12 +219,20 @@ export function parseOrder(value: unknown): OrderWire {
     throw new Error("Zero order size or price");
   unsigned(o.expiry, (1n << 63n) - 1n);
   unsigned(o.nonce);
+  const bound = boundOrderNonce(o.salt);
+  if (bound !== null && bound !== BigInt(o.nonce)) throw new Error("Order salt nonce differs");
+  if (o.delegate !== undefined) {
+    address(o.delegate);
+    if (o.delegate === o.maker || o.recipient !== o.maker || bound !== BigInt(o.nonce))
+      throw new Error("Invalid delegated order owner, recipient or nonce-bound salt");
+  }
   for (const field of [o.branch, o.side, o.fundingKind, o.tif])
     if (field !== 0 && field !== 1) throw new Error("Invalid order enum");
   if (!Number.isInteger(o.maxFeeBps) || o.maxFeeBps < 0 || o.maxFeeBps > 1_000)
     throw new Error("Invalid fee cap");
   return {
     maker: o.maker,
+    ...(o.delegate === undefined ? {} : {delegate: o.delegate}),
     recipient: o.recipient,
     marketId: o.marketId,
     salt: o.salt,
@@ -227,6 +267,7 @@ export function orderWire(order: OrderAccount): OrderWire {
   const t = order.terms;
   return {
     maker: order.owner.toBase58(),
+    ...(order.delegate.equals(PublicKey.default) ? {} : {delegate: order.delegate.toBase58()}),
     recipient: t.recipient.toBase58(),
     marketId: order.market.toBase58(),
     salt: hex(t.salt),
@@ -290,9 +331,10 @@ export function instruction(
   if (!spec) throw new Error(`Unknown instruction ${name}`);
   const keys = spec.accounts.map((item) => {
     if ("accounts" in item) throw new Error("Nested IDL accounts are not supported");
-    const pubkey = accounts[item.name] ?? (item.address ? key(item.address) : undefined);
+    const pubkey = accounts[item.name] ?? (item.address ? key(item.address) : item.optional ? program : undefined);
     if (!pubkey) throw new Error(`Missing account ${item.name}`);
-    return { pubkey, isSigner: item.signer ?? false, isWritable: item.writable ?? false };
+    const absent = item.optional && pubkey.equals(program);
+    return { pubkey, isSigner: absent ? false : item.signer ?? false, isWritable: absent ? false : item.writable ?? false };
   });
   return new TransactionInstruction({
     programId: program,

@@ -78,7 +78,7 @@ Retry-After. Run one API process or coordinate this cache/limiter before scaling
 
 ## Verification
 
-`bun test apps/api/test/jupiter.test.ts apps/ui/test/spot-prices.test.ts`
+`bun test apps/api/test/solana/jupiter.test.ts apps/ui/test/spot-prices.test.ts`
 
 The tests use mocked transport, not live credentials, databases or transactions.
 Historical spot charts remain unavailable: Price V3 returns current references,

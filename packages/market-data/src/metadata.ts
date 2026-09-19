@@ -1,8 +1,8 @@
-import { type Hex, isHex } from "viem";
-
 import {
+  type Hex,
   decimalInteger,
   hashCanonical,
+  isHex32,
   MarketDataError,
   object,
   requiredString,
@@ -87,7 +87,7 @@ export const polymarketImageUrl = (input: unknown): string | null => {
 export const normalizeGammaMarket = (input: unknown): NormalizedPolymarketMarket => {
   const raw = object(input, "Gamma market");
   const conditionId = requiredString(raw.conditionId, "conditionId", 66).toLowerCase();
-  if (!isHex(conditionId, { strict: true }) || conditionId.length !== 66) {
+  if (!isHex32(conditionId)) {
     throw new MarketDataError("INVALID_METADATA", "conditionId must be bytes32");
   }
   if (raw.negRisk === true) {

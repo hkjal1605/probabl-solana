@@ -1,8 +1,8 @@
-# probabl — Solana migration
+# probabl — Solana
 
-The original public and admin interfaces have been copied into a native Solana implementation. Localnet trading, custody, resolution, indexing and application rehearsals run against a compiled Rust program.
+Trading, custody, resolution and indexing run on Solana. The public and admin interfaces use the native API.
 
-**Work in progress, not production-approved.** The full file-by-file source review, feature-parity work and 100% contract coverage are not complete. See [MIGRATION.md](MIGRATION.md) for measured results and remaining work. Existing EVM audits do not cover this port.
+**Work in progress, not production-approved.** Full program coverage and an independent security review remain outstanding. See [SECURITY.md](SECURITY.md) for release gates.
 
 Classic SPL and selected Token-2022 collateral are supported, including fee-bearing
 base/quote tokens with net accounting and signed receipt limits. This does **not**
@@ -24,7 +24,7 @@ In a separate terminal, start a local validator with an unused ledger directory:
 solana-test-validator --ledger .local/validator \
   --bind-address 127.0.0.1 --rpc-port 8899 \
   --limit-ledger-size 1000000 \
-  --bpf-program CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3 target/deploy/conditional_stocks.so
+  --bpf-program 8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg target/deploy/conditional_stocks.so
 ```
 
 Then:
@@ -42,7 +42,7 @@ The dev runner prints its PostgreSQL URL and retains its owned database/log dire
 
 For a browser wallet, select the matching localhost Solana RPC. The program requires actual SPL funding; a newly connected wallet has no demo stock or quote tokens. Generated test wallets are used by automated rehearsals and are not imported into your browser wallet.
 
-Polymarket metadata/probability ingestion is optional in the mock demo. Set a new `POLYMARKET_INTERNAL_TOKEN` and `POLYMARKET_INGESTOR_URL=http://127.0.0.1:42073` to start the copied reference-data service. Real external market mappings and evidence must be reviewed before listing.
+Polymarket metadata/probability ingestion is optional in the mock demo. Set a new `POLYMARKET_INTERNAL_TOKEN` and `POLYMARKET_INGESTOR_URL=http://127.0.0.1:42073` to start the reference-data service. Real external market mappings and evidence must be reviewed before listing.
 
 ## Devnet staging
 
@@ -57,7 +57,7 @@ sufficient Devnet SOL and an explicit `devnet:deploy --execute` command.
 ```sh
 bun run typecheck
 bun run test                     # fast TS + host Rust tests
-bun run test:references          # copied reference service + isolated PostgreSQL
+bun run test:references          # Polymarket service; isolated PostgreSQL required
 bun run test:solana              # actual SBF tests; running localhost validator required
 bun run test:coverage            # host-instrumented Rust report, NOT SBF coverage
 bun run build:ui
@@ -75,10 +75,10 @@ With a localhost validator and PostgreSQL running, set `TEST_DATABASE_URL` to an
 | Rust program | `programs/conditional-stocks` |
 | Integer accounting and property tests | `crates/protocol-core` |
 | Native SDK, planner, evidence, instruction validation | `packages/solana-client` |
-| Native API and admin workflow | `apps/api/src/solana.ts`, `solana-admin.ts` |
+| Native API and admin workflow | `apps/api/src/solana.ts`, `apps/api/src/solana/admin/routes.ts` |
 | Finalized projections, durable replay, reconciliation | `services/solana-indexer` |
-| Preserved public/admin UI and design system | `apps/ui`, `apps/admin-ui`, `packages/ui` |
+| Public/admin UI and design system | `apps/ui`, `apps/admin-ui` |
 | Reused metadata/probability and relational storage | `packages/market-data`, `packages/db`, `services/polymarket-ingestor` |
 | Local setup | `scripts/solana` |
 
-The copied Solidity contracts, EVM indexer/bindings, audit records and deployment scripts are retained as migration references, not used by the native runtime. The previous [README](docs/legacy/README.evm.md) and [security policy](docs/legacy/SECURITY.evm.md) are archived. Existing Cloudflare/RH/Anvil deployment commands are legacy and have not been validated for this Solana release.
+The repository contains only the Solana implementation and its external Polymarket data integration.

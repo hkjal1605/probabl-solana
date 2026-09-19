@@ -1,10 +1,7 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { Separator } from "@/components/ui/separator";
 export function SiteFooter() {
-  const path = usePathname();
-  if (path === "/") return null;
   return (
     <footer className="mt-auto">
       <Separator />

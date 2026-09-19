@@ -66,6 +66,7 @@ import {
   key,
 } from "../src/index.ts";
 import { initializeMarketVaults } from "../src/admin.ts";
+import { snapshot as programSnapshot } from "../../../services/solana-indexer/src/projection";
 import { reconcileVaults } from "../../../services/solana-indexer/src/reconcile.ts";
 import { assertMarketInvariants } from "./validator-invariants.ts";
 
@@ -577,7 +578,7 @@ describe.skipIf(!rpc)("compiled Token-2022 collateral custody", () => {
     );
     await connection.confirmTransaction(signature, "finalized");
     expect(
-      (await reconcileVaults(client, [market.toBase58()], 0)).checkedVaults,
+      (await reconcileVaults(client, await programSnapshot(client))).checkedVaults,
     ).toBe(6);
     expect(await balance(market, bob, 0)).toBe(0n);
     expect(await balance(market, alice, 1)).toBe(0n);

@@ -7,8 +7,9 @@ import {
   type VersionedTransactionResponse,
 } from "@solana/web3.js";
 import { SolanaClient, coder, BN } from "@conditional-stocks/solana-client";
-import { type Pool } from "pg";
-import { decodeHistory, replayHistory } from "../src/history.ts";
+import { solanaDatabase } from "@conditional-stocks/db/solana";
+import { decodeHistory, replayHistory as replay, eventInDeployment } from "../src/history.ts";
+import type { Snapshot } from "../src/projection";
 import idl from "../../../packages/solana-client/src/idl.json";
 
 const config = Keypair.generate().publicKey,
@@ -19,6 +20,13 @@ const client = new SolanaClient({
   config: config.toBase58(),
   genesisHash: Keypair.generate().publicKey.toBase58(),
 });
+const deployment = {
+  markets: new Map([[String(market), {}]]),
+  pools: new Map(),
+  delegations: new Map(),
+} as Snapshot;
+const replayHistory = (...args: [Parameters<typeof replay>[0], SolanaClient, string, number]) =>
+  replay(...args, deployment);
 function transaction(
   logs: string[] | null,
   initialize = false,
@@ -65,6 +73,35 @@ const invocation = (data?: string) => [
   ...(data ? [`Program data: ${data}`] : []),
   `Program ${client.program} success`,
 ];
+test("global pool and delegate events have no invented market and are deployment isolated", () => {
+  const pool = Keypair.generate().publicKey,
+    grant = Keypair.generate().publicKey;
+  const s = {
+    ...deployment,
+    pools: new Map([[String(pool), {}]]),
+    delegations: new Map([[String(grant), {}]]),
+  } as Snapshot;
+  for (const [name, data] of [
+    ["PoolChange", { pool, owner: actor, amount: new BN("18446744073709551615"), kind: 0 }],
+    ["DelegateRevoked", { delegation: grant, owner: actor }],
+    ["DelegatesRevoked", { config, owner: actor, epoch: new BN(1) }],
+  ] as const) {
+    const encoded = Buffer.concat([
+      Buffer.from(idl.events.find((e) => e.name === name)!.discriminator),
+      coder.types.encode(name, data),
+    ]).toString("base64");
+    const event = decodeHistory(client, transaction(invocation(encoded))).events[0]!;
+    expect(event.market).toBeNull();
+    expect(eventInDeployment(event, client, s)).toBe(true);
+    expect(
+      eventInDeployment(
+        event,
+        { config: Keypair.generate().publicKey },
+        { ...deployment, pools: new Map(), delegations: new Map() },
+      ),
+    ).toBe(false);
+  }
+});
 function eventData() {
   const event = coder.types.encode("Change", {
     market,
@@ -76,6 +113,21 @@ function eventData() {
   const discriminator = Buffer.from(idl.events.find((e) => e.name === "Change")!.discriminator);
   return Buffer.concat([discriminator, event]).toString("base64");
 }
+test("retirement event byte images survive JSON persistence and failed transactions are excluded", () => {
+  const bytes = Buffer.from(
+    Array.from({ length: coder.accounts.size("Order") }, (_, i) => i % 256),
+  );
+  const discriminator = Buffer.from(
+    idl.events.find((e) => e.name === "OrderRetired")!.discriminator,
+  );
+  const encoded = Buffer.concat([
+    discriminator,
+    coder.types.encode("OrderRetired", { market, account: actor, data: bytes }),
+  ]).toString("base64");
+  const decoded = decodeHistory(client, transaction(invocation(encoded)));
+  expect(JSON.parse(JSON.stringify(decoded.events[0]!.data)).data).toEqual([...bytes]);
+  expect(decodeHistory(client, transaction(invocation(encoded), false, true)).events).toEqual([]);
+});
 function database(cursor?: { signature: string; slot: string; snapshot_slot: string }) {
   const calls: { sql: string; args?: unknown[] }[] = [];
   let released = false;
@@ -95,7 +147,7 @@ function database(cursor?: { signature: string; slot: string; snapshot_slot: str
     },
   };
   return {
-    db: { connect: async () => connection } as unknown as Pool,
+    db: solanaDatabase({ connect: async () => connection } as any),
     calls,
     released: () => released,
   };
@@ -239,7 +291,7 @@ describe("finalized history integrity", () => {
     await replayHistory(db.db, source.client, "domain", 105);
     expect(
       db.calls.find((c) => c.sql.startsWith("INSERT INTO solana_history_cursors"))?.args,
-    ).toEqual(["domain", "old-pruned-signature", "2", 105]);
+    ).toEqual(["domain", "old-pruned-signature", "2", "105"]);
     expect(source.fetched).toEqual([]);
     expect(db.released()).toBe(true);
   });
@@ -264,7 +316,7 @@ describe("finalized history integrity", () => {
     expect(source.fetched).toEqual(["a", "b"]);
     expect(
       db.calls.find((c) => c.sql.startsWith("INSERT INTO solana_history_cursors"))?.args,
-    ).toEqual(["domain", "b", 100, 101]);
+    ).toEqual(["domain", "b", "100", "101"]);
   });
   test("first backfill must include the exact deployment initialization", async () => {
     const db = database(),

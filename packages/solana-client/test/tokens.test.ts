@@ -171,16 +171,20 @@ test("Token-2022 builders bind program, program-specific ATA and signed minimum"
     97n,
   );
   const decoded = coder.instruction.decode(ix.data)!;
-  expect(decoded.name).toBe("deposit_bounded");
+  const standalone = client.depositPool(owner, mint, 100n, TOKEN_2022_PROGRAM_ID, 97n);
+  expect(standalone.data.equals(ix.data)).toBe(true);
+  expect(standalone.keys).toEqual(ix.keys);
+  expect(standalone.keys.some(account => account.pubkey.equals(market))).toBe(false);
+  expect(decoded.name).toBe("deposit_pool");
   expect(
     (
       decoded.data as { minimum_credit: { toString(): string } }
     ).minimum_credit.toString(),
   ).toBe("97");
-  expect(ix.keys.at(-1)?.pubkey.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
+  expect(ix.keys.at(-2)?.pubkey.equals(TOKEN_2022_PROGRAM_ID)).toBe(true);
   expect(
-    ix.keys[4]?.pubkey.equals(
-      client.deposit(market, owner, mint, 0, 100n).keys[4]!.pubkey,
+    ix.keys[5]?.pubkey.equals(
+      client.deposit(market, owner, mint, 0, 100n).keys[5]!.pubkey,
     ),
   ).toBe(false);
   const withdrawal = client.withdraw(
@@ -194,9 +198,10 @@ test("Token-2022 builders bind program, program-specific ATA and signed minimum"
     97n,
   );
   expect(coder.instruction.decode(withdrawal[1]!.data)?.name).toBe(
-    "withdraw_bounded",
+    "withdraw_pool",
   );
   expect(unwrap(envelope(withdrawal))).toHaveLength(2);
+  expect(client.withdrawPool(owner, mint, 100n, owner, TOKEN_2022_PROGRAM_ID, 97n)).toEqual(withdrawal);
   for (const [asset, amount, minimum] of [
     [0, -1n, 1n],
     [0, 0n, 0n],

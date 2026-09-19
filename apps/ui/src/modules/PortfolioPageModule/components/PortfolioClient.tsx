@@ -16,9 +16,8 @@ import type { MarketView, PositionView } from "@/types/api";
 import { PortfolioEventCard } from "./PortfolioEventCard";
 import { PortfolioEventSkeleton } from "./PortfolioEventSkeleton";
 import { PortfolioTradeHistory } from "./PortfolioTradeHistory";
-
-const vaultAvailable = (creditBalances?: Record<string, string>) =>
-  Object.values(creditBalances ?? {}).reduce((sum, amount) => sum + BigInt(amount), 0n);
+import { PortfolioVault } from "./PortfolioVault";
+import { TradingPermissionCard } from "./TradingPermissionCard";
 
 const hasClaims = (position: PositionView) =>
   [position.stockYes, position.stockNo, position.quoteYes, position.quoteNo].some(
@@ -36,17 +35,17 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
   const activeOrders = ordersQuery.orders.filter((order) => order.status === "open");
   const balances = assetQuery.balances
     .map((asset) => {
-      const vault = vaultAvailable(asset.balance.creditBalances);
+      const vault = BigInt(asset.balance.vaultAvailable);
       const walletAmount = BigInt(asset.balance.canonicalBalance);
-      return { ...asset, vault, walletAmount, available: walletAmount + vault };
+      const reserved = BigInt(asset.balance.reserved);
+      return { ...asset, vault, walletAmount, reserved, available: vault };
     })
-    .filter((asset) => asset.available > 0n);
+    .filter((asset) => asset.available > 0n || asset.walletAmount > 0n || asset.reserved > 0n);
   const claims = positionsQuery.positions.filter(hasClaims);
   const valuesKnown =
-    balances.length > 0 &&
     assetQuery.isDataFresh &&
     marketQuery.isDataFresh &&
-    balances.every((asset) => asset.reference !== null);
+    balances.every((asset) => asset.available === 0n || asset.reference !== null);
   const total = valuesKnown
     ? balances.reduce(
         (sum, asset) =>
@@ -118,7 +117,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
               >
                 View claims
               </Button>
-              <Button size="lg" render={<Link href="/markets" />} nativeButton={false}>
+              <Button size="lg" render={<Link href="/" />} nativeButton={false}>
                 Explore markets
               </Button>
             </div>
@@ -152,7 +151,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                     {total === null ? "—" : `$${formatNumber(total, 2)}`}
                   </p>
                 )}
-                <p className="mt-2 text-xs text-muted-foreground">Whole assets · estimated value</p>
+                <p className="mt-2 text-xs text-muted-foreground">Available in vault · estimated value</p>
               </div>
               {assetQuery.isInitialError ? (
                 <DataError
@@ -173,10 +172,10 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                   ))}
                 </div>
               ) : balances.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No supported token balances yet.</p>
+                <p className="text-sm text-muted-foreground">Deposit tokens to start trading.</p>
               ) : (
                 <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-4 lg:grid-cols-7">
-                  {balances.map((asset) => (
+                  {balances.filter(asset => asset.available > 0n).map((asset) => (
                     <div key={asset.token} className="min-w-0">
                       <dt className="text-sm font-medium text-muted-foreground">{asset.symbol}</dt>
                       <dd className="mt-2 truncate text-lg font-medium tabular-nums">
@@ -190,6 +189,12 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
               )}
             </CardContent>
           </Card>
+
+          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <PortfolioVault assets={assetQuery.assets} balances={assetQuery.balances}
+              fresh={assetQuery.isDataFresh} refresh={assetQuery.refetch} />
+            <TradingPermissionCard />
+          </div>
 
           <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
             <section id="portfolio-events" className="flex min-w-0 flex-col gap-5">

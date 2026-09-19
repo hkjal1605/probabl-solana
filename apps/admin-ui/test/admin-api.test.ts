@@ -14,10 +14,10 @@ test("admin requests reject missing sessions and unsafe paths before a network c
     for (const path of [
       "https://example.test",
       "//example.test",
-      "/api/gateway/../admin",
-      "/api/gateway/https://example.test",
-      "/api/gateway/admin?redirect=1",
-      "/api/gateway/admin\\evil",
+      "/api/solana/../admin",
+      "/api/solana/https://example.test",
+      "/api/solana/admin?redirect=1",
+      "/api/solana/admin\\evil",
     ])
       await expect(requestJson(path)).rejects.toThrow("Invalid");
     expect(calls).toBe(0);

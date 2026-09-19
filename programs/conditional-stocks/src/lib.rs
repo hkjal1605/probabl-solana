@@ -1,18 +1,24 @@
 #![allow(ambiguous_glob_reexports)]
 use anchor_lang::prelude::*;
 
-declare_id!("CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3");
+declare_id!("8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg");
 
 pub mod custody;
+pub mod delegation;
 pub mod exchange;
 pub mod governance;
 pub mod invariants;
+pub mod maintenance;
+pub mod pool;
 pub mod state;
 pub mod token_policy;
 
 pub use custody::*;
+pub use delegation::*;
 pub use exchange::*;
 pub use governance::*;
+pub use maintenance::*;
+pub use pool::*;
 pub use state::*;
 
 #[program]
@@ -56,6 +62,26 @@ pub mod conditional_stocks {
     }
     pub fn initialize_asset(ctx: Context<InitializeAsset>, asset: u8) -> Result<()> {
         custody::initialize_asset(ctx, asset)
+    }
+    pub fn initialize_pool(ctx: Context<InitializePool>) -> Result<()> {
+        pool::initialize_pool(ctx)
+    }
+    pub fn initialize_credit(ctx: Context<InitializeCredit>) -> Result<()> {
+        pool::initialize_credit(ctx)
+    }
+    pub fn deposit_pool(
+        ctx: Context<PoolTransfer>,
+        amount: u64,
+        minimum_credit: u64,
+    ) -> Result<()> {
+        pool::deposit_pool(ctx, amount, minimum_credit)
+    }
+    pub fn withdraw_pool(
+        ctx: Context<PoolTransfer>,
+        amount: u64,
+        minimum_received: u64,
+    ) -> Result<()> {
+        pool::withdraw_pool(ctx, amount, minimum_received)
     }
     pub fn initialize_claim(ctx: Context<InitializeClaim>, asset: u8) -> Result<()> {
         custody::initialize_claim(ctx, asset)
@@ -108,14 +134,40 @@ pub mod conditional_stocks {
     pub fn invalidate_nonce(ctx: Context<InvalidateNonce>, minimum: u64) -> Result<()> {
         exchange::invalidate_nonce(ctx, minimum)
     }
+    pub fn approve_delegate(ctx: Context<ApproveDelegate>, limits: DelegateLimits) -> Result<()> {
+        delegation::approve_delegate(ctx, limits)
+    }
+    pub fn revoke_delegate(ctx: Context<RevokeDelegate>) -> Result<()> {
+        delegation::revoke_delegate(ctx)
+    }
+    pub fn revoke_all_delegates(ctx: Context<RevokeAllDelegates>) -> Result<()> {
+        delegation::revoke_all_delegates(ctx)
+    }
     pub fn cancel(ctx: Context<Cancel>) -> Result<()> {
         exchange::cancel(ctx)
+    }
+    pub fn retire_orders<'info>(
+        ctx: Context<'info, RetireOrders<'info>>,
+        order_count: u8,
+    ) -> Result<()> {
+        maintenance::retire_orders(ctx, order_count)
+    }
+    pub fn compact_market(ctx: Context<CompactMarket>) -> Result<()> {
+        maintenance::compact_market(ctx)
+    }
+    pub fn cancel_orders<'info>(
+        ctx: Context<'info, RetireOrders<'info>>,
+        order_count: u8,
+    ) -> Result<()> {
+        maintenance::cancel_orders(ctx, order_count)
     }
     pub fn place<'info>(
         ctx: Context<'info, Place<'info>>,
         terms: OrderTerms,
         plan: Plan,
+        participants: u8,
+        delegations: u8,
     ) -> Result<()> {
-        exchange::place(ctx, terms, plan)
+        exchange::place(ctx, terms, plan, participants, delegations)
     }
 }

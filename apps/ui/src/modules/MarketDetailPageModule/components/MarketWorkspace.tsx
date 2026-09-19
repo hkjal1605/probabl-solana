@@ -111,7 +111,7 @@ export function MarketWorkspace({
         ) : (
           <EmptyState>
             Market not found in the canonical indexer.
-            <Button variant="outline" render={<Link href="/markets" />} nativeButton={false}>
+            <Button variant="outline" render={<Link href="/" />} nativeButton={false}>
               Explore markets
             </Button>
           </EmptyState>

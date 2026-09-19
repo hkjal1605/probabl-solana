@@ -1,5 +1,4 @@
-import type { NormalizedPolymarketMarket } from "@conditional-stocks/market-data";
-import type { Hex } from "viem";
+import type { Hex, NormalizedPolymarketMarket } from "@conditional-stocks/market-data";
 export interface MetadataSnapshot {
   fetchedAtMs: string;
   normalized: NormalizedPolymarketMarket;

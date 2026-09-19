@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
-import { testDatabase } from "@conditional-stocks/db/testing";
+import { testDatabase } from "@conditional-stocks/db/polymarket/testing";
 import { conditionId } from "./helpers.ts";
 
 // A spawned process must exit naturally with an OPEN client socket: clearing an
 // interval in onClose alone is insufficient when Bun force-stops active sockets.
 test("open public WebSocket cannot retain timers, DB reads or process after SIGTERM", async () => {
   const fixture = await testDatabase();
+  await fixture.database.end();
   const child = Bun.spawn(
     ["bun", "--no-env-file", new URL("./fixtures/shutdown.ts", import.meta.url).pathname],
     {

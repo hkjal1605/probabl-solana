@@ -1,49 +1,49 @@
 import {
-  Connection,
-  Keypair,
-  PublicKey,
-  SystemProgram,
-  TransactionMessage,
-  VersionedTransaction,
-  type TransactionInstruction,
-} from "@solana/web3.js";
-import {
-  getAssociatedTokenAddressSync,
-  createAssociatedTokenAccountInstruction,
-  createInitializeMint2Instruction,
-  createMintToCheckedInstruction,
-  createSyncNativeInstruction,
-  ExtensionType,
-  getMintLen,
-  MINT_SIZE,
-  createInitializeMetadataPointerInstruction,
-  createInitializeTransferFeeConfigInstruction,
-  unpackAccount,
-  unpackMint,
-  getTransferFeeConfig,
-  getMetadataPointerState,
-  getTokenMetadata,
-  TYPE_SIZE,
-  LENGTH_SIZE,
-} from "@solana/spl-token";
-import { createInitializeInstruction, pack } from "@solana/spl-token-metadata";
-import {
-  SolanaClient,
+  type ConfigAccount,
+  coder,
   configAddress,
   key,
   mintExtensions,
-  coder,
-  type ConfigAccount,
+  SolanaClient,
 } from "@conditional-stocks/solana-client";
 import {
+  createAssociatedTokenAccountInstruction,
+  createInitializeMetadataPointerInstruction,
+  createInitializeMint2Instruction,
+  createInitializeTransferFeeConfigInstruction,
+  createMintToCheckedInstruction,
+  createSyncNativeInstruction,
+  ExtensionType,
+  getAssociatedTokenAddressSync,
+  getMetadataPointerState,
+  getMintLen,
+  getTokenMetadata,
+  getTransferFeeConfig,
+  LENGTH_SIZE,
+  MINT_SIZE,
+  TYPE_SIZE,
+  unpackAccount,
+  unpackMint,
+} from "@solana/spl-token";
+import { createInitializeInstruction, pack } from "@solana/spl-token-metadata";
+import {
+  type Connection,
+  type Keypair,
+  PublicKey,
+  SystemProgram,
+  type TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
+import {
   ASSETS,
-  tokenProgram,
-  rawAmount,
-  PROGRAM_ID,
-  NATIVE_MINT,
   type AssetPlan,
   type AssetSpec,
   type DeploymentPlan,
+  NATIVE_MINT,
+  PROGRAM_ID,
+  rawAmount,
+  tokenProgram,
 } from "./devnet-policy.ts";
 
 export interface ChainContext {
@@ -53,48 +53,26 @@ export interface ChainContext {
   assertNetwork: () => Promise<void>;
   record: (step: string, value: Record<string, unknown>) => Promise<void>;
 }
-export function assetPlan(
-  spec: AssetSpec,
-  mint: PublicKey,
-  owner: PublicKey,
-): AssetPlan {
+export function assetPlan(spec: AssetSpec, mint: PublicKey, owner: PublicKey): AssetPlan {
   return {
     symbol: spec.symbol,
     mint: mint.toBase58(),
-    ata: getAssociatedTokenAddressSync(
-      mint,
-      owner,
-      false,
-      tokenProgram(spec),
-    ).toBase58(),
+    ata: getAssociatedTokenAddressSync(mint, owner, false, tokenProgram(spec)).toBase58(),
     program: tokenProgram(spec).toBase58(),
     decimals: spec.decimals,
     initialRaw: rawAmount(spec.units, spec.decimals).toString(),
-    name:
-      spec.kind === "native"
-        ? "Wrapped Devnet SOL"
-        : "Devnet Mock " + spec.symbol,
+    name: spec.kind === "native" ? "Wrapped Devnet SOL" : "Devnet Mock " + spec.symbol,
     metadataSymbol: spec.kind === "native" ? "SOL" : "d" + spec.symbol,
     feeBps: spec.feeBps,
   };
 }
-export async function assetInstructions(
-  ctx: ChainContext,
-  spec: AssetSpec,
-  mint: Keypair | null,
-) {
+export async function assetInstructions(ctx: ChainContext, spec: AssetSpec, mint: Keypair | null) {
   const owner = ctx.deployer.publicKey,
     program = tokenProgram(spec),
     mintKey = mint?.publicKey ?? NATIVE_MINT;
   const asset = assetPlan(spec, mintKey, owner),
     ata = key(asset.ata);
-  const createAta = createAssociatedTokenAccountInstruction(
-    owner,
-    ata,
-    owner,
-    mintKey,
-    program,
-  );
+  const createAta = createAssociatedTokenAccountInstruction(owner, ata, owner, mintKey, program);
   if (spec.kind === "native")
     return {
       asset,
@@ -121,36 +99,24 @@ export async function assetInstructions(
   };
   const extensions =
     spec.kind === "token2022"
-      ? [
-          ExtensionType.MetadataPointer,
-          ...(spec.feeBps ? [ExtensionType.TransferFeeConfig] : []),
-        ]
+      ? [ExtensionType.MetadataPointer, ...(spec.feeBps ? [ExtensionType.TransferFeeConfig] : [])]
       : [];
   const space = extensions.length ? getMintLen(extensions) : MINT_SIZE;
   // Allocate fixed extensions first; InitializeMetadata reallocates using the
   // already funded rent. Creation, metadata, ATA and initial mint are atomic.
   const rentSize =
-    space +
-    (extensions.length ? TYPE_SIZE + LENGTH_SIZE + pack(metadata).length : 0);
+    space + (extensions.length ? TYPE_SIZE + LENGTH_SIZE + pack(metadata).length : 0);
   const instructions = [
     SystemProgram.createAccount({
       fromPubkey: owner,
       newAccountPubkey: mintKey,
-      lamports:
-        await ctx.connection.getMinimumBalanceForRentExemption(rentSize),
+      lamports: await ctx.connection.getMinimumBalanceForRentExemption(rentSize),
       space,
       programId: program,
     }),
   ];
   if (extensions.length) {
-    instructions.push(
-      createInitializeMetadataPointerInstruction(
-        mintKey,
-        owner,
-        mintKey,
-        program,
-      ),
-    );
+    instructions.push(createInitializeMetadataPointerInstruction(mintKey, owner, mintKey, program));
     if (spec.feeBps)
       instructions.push(
         createInitializeTransferFeeConfigInstruction(
@@ -163,15 +129,7 @@ export async function assetInstructions(
         ),
       );
   }
-  instructions.push(
-    createInitializeMint2Instruction(
-      mintKey,
-      spec.decimals,
-      owner,
-      null,
-      program,
-    ),
-  );
+  instructions.push(createInitializeMint2Instruction(mintKey, spec.decimals, owner, null, program));
   if (extensions.length)
     instructions.push(
       createInitializeInstruction({
@@ -216,8 +174,7 @@ export async function sendStep(
   );
   tx.sign([ctx.deployer, ...others]);
   const bytes = tx.serialize();
-  if (bytes.length > 1232)
-    throw new Error("Deployment transaction exceeds packet limit");
+  if (bytes.length > 1232) throw new Error("Deployment transaction exceeds packet limit");
   // Persist signed bytes before submission. No private key is in a transaction.
   // A rerun verifies the on-chain postcondition before attempting this step.
   await ctx.record(step, {
@@ -233,12 +190,8 @@ export async function sendStep(
     maxRetries: 3,
   });
   await ctx.record(step, { status: "submitted", signature, ...latest });
-  const result = await ctx.connection.confirmTransaction(
-    { signature, ...latest },
-    "finalized",
-  );
-  if (result.value.err)
-    throw new Error("Deployment transaction failed atomically: " + step);
+  const result = await ctx.connection.confirmTransaction({ signature, ...latest }, "finalized");
+  if (result.value.err) throw new Error("Deployment transaction failed atomically: " + step);
   await ctx.record(step, {
     status: "finalized",
     signature,
@@ -246,47 +199,36 @@ export async function sendStep(
   });
   return signature;
 }
-export async function verifyAsset(ctx: ChainContext, asset: AssetPlan) {
+export async function verifyAsset(ctx: ChainContext, asset: AssetPlan, reuseExisting = false) {
   const spec = ASSETS.find((a) => a.symbol === asset.symbol)!;
   const mintKey = key(asset.mint),
     program = tokenProgram(spec),
     owner = ctx.deployer.publicKey;
   if (JSON.stringify(assetPlan(spec, mintKey, owner)) !== JSON.stringify(asset))
     throw new Error("Asset plan differs from fixed fixture policy");
-  const result = await ctx.connection.getMultipleAccountsInfoAndContext(
-    [mintKey, key(asset.ata)],
-    { commitment: "finalized" },
-  );
+  const result = await ctx.connection.getMultipleAccountsInfoAndContext([mintKey, key(asset.ata)], {
+    commitment: "finalized",
+  });
   const mint = unpackMint(mintKey, result.value[0] ?? null, program);
   const expectedExtensions =
-    spec.kind === "token2022"
-      ? [18, 19, ...(spec.feeBps ? [1] : [])].sort((a, b) => a - b)
-      : [];
+    spec.kind === "token2022" ? [18, 19, ...(spec.feeBps ? [1] : [])].sort((a, b) => a - b) : [];
   if (
     JSON.stringify(mintExtensions(mint.tlvData).sort((a, b) => a - b)) !==
     JSON.stringify(expectedExtensions)
   )
     throw new Error("Unexpected mock mint extension set");
-  if (
-    !mint.isInitialized ||
-    mint.decimals !== spec.decimals ||
-    mint.freezeAuthority
-  )
+  if (!mint.isInitialized || mint.decimals !== spec.decimals || mint.freezeAuthority)
     throw new Error("Mock mint initialization/decimals/freeze mismatch");
   if (spec.kind === "native") {
     if (!mintKey.equals(NATIVE_MINT) || mint.mintAuthority)
       throw new Error("SOL must be canonical wrapped native SOL");
   } else if (
     !mint.mintAuthority?.equals(owner) ||
-    mint.supply > BigInt(asset.initialRaw)
+    (!reuseExisting && mint.supply > BigInt(asset.initialRaw))
   ) {
-    throw new Error(
-      "Mock mint authority or issuance differs from the one-time allocation",
-    );
+    throw new Error("Mock mint authority or issuance differs from the one-time allocation");
   }
-  const account = result.value[1]
-    ? unpackAccount(key(asset.ata), result.value[1]!, program)
-    : null;
+  const account = result.value[1] ? unpackAccount(key(asset.ata), result.value[1]!, program) : null;
   if (
     account &&
     (!account.owner.equals(owner) ||
@@ -302,12 +244,7 @@ export async function verifyAsset(ctx: ChainContext, asset: AssetPlan) {
   // deployment. Verification reports current balance; it does not remint/top up.
   if (spec.kind === "token2022") {
     const pointer = getMetadataPointerState(mint),
-      metadata = await getTokenMetadata(
-        ctx.connection,
-        mintKey,
-        "finalized",
-        program,
-      );
+      metadata = await getTokenMetadata(ctx.connection, mintKey, "finalized", program);
     if (
       !pointer?.metadataAddress?.equals(mintKey) ||
       !pointer.authority?.equals(owner) ||
@@ -353,17 +290,25 @@ export async function initializeAssets(
     const asset = plan.assets.find((a) => a.symbol === spec.symbol)!;
     const marker = spec.kind === "native" ? key(asset.ata) : key(asset.mint);
     const exists = await ctx.connection.getAccountInfo(marker, "finalized");
+    if (plan.reuseExistingAssets) {
+      if (!exists) throw new Error("Configured reusable Devnet asset is missing");
+      const verified = await verifyAsset(ctx, asset, true);
+      if (!verified.tokenAccountExists)
+        throw new Error("Reusable Devnet asset requires the deployer token account");
+      if (!completed.has("asset:" + spec.symbol))
+        await ctx.record("asset:" + spec.symbol, {
+          status: "recovered",
+          slot: verified.slot,
+          reusedExisting: true,
+        });
+      continue;
+    }
     if (!exists && !completed.has("asset:" + spec.symbol)) {
       const signer = mintSigners.get(spec.symbol) ?? null;
       const built = await assetInstructions(ctx, spec, signer);
       if (JSON.stringify(built.asset) !== JSON.stringify(asset))
         throw new Error("Mint signer differs from prepared plan");
-      await sendStep(
-        ctx,
-        "asset:" + spec.symbol,
-        built.instructions,
-        signer ? [signer] : [],
-      );
+      await sendStep(ctx, "asset:" + spec.symbol, built.instructions, signer ? [signer] : []);
     } else if (exists && !completed.has("asset:" + spec.symbol)) {
       // Recover an uncertain RPC response only from a fully initialized atomic
       // step, never from an empty or someone else's ATA.
@@ -382,11 +327,7 @@ export async function initializeAssets(
     await verifyAsset(ctx, asset);
   }
 }
-export function assertConfig(
-  config: ConfigAccount,
-  owner: PublicKey,
-  quote: PublicKey,
-) {
+export function assertConfig(config: ConfigAccount, owner: PublicKey, quote: PublicKey) {
   if (
     !config.seed_authority.equals(owner) ||
     !config.admin.equals(owner) ||
@@ -398,14 +339,9 @@ export function assertConfig(
     config.taker_bps ||
     !Object.values(config.roles).every((k) => k.equals(owner))
   )
-    throw new Error(
-      "Existing configuration differs from this Devnet staging deployment",
-    );
+    throw new Error("Existing configuration differs from this Devnet staging deployment");
 }
-export async function initializeConfig(
-  ctx: ChainContext,
-  plan: DeploymentPlan,
-) {
+export async function initializeConfig(ctx: ChainContext, plan: DeploymentPlan) {
   const client = new SolanaClient({
     rpcUrl: ctx.connection.rpcEndpoint,
     config: plan.config,
@@ -414,9 +350,7 @@ export async function initializeConfig(
   const quote = key(plan.assets.find((a) => a.symbol === "USDC")!.mint),
     owner = ctx.deployer.publicKey;
   await ctx.assertNetwork();
-  if (
-    !(await ctx.connection.getAccountInfo(configAddress(owner), "finalized"))
-  ) {
+  if (!(await ctx.connection.getAccountInfo(configAddress(owner), "finalized"))) {
     await sendStep(ctx, "config", [
       client.ix(
         "initialize",
@@ -438,14 +372,8 @@ export async function initializeConfig(
   }
   await verifyConfiguration(ctx, plan);
 }
-export async function verifyConfiguration(
-  ctx: ChainContext,
-  plan: DeploymentPlan,
-) {
-  const info = await ctx.connection.getAccountInfo(
-    key(plan.config),
-    "finalized",
-  );
+export async function verifyConfiguration(ctx: ChainContext, plan: DeploymentPlan) {
+  const info = await ctx.connection.getAccountInfo(key(plan.config), "finalized");
   if (!info || !info.owner.equals(PROGRAM_ID) || info.executable)
     throw new Error("Missing or foreign finalized protocol configuration");
   assertConfig(

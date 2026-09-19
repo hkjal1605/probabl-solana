@@ -38,6 +38,7 @@ async function main() {
     rpcUrl: rpc,
     config: address(required("MM_SOLANA_CONFIG")),
     genesisHash: required("MM_GENESIS_HASH"),
+    addressLookupTables: (env.SOLANA_ADDRESS_LOOKUP_TABLES ?? "").split(",").map((v) => v.trim()).filter(Boolean),
     ...(env.MM_PROGRAM_ID ? { programId: address(env.MM_PROGRAM_ID) } : {}),
   });
   await client.assertNetwork();
@@ -80,6 +81,11 @@ async function main() {
   process.on("SIGTERM", stop);
   log("starting", { mode, wallet: owner.toBase58(), markets: config.markets.length });
   try {
+    if (process.argv.includes("--reclaim-rent")) {
+      if (!live) throw new Error("Rent recovery needs explicit execution");
+      await engine.reclaimRent();
+      return;
+    }
     if (process.argv.includes("--cancel")) {
       if (!live) throw new Error("Cancellation needs explicit execution");
       await engine.cancelMarket();

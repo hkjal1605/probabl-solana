@@ -4,38 +4,26 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    "./connection": "./src/connection.ts",
-    "./schema": "./src/schema.ts",
-    "./testing": "./src/testing.ts",
-    "./gateway": "./src/gateway/queries.ts",
-    "./evidence": "./src/evidence/queries.ts",
-    "./reconciliation": "./src/reconciliation/queries.ts",
-    "./reconciliation/types": "./src/reconciliation/types.ts",
+    "./solana": "./src/solana/connection.ts",
+    "./solana/testing": "./src/solana/testing.ts",
+    "./solana/local": "./src/solana/local.ts",
+    "./solana/administration": "./src/solana/administration.ts",
+    "./postgres-url": "./src/postgres-url.ts",
     "./polymarket": "./src/polymarket/queries.ts",
-    "./indexer/schema": "./src/indexer/schema.ts",
-    "./indexer/reads": "./src/indexer/reads.ts",
-    "./indexer/cache": "./src/indexer/cache.ts",
-    "./indexer/verification": "./src/indexer/verification.ts",
-    "./indexer/writes": "./src/indexer/writes.ts"
+    "./polymarket/testing": "./src/polymarket/testing.ts"
   },
   "scripts": {
-    "migrate": "bun scripts/migrate.ts",
-    "generate": "drizzle-kit generate",
+    "migrate:solana": "bun scripts/migrate-solana.ts",
+    "migrate:polymarket": "bun scripts/migrate-polymarket.ts",
+    "reset:devnet": "bun scripts/reset-devnet.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@solana/web3.js": "1.98.4",
-    "@conditional-stocks/domain": "workspace:*",
     "@conditional-stocks/market-data": "workspace:*",
-    "@conditional-stocks/orderbook": "workspace:*",
-    "@conditional-stocks/shared": "workspace:*",
-    "drizzle-orm": "0.41.0",
-    "pg": "8.23.0",
-    "ponder": "0.17.8",
-    "viem": "2.56.3"
+    "pg": "8.23.0"
   },
   "devDependencies": {
-    "@types/pg": "8.23.1",
-    "drizzle-kit": "0.30.6"
+    "@types/pg": "8.23.1"
   }
 }

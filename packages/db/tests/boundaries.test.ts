@@ -13,7 +13,7 @@ async function sources(directory: string, includeDatabase = false): Promise<stri
       )
         return [];
       const path = `${directory}/${entry.name}`;
-      if (path === "packages/contracts/lib" || (!includeDatabase && path === "packages/db"))
+      if (!includeDatabase && path === "packages/db")
         return [];
       if (entry.isDirectory()) return sources(path, includeDatabase);
       return /\.(ts|tsx)$/.test(path) ? [path] : [];
@@ -57,7 +57,7 @@ test("authored runtime and tests have no embedded SQL database adapters or local
   expect(violations).toEqual([]);
 });
 
-test("database package never imports applications, services or Ponder runtime virtual modules", async () => {
+test("database package never imports applications or service runtime modules", async () => {
   const violations: string[] = [];
   const pending = ["packages/db/src"];
   while (pending.length) {
@@ -69,7 +69,7 @@ test("database package never imports applications, services or Ponder runtime vi
       else {
         const text = await Bun.file(resolve(root, path)).text();
         if (
-          /(?:from\s+|import\s*\()["'](?:ponder:|.*(?:\/apps\/|\/services\/)|@conditional-stocks\/(?:api|web|rh-indexer|settlement-worker|matcher|polymarket-ingestor)(?:["'/]))/.test(
+          /(?:from\s+|import\s*\()["'](?:.*(?:\/apps\/|\/services\/)|@conditional-stocks\/(?:api|web|solana-indexer|market-maker|polymarket-ingestor)(?:["'/]))/.test(
             text,
           )
         )

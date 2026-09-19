@@ -23,6 +23,14 @@ mock.module("../../src/components/providers/WalletProvider", () => ({ useWallet:
 mock.module("../../src/hooks/useTradingReadiness", () => ({
   useTradingReadiness: () => ({ ready }),
 }));
+mock.module("../../src/hooks/useTradingPermission", () => ({
+  useTradingPermission: () => ({ permission: { active: true, delegate: "delegate",
+    grant: { expiresAt: "9999999999" } }, refresh: async () => {} }),
+}));
+mock.module("../../src/hooks/useProtocolData", () => ({
+  usePositions: () => ({ data: { owner: wallet.account,
+    balances: { [market.quoteToken]: { vaultAvailable: "1000000" } } }, isDataFresh: true }),
+}));
 mock.module("../../src/hooks/useAsyncAction", () => ({
   useAsyncAction: () => ({
     busy: false,
@@ -45,10 +53,10 @@ mock.module("@conditional-stocks/solana-client", () => ({
   parseOrder: (value: unknown) => value,
   parseAtomicPlan: () => {},
   orderId: () => "hash",
-  verifyEnvelope: () => {},
-}));
-mock.module("../../src/lib/trading/rpc", () => ({
-  solana: () => ({ funding: async () => ({ approvalCall: null, balanceSufficient: true }) }),
+  fundingAsset: () => 1,
+  claimAddress: () => "claim",
+  quote: () => 1n,
+  key: (value: string) => value,
 }));
 mock.module("../../src/services/protocol-api-service", () => ({
   api: {

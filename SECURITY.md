@@ -1,6 +1,6 @@
 # Solana security boundary
 
-**Unaudited migration. Do not deploy with real funds.** Passing tests and core arithmetic coverage do not establish that the Rust program is free from exploitable defects. The original Solidity audit findings, approvals and internal-mainnet exceptions do not transfer to this implementation.
+**Unaudited Solana program. Do not deploy with real funds.** Passing tests and core arithmetic coverage do not establish that the Rust program is free from exploitable defects.
 
 An agent-assisted [MetaDAO comparative review](docs/security/metadao-comparison-2026-09-12.md)
 covers the current first-party Rust program and adds arithmetic/SBF regressions.
@@ -27,7 +27,7 @@ the other release gates remain.
 
 ## Explicit limitations and release gates
 
-See [MIGRATION.md](MIGRATION.md) for the complete tracked gap list.
+The release gaps below remain open until independently reviewed and rehearsed.
 
 - Full source review and Solana feature parity are unfinished.
 - Measured 100% line coverage is confined to the pure accounting crate and token-admission policy. Anchor custody/exchange CPI handlers are exercised on a validator but are not included in host coverage. Full program coverage has not been achieved.

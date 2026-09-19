@@ -21,22 +21,34 @@ pub fn read_claim(
     vault_info: &AccountInfo,
 ) -> Result<ClaimSnapshot> {
     require!((2..6).contains(&asset), ProtocolError::InvalidAsset);
-    require_keys_eq!(*mint_info.owner, token::ID, ProtocolError::InvalidAccount);
-    require_keys_eq!(*vault_info.owner, token::ID, ProtocolError::InvalidAccount);
-    let (expected_mint, _) =
-        Pubkey::find_program_address(&[b"claim", market_key.as_ref(), &[asset as u8]], &crate::ID);
     let (expected_vault, _) =
         Pubkey::find_program_address(&[b"vault", market_key.as_ref(), &[asset as u8]], &crate::ID);
-    require_keys_eq!(*mint_info.key, expected_mint, ProtocolError::InvalidAsset);
-    require_keys_eq!(
-        *mint_info.key,
-        market.mints[asset],
-        ProtocolError::InvalidAsset
-    );
     require_keys_eq!(
         *vault_info.key,
         expected_vault,
         ProtocolError::InvalidAccount
+    );
+    read_claim_with_validated_vault(market, market_key, asset, mint_info, vault_info)
+}
+
+/// Positions' typed Anchor constraints have already checked this vault PDA.
+/// Exchange's untyped tail must enter through read_claim instead.
+pub(crate) fn read_claim_with_validated_vault(
+    market: &Market,
+    market_key: &Pubkey,
+    asset: usize,
+    mint_info: &AccountInfo,
+    vault_info: &AccountInfo,
+) -> Result<ClaimSnapshot> {
+    require!((2..6).contains(&asset), ProtocolError::InvalidAsset);
+    require_keys_eq!(*mint_info.owner, token::ID, ProtocolError::InvalidAccount);
+    require_keys_eq!(*vault_info.owner, token::ID, ProtocolError::InvalidAccount);
+    // initialize_claim registers only the canonical mint; Market is a validated
+    // program-owned PDA. Its immutable mint identity needs no second bump search.
+    require_keys_eq!(
+        *mint_info.key,
+        market.mints[asset],
+        ProtocolError::InvalidAsset
     );
     let mint = Mint::try_deserialize(&mut mint_info.try_borrow_data()?.as_ref())?;
     let vault = TokenAccount::try_deserialize(&mut vault_info.try_borrow_data()?.as_ref())?;
@@ -55,6 +67,22 @@ pub fn read_claim(
             && vault.close_authority.is_none(),
         ProtocolError::InvalidAccount
     );
+    require!(mint.supply >= vault.amount, ProtocolError::ClaimBacking);
+    Ok(ClaimSnapshot {
+        supply: mint.supply,
+        balance: vault.amount,
+    })
+}
+
+/// Fresh data after our classic-SPL mint/burn CPI, for accounts whose identity
+/// and authority were already checked by read_claim in this same instruction.
+/// Not an entrypoint validator: never use this on an unvalidated account pair.
+pub(crate) fn reload_claim(
+    mint_info: &AccountInfo,
+    vault_info: &AccountInfo,
+) -> Result<ClaimSnapshot> {
+    let mint = Mint::try_deserialize(&mut mint_info.try_borrow_data()?.as_ref())?;
+    let vault = TokenAccount::try_deserialize(&mut vault_info.try_borrow_data()?.as_ref())?;
     require!(mint.supply >= vault.amount, ProtocolError::ClaimBacking);
     Ok(ClaimSnapshot {
         supply: mint.supply,

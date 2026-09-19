@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createPolymarketQueries, type PolymarketQueries } from "@conditional-stocks/db/polymarket";
-import { testDatabase } from "@conditional-stocks/db/testing";
+import { testDatabase } from "@conditional-stocks/db/polymarket/testing";
 import { createPolymarketApp } from "../src/app.ts";
 import { PolymarketIngestor } from "../src/service.ts";
 import { environment, FakeSource } from "./helpers.ts";

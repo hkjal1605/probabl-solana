@@ -14,7 +14,7 @@ export const getPositions = async (owner: string, signal: AbortSignal) =>
   );
 export async function getPayouts(owner: string, signal: AbortSignal) {
   const page = await requestJson<PayoutPage>(`/payouts/${encodeURIComponent(owner)}`, { signal });
-  if (!protocolConfig.payoutVault || page.vault !== protocolConfig.payoutVault)
+  if (!protocolConfig.programId || page.vault !== protocolConfig.programId)
     throw new Error("Payout vault configuration does not match the indexer");
   if (page.nextCursor) throw new Error("Unexpected pagination from the native indexer");
   return page;

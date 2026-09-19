@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-conditional_stocks = "CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3"
+conditional_stocks = "8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg"
 
 [programs.devnet]
-conditional_stocks = "CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3"
+conditional_stocks = "8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg"
 
 [provider]
 cluster = "Localnet"

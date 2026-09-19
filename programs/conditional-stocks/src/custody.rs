@@ -1,5 +1,8 @@
 use crate::invariants::{self, ClaimSnapshot};
-use crate::state::*;
+use crate::{
+    pool::{self, AssetCredit, AssetPool},
+    state::*,
+};
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount};
 use anchor_spl::token_interface::{
@@ -17,8 +20,11 @@ pub struct InitializeAsset<'info> {
     pub market: Box<Account<'info, Market>>,
     #[account(owner = token_program.key())]
     pub mint: InterfaceAccount<'info, InterfaceMint>,
-    #[account(init, payer = payer, seeds = [b"vault", market.key().as_ref(), &[asset]], bump,
-        token::mint = mint, token::authority = market, token::token_program = token_program)]
+    #[account(seeds = [b"pool", market.config.as_ref(), mint.key().as_ref()], bump = pool.bump,
+        has_one = mint, has_one = token_program)]
+    pub pool: Account<'info, AssetPool>,
+    #[account(seeds = [b"pool-vault", pool.key().as_ref()], bump,
+        token::mint = mint, token::authority = pool, token::token_program = token_program)]
     pub vault: InterfaceAccount<'info, InterfaceTokenAccount>,
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
@@ -27,7 +33,14 @@ pub struct InitializeAsset<'info> {
 pub fn initialize_asset(ctx: Context<InitializeAsset>, asset: u8) -> Result<()> {
     crate::token_policy::validate_mint(&ctx.accounts.mint.to_account_info())?;
     let i = asset_index(asset)?;
-    require!(i < 2, ProtocolError::InvalidAsset);
+    require!(
+        i < 2 && ctx.accounts.market.vaults_initialized & (1 << asset) == 0,
+        ProtocolError::InvalidAsset
+    );
+    require!(
+        ctx.accounts.vault.amount >= ctx.accounts.pool.liability,
+        ProtocolError::Insolvent
+    );
     require_keys_eq!(
         ctx.accounts.market.mints[i],
         ctx.accounts.mint.key(),
@@ -135,6 +148,7 @@ pub fn deposit_bounded(
 ) -> Result<()> {
     crate::token_policy::validate_mint(&ctx.accounts.mint.to_account_info())?;
     let i = asset_index(asset)?;
+    require!(i >= 2, ProtocolError::InvalidAsset);
     require!(
         amount > 0 && minimum_credit > 0 && minimum_credit <= amount,
         ProtocolError::InvalidTerms
@@ -213,6 +227,7 @@ pub fn withdraw_bounded(
 ) -> Result<()> {
     crate::token_policy::validate_mint(&ctx.accounts.mint.to_account_info())?;
     let i = asset_index(asset)?;
+    require!(i >= 2, ProtocolError::InvalidAsset);
     require!(
         amount > 0 && minimum_received > 0 && minimum_received <= amount,
         ProtocolError::InvalidTerms
@@ -280,6 +295,7 @@ pub fn withdraw_bounded(
 #[derive(Accounts)]
 #[instruction(collateral: u8)]
 pub struct Positions<'info> {
+    #[account(mut)]
     pub owner: Signer<'info>,
     #[account(mut, seeds = [b"market", market.config.as_ref(), &market.id], bump = market.bump)]
     pub market: Box<Account<'info, Market>>,
@@ -299,24 +315,71 @@ pub struct Positions<'info> {
     pub token_program: Program<'info, Token>,
     // Read-only: position operations move credit/backing, not issuer tokens.
     // Safe constraint indexing; validate() rejects every collateral outside 0..2.
-    #[account(seeds = [b"vault", market.key().as_ref(), &[collateral]], bump,
+    #[account(seeds = [b"pool", market.config.as_ref(), market.mints[usize::from(collateral != 0)].as_ref()], bump = pool.bump)]
+    pub pool: Account<'info, AssetPool>,
+    #[account(init_if_needed, payer = owner, space = 8 + AssetCredit::INIT_SPACE,
+        seeds = [b"asset-credit", pool.key().as_ref(), owner.key().as_ref()], bump)]
+    pub credit: Box<Account<'info, AssetCredit>>,
+    pub system_program: Program<'info, System>,
+    #[account(seeds = [b"pool-vault", pool.key().as_ref()], bump,
         constraint = underlying_vault.mint == market.mints[usize::from(collateral != 0)] @ ProtocolError::InvalidAsset,
-        constraint = underlying_vault.owner == market.key() @ ProtocolError::InvalidAccount)]
+        constraint = underlying_vault.owner == pool.key() @ ProtocolError::InvalidAccount)]
     pub underlying_vault: Box<InterfaceAccount<'info, InterfaceTokenAccount>>,
 }
 
 impl Positions<'_> {
+    fn hydrate(&mut self, collateral: u8, bump: u8) -> Result<[u128; 2]> {
+        pool::empty_underlying(&self.market)?;
+        if self.credit.owner == Pubkey::default() {
+            require!(self.credit.available == 0, ProtocolError::InvalidAccount);
+            self.credit.owner = self.owner.key();
+            self.credit.pool = self.pool.key();
+            self.credit.bump = bump;
+        }
+        require_keys_eq!(
+            self.credit.owner,
+            self.owner.key(),
+            ProtocolError::Unauthorized
+        );
+        require_keys_eq!(
+            self.credit.pool,
+            self.pool.key(),
+            ProtocolError::InvalidAccount
+        );
+        require!(
+            self.credit.bump == bump
+                && self.wallet.balances[0] == 0
+                && self.wallet.balances[1] == 0,
+            ProtocolError::InvalidAccount
+        );
+        self.market
+            .credit(&mut self.wallet, collateral as usize, self.credit.available)?;
+        Ok([self.market.liability(0)?, self.market.liability(1)?])
+    }
+    fn flush(&mut self, collateral: u8, before: [u128; 2]) -> Result<()> {
+        pool::conserved(&self.market, before)?;
+        self.credit.available = self.wallet.balances[collateral as usize];
+        self.market
+            .debit(&mut self.wallet, collateral as usize, self.credit.available)?;
+        pool::empty_underlying(&self.market)
+    }
     fn snapshot(&self, collateral: u8) -> Result<[ClaimSnapshot; 2]> {
         let i = self.validate(collateral)?;
+        pool::validate_pool(
+            &self.pool.to_account_info(),
+            &self.market,
+            collateral as usize,
+            self.underlying_vault.amount,
+        )?;
         let claims = [
-            invariants::read_claim(
+            invariants::read_claim_with_validated_vault(
                 &self.market,
                 &self.market.key(),
                 i,
                 &self.yes_mint.to_account_info(),
                 &self.yes_vault.to_account_info(),
             )?,
-            invariants::read_claim(
+            invariants::read_claim_with_validated_vault(
                 &self.market,
                 &self.market.key(),
                 i + 1,
@@ -339,7 +402,22 @@ impl Positions<'_> {
         amounts: [u64; 2],
         minting: bool,
     ) -> Result<()> {
-        let after = self.snapshot(collateral)?;
+        let after = [
+            invariants::reload_claim(
+                &self.yes_mint.to_account_info(),
+                &self.yes_vault.to_account_info(),
+            )?,
+            invariants::reload_claim(
+                &self.no_mint.to_account_info(),
+                &self.no_vault.to_account_info(),
+            )?,
+        ];
+        invariants::check_collateral(
+            &self.market,
+            collateral as usize,
+            self.underlying_vault.amount,
+            after,
+        )?;
         for i in 0..2 {
             invariants::check_delta(before[i], after[i], amounts[i], minting)?;
         }
@@ -400,6 +478,7 @@ impl Positions<'_> {
 pub fn split(ctx: Context<Positions>, collateral: u8, amount: u64) -> Result<()> {
     let i = ctx.accounts.validate(collateral)?;
     require!(amount > 0, ProtocolError::InvalidTerms);
+    let conserved = ctx.accounts.hydrate(collateral, ctx.bumps.credit)?;
     let before = ctx.accounts.snapshot(collateral)?;
     ctx.accounts
         .market
@@ -415,6 +494,7 @@ pub fn split(ctx: Context<Positions>, collateral: u8, amount: u64) -> Result<()>
         .credit(&mut ctx.accounts.wallet, i + 1, amount)?;
     ctx.accounts
         .verify(collateral, before, [amount, amount], true)?;
+    ctx.accounts.flush(collateral, conserved)?;
     emit!(Change {
         market: ctx.accounts.market.key(),
         account: ctx.accounts.owner.key(),
@@ -428,6 +508,7 @@ pub fn split(ctx: Context<Positions>, collateral: u8, amount: u64) -> Result<()>
 pub fn merge(ctx: Context<Positions>, collateral: u8, amount: u64) -> Result<()> {
     let i = ctx.accounts.validate(collateral)?;
     require!(amount > 0, ProtocolError::InvalidTerms);
+    let conserved = ctx.accounts.hydrate(collateral, ctx.bumps.credit)?;
     let before = ctx.accounts.snapshot(collateral)?;
     ctx.accounts
         .market
@@ -443,6 +524,7 @@ pub fn merge(ctx: Context<Positions>, collateral: u8, amount: u64) -> Result<()>
         .credit(&mut ctx.accounts.wallet, collateral as usize, amount)?;
     ctx.accounts
         .verify(collateral, before, [amount, amount], false)?;
+    ctx.accounts.flush(collateral, conserved)?;
     emit!(Change {
         market: ctx.accounts.market.key(),
         account: ctx.accounts.owner.key(),
@@ -471,6 +553,7 @@ pub fn redeem(
         ctx.accounts.market.payouts[0],
         ctx.accounts.market.payouts[1],
     ))?;
+    let conserved = ctx.accounts.hydrate(collateral, ctx.bumps.credit)?;
     let before = ctx.accounts.snapshot(collateral)?;
     ctx.accounts
         .market
@@ -486,6 +569,7 @@ pub fn redeem(
         .credit(&mut ctx.accounts.wallet, collateral as usize, amount)?;
     ctx.accounts
         .verify(collateral, before, [yes_amount, no_amount], false)?;
+    ctx.accounts.flush(collateral, conserved)?;
     emit!(Change {
         market: ctx.accounts.market.key(),
         account: ctx.accounts.owner.key(),
@@ -580,7 +664,7 @@ pub struct TransferCredit<'info> {
 
 pub fn transfer_credit(ctx: Context<TransferCredit>, asset: u8, amount: u64) -> Result<()> {
     let i = asset_index(asset)?;
-    require!(amount > 0, ProtocolError::InvalidTerms);
+    require!(i >= 2 && amount > 0, ProtocolError::InvalidTerms);
     ctx.accounts.source.balances[i] = sub(ctx.accounts.source.balances[i], amount)?;
     ctx.accounts.destination.balances[i] = add(ctx.accounts.destination.balances[i], amount)?;
     emit!(Change {

@@ -1,10 +1,9 @@
-/** Check every copied/reused TS workspace except the retained EVM deployment
- * scripts, whose imports deliberately describe the old UI transaction format. */
+/** Check every active TypeScript workspace, then the standalone Solana scripts. */
 const manifests = [...new Bun.Glob("{apps,packages,services}/*/package.json").scanSync(".")];
 const results = await Promise.all(
   manifests.map(async (path) => {
     const manifest = await Bun.file(path).json();
-    if (!manifest.scripts?.typecheck || manifest.name === "@conditional-stocks/contracts") return 0;
+    if (!manifest.scripts?.typecheck) return 0;
     console.info("Typecheck " + manifest.name);
     return Bun.spawn([process.execPath, "run", "typecheck"], {
       cwd: path.slice(0, -"/package.json".length),

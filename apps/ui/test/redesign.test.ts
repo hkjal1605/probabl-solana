@@ -178,6 +178,7 @@ describe("Solana claim transaction construction", () => {
       config: account,
       genesisHash: "fixture",
     });
+    client.rememberMarket(key(account), {config: client.config, mints: [key(account), key("11111111111111111111111111111111")]});
     for (const action of ["split", "merge"] as const) {
       const ix = client.position(action, key(account), key(account), 0, 1_000_001n);
       const decoded = required(coder.instruction.decode(ix.data));
@@ -267,7 +268,7 @@ describe("honest market, portfolio and evidence presentation", () => {
       ),
     ).toBe(123n);
   });
-  test("positions include event-level USDC branches once and aggregate their active reservations", () => {
+  test("sibling event markets keep their USDC claims and reservations separate", () => {
     const baseOrder = required(state.orders[0]);
     const basePosition = required(state.positions[0]);
     const secondMarket = {
@@ -310,12 +311,15 @@ describe("honest market, portfolio and evidence presentation", () => {
       ],
     );
     const quoteRows = rows.filter((row) => row.kind === "quote");
-    expect(quoteRows).toHaveLength(2);
+    expect(quoteRows).toHaveLength(4);
     expect(quoteRows.map((row) => `${row.symbol}-${row.branch === 0 ? "YES" : "NO"}`)).toEqual([
       "USDC-YES",
       "USDC-NO",
+      "USDC-YES",
+      "USDC-NO",
     ]);
-    expect(quoteRows[0]?.reserved).toBe(200n);
+    expect(quoteRows[0]?.reserved).toBe(123n);
+    expect(quoteRows[2]?.reserved).toBe(77n);
     expect(rows.find((row) => row.key === `stock-${market.id}-0`)?.reserved).toBe(55n);
   });
   test("invalid payout is not incorrectly reported YES merely because numerator is one", () => {

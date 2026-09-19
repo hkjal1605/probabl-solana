@@ -43,8 +43,8 @@ export function SystemHealth() {
   const [paused, setPaused] = useState(true);
   const [payload, setPayload] = useState("");
   const build = () => {
-    if (!adminConfig.exchange) {
-      toast.error("Exchange address is not configured");
+    if (!adminConfig.programId) {
+      toast.error("Solana program ID is not configured");
       return;
     }
     const client = new SolanaClient(adminConfig),

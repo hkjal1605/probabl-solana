@@ -88,6 +88,10 @@ export interface IndexedOrder {
   updatedBlock: string;
 }
 export interface WholeBalanceView {
+  vaultAvailable: string;
+  reserved: string;
+  tokenProgram?: string;
+  externalBlockNumber?: string;
   creditBalances?: Record<string, string>;
   decimals: number;
   account: string;
@@ -96,6 +100,8 @@ export interface WholeBalanceView {
   token: string;
 }
 export interface PayoutCreditView {
+  scope: "global" | "market";
+  pool: string | null;
   id: string;
   beneficiary: string;
   asset: string;

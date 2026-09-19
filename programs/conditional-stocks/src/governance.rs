@@ -62,7 +62,7 @@ pub fn propose_admin(ctx: Context<Configure>, successor: Pubkey) -> Result<()> {
     ctx.accounts.config.admin_after = Clock::get()?
         .unix_timestamp
         .checked_add(ADMIN_DELAY)
-        .ok_or(error!(ProtocolError::Arithmetic))?;
+        .ok_or_else(|| error!(ProtocolError::Arithmetic))?;
     Ok(())
 }
 
@@ -104,7 +104,7 @@ pub fn pause(ctx: Context<Pause>, paused: bool, reason: [u8; 32]) -> Result<()> 
 }
 
 #[derive(Accounts)]
-#[instruction(id: [u8;32])]
+#[instruction(id: [u8;32], terms: Terms)]
 pub struct CreateMarket<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
@@ -114,7 +114,7 @@ pub struct CreateMarket<'info> {
     pub base_mint: InterfaceAccount<'info, Mint>,
     #[account(address = config.quote_mint)]
     pub quote_mint: InterfaceAccount<'info, Mint>,
-    #[account(init, payer = admin, space = 8 + Market::INIT_SPACE,
+    #[account(init, payer = admin, space = Market::allocation_size(terms.metadata_uri.len(), None),
         seeds = [b"market", config.key().as_ref(), &id], bump)]
     pub market: Box<Account<'info, Market>>,
     pub system_program: Program<'info, System>,

@@ -1,5 +1,4 @@
-import { loadDatabaseOptions, openDatabase } from "@conditional-stocks/db/connection";
-import { createPolymarketQueries } from "@conditional-stocks/db/polymarket";
+import { createPolymarketDatabase, createPolymarketQueries, initializePolymarketStorage } from "@conditional-stocks/db/polymarket";
 import { createPolymarketApp } from "./app.ts";
 import { loadPolymarketEnvironment } from "./environment.ts";
 import { logger } from "./logger.ts";
@@ -9,7 +8,8 @@ import { OfficialPolymarketSource } from "./source.ts";
 
 async function main() {
   const environment = loadPolymarketEnvironment(Bun.env);
-  const database = await openDatabase(loadDatabaseOptions(Bun.env, "probabl-polymarket"));
+  const database = createPolymarketDatabase(Bun.env.DATABASE_URL ?? "");
+  await initializePolymarketStorage(database);
   const store = createPolymarketQueries(database);
   const source = new OfficialPolymarketSource(
     environment.gammaUrl,
@@ -35,7 +35,7 @@ async function main() {
     await server.stop(true);
     await server.drainRequests();
     await service.stop();
-    await database.close();
+    await database.end();
     logger.info("service.stopped");
   };
   process.once("SIGINT", shutdown);

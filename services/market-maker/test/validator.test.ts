@@ -175,8 +175,20 @@ test.skipIf(!process.env.MM_VALIDATOR_FIXTURE)(
     failFeed = true;
     await engine.cycle();
     expect(owned(await snapshot(client, "confirmed"), maker.publicKey, id)).toEqual([]);
+    const prior = await snapshot(client, "confirmed");
+    const retiring = [...prior.orders].filter(([, o]) => o.owner.equals(maker.publicKey));
+    const priorInventory = inventory(prior, maker.publicKey, id);
+    const priorSol = await client.connection.getBalance(maker.publicKey, "confirmed");
+    expect(retiring.length).toBeGreaterThan(0);
+    await engine.reclaimRent();
+    const recovered = await snapshot(client, "confirmed");
+    expect([...recovered.orders.values()].filter((o) => o.owner.equals(maker.publicKey))).toEqual([]);
+    expect(inventory(recovered, maker.publicKey, id)).toEqual(priorInventory);
+    expect(await client.connection.getBalance(maker.publicKey, "confirmed")).toBeGreaterThan(priorSol);
+    // The durable nonce survives, so the next cycle can use a fresh generation.
+    expect(big(recovered.traders.get(maker.publicKey.toBase58())!.minimum_nonce)).toBeGreaterThan(0n);
     expect(
-      (await reconcileVaults(client, [id], await client.connection.getSlot("finalized"))).healthy,
+      (await reconcileVaults(client, await snapshot(client))).healthy,
     ).toBe(true);
   },
   120000,

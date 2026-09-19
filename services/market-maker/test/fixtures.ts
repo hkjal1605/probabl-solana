@@ -1,4 +1,4 @@
-import { Keypair } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
 import {
   bn,
   WAD,
@@ -78,10 +78,13 @@ export function book(): Snapshot {
     orders: new Map(),
     wallets: new Map(),
     traders: new Map(),
+    pools: new Map(),
+    credits: new Map(),
   };
 }
 export function order(branch = 0, side = 0): OrderAccount {
   return {
+    delegate: PublicKey.default,
     market: key(id),
     owner,
     terms: {

@@ -1,6 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
-import { connectWallet, findWallet, type SolanaWallet } from "../src/lib/wallet/injected";
+import {
+  availableWallets,
+  connectWallet,
+  findWallet,
+  type SolanaWallet,
+} from "../src/lib/wallet/injected";
 import {
   assertRequestSession,
   browserStorage,
@@ -201,6 +206,17 @@ test("remembered wallet selection never silently switches to a newly installed d
   expect(findWallet({ solana: phantom })).toEqual({ kind: "injected", provider: phantom });
 });
 
+test("wallet choices include each distinct Solana provider once", () => {
+  const phantom = wallet().p;
+  const solflare = wallet().p;
+  expect(
+    availableWallets({ phantom: { solana: phantom }, solflare, solana: phantom }).map(
+      (w) => w.kind,
+    ),
+  ).toEqual(["phantom", "solflare"]);
+  expect(availableWallets({ solana: solflare }).map((w) => w.kind)).toEqual(["injected"]);
+});
+
 test("known wallets reconnect only if trusted, while manual connection remains explicit", async () => {
   for (const kind of ["phantom", "solflare"] as const) {
     const { p, calls } = wallet();
@@ -212,6 +228,24 @@ test("known wallets reconnect only if trusted, while manual connection remains e
   const { p } = wallet();
   p.isPhantom = true;
   expect(await connectWallet({ kind: "injected", provider: p }, true)).toBe(owner.toBase58());
+});
+
+test("manual wallet connection passes no options argument to injected providers", async () => {
+  const { p } = wallet();
+  p.connect = async function () {
+    if (arguments.length !== 0) throw new Error("Unexpected error");
+    return { publicKey: owner };
+  };
+  expect(await connectWallet({ kind: "phantom", provider: p }, false)).toBe(owner.toBase58());
+});
+
+test("an already connected wallet can be reused without asking the extension again", async () => {
+  const { p } = wallet();
+  p.isConnected = true;
+  p.connect = async () => {
+    throw new Error("Unexpected error");
+  };
+  expect(await connectWallet({ kind: "phantom", provider: p }, false)).toBe(owner.toBase58());
 });
 
 test("unknown wallets are never prompted automatically; lock/revoke/mismatch errors cannot restore authentication", async () => {

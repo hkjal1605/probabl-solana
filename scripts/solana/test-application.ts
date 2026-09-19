@@ -2,7 +2,8 @@
  * liquidity or operational evidence is reused by this integration test. */
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { resolve, join } from "node:path";
-import { Pool } from "pg";
+import { Connection, Keypair } from "@solana/web3.js";
+import { disposableSolanaDatabase } from "../../packages/db/src/solana/testing";
 
 const database = process.env.TEST_DATABASE_URL,
   rpc = process.env.SOLANA_TEST_RPC ?? process.env.SOLANA_RPC_URL ?? "http://127.0.0.1:8899";
@@ -19,14 +20,11 @@ if (
   );
 const base = resolve(".local");
 await mkdir(base, { recursive: true, mode: 0o700 });
-const fixtures = await mkdtemp(join(base, "app-test-")),
-  name = "probabl_test_" + crypto.randomUUID().replaceAll("-", "");
-const dbAdmin = new Pool({ connectionString: database, max: 1 }),
-  dbUrl = new URL(database);
-dbUrl.pathname = "/" + name;
+const fixtures = await mkdtemp(join(base, "app-test-"));
+const databaseFixture = await disposableSolanaDatabase(database);
+const dbUrl = new URL(databaseFixture.connectionString);
 const processes: ReturnType<typeof Bun.spawn>[] = [];
-let created = false,
-  interrupted = false;
+let interrupted = false;
 const onSignal = () => {
   interrupted = true;
   for (const child of processes) if (child.exitCode === null) child.kill("SIGTERM");
@@ -46,8 +44,6 @@ const run = async (args: string[], env: Record<string, string | undefined>) => {
   if (result !== 0) throw new Error("Test command failed: " + args.join(" "));
 };
 try {
-  await dbAdmin.query('CREATE DATABASE "' + name + '"');
-  created = true;
   const bootstrapEnv = { ...process.env, SOLANA_RPC_URL: rpc, SOLANA_FIXTURE_DIR: fixtures };
   await run(["scripts/solana/bootstrap.ts"], bootstrapEnv);
   const generated = Object.fromEntries(
@@ -59,6 +55,12 @@ try {
         return [line.slice(0, split), line.slice(split + 1)];
       }),
   );
+  const delegate = Keypair.generate();
+  const connection = new Connection(rpc, "confirmed");
+  const airdrop = await connection.requestAirdrop(delegate.publicKey, 2_000_000_000);
+  const blockhash = await connection.getLatestBlockhash("confirmed");
+  const funded = await connection.confirmTransaction({ signature: airdrop, ...blockhash }, "confirmed");
+  if (funded.value.err) throw new Error("Generated trading delegate could not be funded");
   const apiProbe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() }),
     indexerProbe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
   const apiUrl = apiProbe.url.origin,
@@ -66,6 +68,8 @@ try {
   const env = {
     ...bootstrapEnv,
     ...generated,
+    TRADING_DELEGATE_PRIVATE_KEY: JSON.stringify([...delegate.secretKey]),
+    TRADING_DELEGATE_ADDRESS: String(delegate.publicKey),
     DATABASE_URL: dbUrl.toString(),
     TEST_DATABASE_URL: dbUrl.toString(),
     SOLANA_APP_E2E: "1",
@@ -78,6 +82,7 @@ try {
   await apiProbe.stop(true);
   await indexerProbe.stop(true);
   await run(["run", "--filter", "@conditional-stocks/db", "migrate"], env);
+  await run(["run", "--filter", "@conditional-stocks/db", "migrate:solana"], env);
   for (const file of ["services/solana-indexer/src/main.ts", "apps/api/src/solana.ts"])
     processes.push(
       Bun.spawn([process.execPath, file], { env, stdout: "inherit", stderr: "inherit" }),
@@ -96,7 +101,7 @@ try {
   }
   if (!ready) throw new Error("Fresh test stack did not become ready");
   await run(
-    ["test", "packages/solana-client/test/application-e2e.test.ts", "apps/api/test/solana.test.ts"],
+    ["test", "packages/solana-client/test/application-e2e.test.ts", "apps/api/test/solana/admin.test.ts"],
     env,
   );
 } finally {
@@ -114,9 +119,8 @@ try {
     }),
   );
   try {
-    if (created) await dbAdmin.query('DROP DATABASE "' + name + '" WITH (FORCE)');
+    await databaseFixture.close();
   } finally {
-    await dbAdmin.end();
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
   }

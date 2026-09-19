@@ -1,4 +1,5 @@
 import { createStore } from "zustand/vanilla";
+import { clearTradingPermissions } from "./useTradingPermissionStore";
 
 export interface Resource<T> {
   data: T | undefined;
@@ -72,4 +73,5 @@ export async function refreshStores(names?: string[]) {
 }
 export function clearWalletStores() {
   for (const name of ["wallet-orders", "positions", "payout-credits"]) resources.get(name)?.reset();
+  clearTradingPermissions();
 }

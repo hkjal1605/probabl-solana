@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { PublicKey } from "@solana/web3.js";
 import { MintLayout, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
-import { bn, coder, SolanaClient, unwrap, walletAddress, type MarketAccount } from "../src/index";
+import { bn, coder, SolanaClient, unwrap, walletAddress, poolAddress, assetCreditAddress, type MarketAccount } from "../src/index";
 
 test("funding uses two batches, validates identities, and handles missing SPL/2022 ATAs", async () => {
   for (const tokenProgram of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
@@ -21,6 +21,8 @@ test("funding uses two batches, validates identities, and handles missing SPL/20
       decimals: 6, isInitialized: true, freezeAuthorityOption: 0, freezeAuthority: PublicKey.default }, mintData);
     const data = await coder.accounts.encode("Market", market);
     const walletData = await coder.accounts.encode("Wallet", { market: id, owner, balances: [bn(0), bn(100), ...amounts(4)], open_notional: bn(0), bump: 0 });
+    const pool = poolAddress(config, market.mints[1]!, program), credit = assetCreditAddress(pool, owner, program);
+    const creditData = await coder.accounts.encode("AssetCredit", {pool,owner,available:bn(100),bump:0});
     const client = new SolanaClient({ rpcUrl: "http://127.0.0.1:8899", genesisHash: "test", config: String(config), programId: String(program) });
     let calls = 0, corrupt = false, funded = false;
     client.connection.getMultipleAccountsInfoAndContext = async (keys, options) => {
@@ -30,6 +32,8 @@ test("funding uses two batches, validates identities, and handles missing SPL/20
         data, owner: corrupt ? owner : program, lamports: 1, executable: false, rentEpoch: 0,
       } : k.equals(market.mints[1]!) ? {
         data: mintData, owner: tokenProgram, lamports: 1, executable: false, rentEpoch: 0,
+      } : funded && k.equals(credit) ? {
+        data: creditData, owner: program, lamports: 1, executable: false, rentEpoch: 0,
       } : funded && k.equals(walletAddress(id, owner, program)) ? {
         data: walletData, owner: program, lamports: 1, executable: false, rentEpoch: 0,
       } : null) };
@@ -45,7 +49,7 @@ test("funding uses two batches, validates identities, and handles missing SPL/20
     await expect(client.funding(order)).rejects.toThrow("foreign market");
     corrupt = false; funded = true; calls = 0;
     const covered = await client.funding(order);
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
     expect(covered.approvalCall).toBeNull();
     expect(covered.balanceSufficient).toBe(true);
   }

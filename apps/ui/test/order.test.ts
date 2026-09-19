@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { assertWalletContext, toRpcQuantity } from "@conditional-stocks/ui-kit/transaction";
 import { createOrder, previewOrder } from "@/lib/trading/order";
 
 const form = {
@@ -7,11 +6,11 @@ const form = {
   quoteTokenDecimals: 6,
   protocolVersion: 2,
   priceFormat: "raw-unit-ratio-x18" as const,
-  account: "0x1000000000000000000000000000000000000001",
+  account: "4o2JYy6ktdZEfaUVHGwdCbvMyypZ1NRCDpyS1rfY9q8z",
   branch: "NO" as const,
   cutoff: "2027-01-01T00:00:00.000Z",
   funding: "claim" as const,
-  marketId: `0x${"11".repeat(32)}`,
+  marketId: "A8J3WFJC4DsGG5vGUsAB6GmvAwfS6vRqoacaWCGAS8tk",
   price: "123.456",
   quantity: "2.5",
   side: "sell" as const,
@@ -59,29 +58,5 @@ describe("order form math", () => {
     expect(previewOrder("-1", "100", form).valid).toBe(false);
     expect(previewOrder("1.0000000000000000001", "100", form).valid).toBe(false);
     expect(previewOrder("1", "100.0000001", form).valid).toBe(false);
-  });
-});
-
-describe("wallet transaction quantities", () => {
-  test("signing and sending reject changed accounts and networks", async () => {
-    let chain = "0x7a69";
-    let account = form.account;
-    const provider = {
-      request: async ({ method }: { method: string }) =>
-        method === "eth_accounts" ? [account] : chain,
-    };
-    await assertWalletContext(provider, form.account, 31337);
-    chain = "0x1";
-    await expect(assertWalletContext(provider, form.account, 31337)).rejects.toThrow("network");
-    chain = "0x7a69";
-    account = "0x2000000000000000000000000000000000000002";
-    await expect(assertWalletContext(provider, form.account, 31337)).rejects.toThrow("account");
-  });
-  test("normalizes API decimal values to strict EIP-1193 hex quantities", () => {
-    expect(toRpcQuantity(undefined)).toBe("0x0");
-    expect(toRpcQuantity("0")).toBe("0x0");
-    expect(toRpcQuantity("16")).toBe("0x10");
-    expect(toRpcQuantity("0x0010")).toBe("0x10");
-    expect(() => toRpcQuantity("-1")).toThrow();
   });
 });

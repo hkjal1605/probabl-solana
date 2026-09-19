@@ -3,6 +3,7 @@ import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import { Buffer } from "buffer";
 import { connectWallet, findWallet, type WalletHandle, type WalletSources } from "./injected";
+import type { WalletKind } from "./session";
 import {
   assertRequestSession,
   createWalletSession,
@@ -111,10 +112,13 @@ export function createWalletController(deps: Dependencies) {
   function scheduleExpiry() {
     if (!session) return;
     // Browser timers overflow beyond ~24.8 days. Re-arm until the absolute expiry.
-    expiryTimer = setTimeout(() => {
-      expireIfNeeded();
-      scheduleExpiry();
-    }, Math.min(2_147_483_647, Math.max(0, session.expiresAt - Date.now())));
+    expiryTimer = setTimeout(
+      () => {
+        expireIfNeeded();
+        scheduleExpiry();
+      },
+      Math.min(2_147_483_647, Math.max(0, session.expiresAt - Date.now())),
+    );
   }
   const dropConnection = (forgetSaved = true) => {
     generation++;
@@ -254,9 +258,11 @@ export function createWalletController(deps: Dependencies) {
       finish(id);
     }
   };
-  const connect = async () => {
+  const connect = async (kind?: WalletKind) => {
     const saved = rememberedWallet(deps.storage());
-    const handle = (saved && findWallet(deps.sources(), saved.kind)) || findWallet(deps.sources());
+    const handle = kind
+      ? findWallet(deps.sources(), kind)
+      : (saved && findWallet(deps.sources(), saved.kind)) || findWallet(deps.sources());
     if (!handle) throw new Error("Open a Solana wallet such as Phantom or Solflare.");
     await establish(handle, false);
   };

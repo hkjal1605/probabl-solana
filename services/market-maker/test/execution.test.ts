@@ -153,3 +153,12 @@ test("emergency cancellation can use reserved gas after quote budget is exhauste
   g.set({ after: 999900000 });
   await expect(g.executor.send([g.ix], true)).rejects.toThrow();
 });
+
+test("rent refunds cannot increase the daily spending allowance", async () => {
+  const f = fixture();
+  f.state.spent = "50000";
+  f.set({ after: 1_020_000_000 });
+  await f.executor.send([f.ix], true);
+  expect(f.sends).toBe(1);
+  expect(f.state.spent).toBe("50000");
+});

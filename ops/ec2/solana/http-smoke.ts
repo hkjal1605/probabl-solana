@@ -4,21 +4,14 @@ import { createPrivateKey, sign } from "node:crypto";
 import { Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 
-const origin = new URL(process.argv[2] ?? "https://api-solana.probabl.trade")
-  .origin;
+const origin = new URL(process.argv[2] ?? "https://api-solana.probabl.trade").origin;
 if (origin === "https://api-solana.probabl.trade") {
-  const redirect = await fetch(
-    "http://api-solana.probabl.trade/ready?probe=redirect",
-    {
-      redirect: "manual",
-      signal: AbortSignal.timeout(20000),
-    },
-  );
+  const redirect = await fetch("http://api-solana.probabl.trade/ready?probe=redirect", {
+    redirect: "manual",
+    signal: AbortSignal.timeout(20000),
+  });
   assert.equal(redirect.status, 308);
-  assert.equal(
-    redirect.headers.get("location"),
-    `${origin}/ready?probe=redirect`,
-  );
+  assert.equal(redirect.headers.get("location"), `${origin}/ready?probe=redirect`);
   await redirect.body?.cancel();
   const acme = await fetch(
     "http://api-solana.probabl.trade/.well-known/acme-challenge/probabl-readiness",
@@ -56,15 +49,9 @@ for (const [path, status] of checks) {
   assert.equal(response.status, status, `${path} status`);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   if (origin.startsWith("https:"))
-    assert.equal(
-      response.headers.get("strict-transport-security"),
-      "max-age=31536000",
-    );
+    assert.equal(response.headers.get("strict-transport-security"), "max-age=31536000");
   if (path === "/ready")
-    assert.equal(
-      ((await response.json()) as { healthy: boolean }).healthy,
-      true,
-    );
+    assert.equal(((await response.json()) as { healthy: boolean }).healthy, true);
   else if (path === "/indexer-health") {
     const body = (await response.json()) as {
       healthy: boolean;
@@ -114,7 +101,7 @@ if (process.argv.includes("--auth")) {
     message: string;
   };
   assert(message.includes("EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"));
-  assert(message.includes("A7t71Mf3PbBuvD8jKXCYQxd9oxrf2woLf3kWszT14mxe"));
+  assert(message.includes("6buYkVtSJjaoozCDsPFYrPhp5g1q1oLg2eLp7FpsZ1tF"));
   const signingKey = createPrivateKey({
     key: Buffer.concat([
       Buffer.from("302e020100300506032b657004220420", "hex"),

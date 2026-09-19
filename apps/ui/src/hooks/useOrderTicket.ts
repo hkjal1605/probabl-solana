@@ -2,10 +2,13 @@
 import {
   type AtomicPlan,
   type OrderWire,
+  claimAddress,
+  fundingAsset,
+  key,
   orderId,
   parseAtomicPlan,
   parseOrder,
-  verifyEnvelope,
+  quote,
 } from "@conditional-stocks/solana-client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@/components/providers/WalletProvider";
@@ -13,23 +16,19 @@ import { toast } from "@/components/ui/toast";
 import { protocolConfig } from "@/config/protocol";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useTradingReadiness } from "@/hooks/useTradingReadiness";
-import { atomicTransaction, verifyAtomicResponse } from "@/lib/trading/atomic";
+import { usePositions } from "@/hooks/useProtocolData";
+import { useTradingPermission } from "@/hooks/useTradingPermission";
 import { marketPriceBound } from "@/lib/trading/entry";
 import { createOrder, previewOrder } from "@/lib/trading/order";
 import { reviewWithSession } from "@/lib/trading/review-session";
-import { solana } from "@/lib/trading/rpc";
 import { api } from "@/services/protocol-api-service";
+import { refreshStores } from "@/stores/createResourceStore";
 import type { MarketView } from "@/types/api";
 
 interface Preparation {
   funding: {
-    approvalCall: { to: string; data: string; value: "0" } | null;
-    approved: boolean;
     balanceSufficient: boolean;
     amount: string;
-    assetKind: string;
-    depositAmount?: string;
-    transferFee?: string;
   };
   order: OrderWire;
   orderHash: string;
@@ -39,7 +38,9 @@ interface Preparation {
 }
 export function useOrderTicket({ market }: { market: MarketView }) {
   const wallet = useWallet(),
-    readiness = useTradingReadiness(market);
+    readiness = useTradingReadiness(market),
+    positions = usePositions(),
+    { permission, refresh: refreshPermission } = useTradingPermission();
   const [branch, setBranch] = useState<"YES" | "NO">("YES"),
     [side, setSide] = useState<"buy" | "sell">("buy"),
     [tif, setTif] = useState<"gtc" | "ioc">("ioc"),
@@ -64,6 +65,10 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     quantity,
     price,
     maxFeeBps,
+    permission?.active,
+    permission?.delegate,
+    permission?.grant?.expiresAt,
+    positions.data?.blockNumber,
   ].join(":");
   const revision = useRef({ context, version: 0 });
   if (revision.current.context !== context)
@@ -89,14 +94,15 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     : false;
   const preview = useMemo(() => previewOrder(quantity, price, market), [quantity, price, market]);
   const prepareAction = async (assertCurrent: () => void, background = false) => {
-    if (!wallet.account || !preview.valid)
-      throw new Error("Connect your wallet and enter a valid quantity and price.");
-    if (!background) await wallet.ensureNetwork();
+    if (!wallet.account || !preview.valid || !permission?.active || !permission.delegate || !permission.grant)
+      throw new Error("Deposit assets and enable trading in Portfolio before placing an order.");
     assertCurrent();
     const candidate = parseOrder(
       createOrder({
         ...market,
         account: wallet.account,
+        delegate: permission.delegate,
+        delegateExpiresAt: permission.grant.expiresAt,
         branch,
         cutoff: market.cutoff,
         funding,
@@ -108,14 +114,12 @@ export function useOrderTicket({ market }: { market: MarketView }) {
         tif,
       }),
     );
-    const [result, localFunding] = await Promise.all([
-      background
-        ? api.prepare<Omit<Preparation, "funding">>(
+    const result = background
+        ? await api.prepare<Omit<Preparation, "funding">>(
             "orders/prepare",
             { order: candidate },
-            wallet.sessionToken ?? undefined,
           )
-        : reviewWithSession({
+        : await reviewWithSession({
             token: wallet.sessionToken,
             request: (token) =>
               api.prepare<Omit<Preparation, "funding">>(
@@ -125,18 +129,26 @@ export function useOrderTicket({ market }: { market: MarketView }) {
               ),
             authenticate: wallet.authenticate,
             assertCurrent,
-          }),
-      solana().funding(candidate),
-    ]);
-    // Funding instructions are built exclusively from locally validated chain
-    // accounts. The API supplies only the indexed execution plan, not custody instructions.
+          });
+    const asset = fundingAsset(candidate),
+      mint = asset < 2 ? (asset === 0 ? market.baseToken : market.quoteToken)
+        : String(claimAddress(key(market.id), asset, key(protocolConfig.programId))),
+      balance = positions.data?.owner === wallet.account ? positions.data.balances[mint] : undefined,
+      available = asset < 2 ? BigInt(balance?.vaultAvailable ?? "0")
+        : BigInt(balance?.creditBalances?.[market.id] ?? "0"),
+      required = candidate.side === 0
+        ? quote(BigInt(candidate.quantity), BigInt(candidate.limitPriceRawX18), true)
+        : BigInt(candidate.quantity);
     parseAtomicPlan(result.plan, candidate);
     assertCurrent();
     if (result.orderHash !== orderId(candidate) || result.atomicRouter !== protocolConfig.programId)
       throw new Error("API order identity differs.");
     if (BigInt(result.plan.deadline) <= BigInt(Math.floor(Date.now() / 1000)))
       throw new Error("The returned quote has already expired. Retry review.");
-    const next = { ...result, funding: localFunding, order: candidate };
+    const next = { ...result, funding: {
+      balanceSufficient: positions.isDataFresh && available >= required,
+      amount: String(required),
+    }, order: candidate };
     setNowSeconds(Math.floor(Date.now() / 1000));
     setPreparation(next);
     return next;
@@ -147,6 +159,8 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     wallet.account &&
       preview.valid &&
       readiness.ready &&
+      positions.isDataFresh &&
+      Boolean(permission?.active) &&
       market.lifecycle === "open" &&
       completedContext !== context,
   );
@@ -207,7 +221,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       await prepareAction(assertCurrent);
     });
   const submitPreparation = async (current: Preparation, assertCurrent: () => void) => {
-    if (!wallet.account || !readiness.ready)
+    if (!wallet.account || !readiness.ready || !permission?.active)
       throw new Error("Review a currently tradable order first.");
     await readiness.requireReady();
     assertCurrent();
@@ -216,28 +230,18 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       BigInt(current.plan.deadline) <= BigInt(Math.floor(Date.now() / 1000))
     )
       throw new Error("Wallet changed or quote expired.");
-    const expected = atomicTransaction({
-      order: current.order,
-      plan: current.plan,
-      account: wallet.account,
-      config: protocolConfig,
-    });
+    if (!current.funding.balanceSufficient) throw new Error("Deposit the required balance in Portfolio");
     const token = wallet.sessionToken ?? (await wallet.authenticate());
     assertCurrent();
-    const response = await api.prepare<unknown>(
-      "orders/transaction",
-      { order: current.order, plan: current.plan },
-      token,
-    );
-    const transaction = verifyAtomicResponse(expected, response);
+    const response = await api.prepare<{signature:string;orderHash:string}>(
+      "trading/submit", { order: current.order }, token);
+    if (response.orderHash !== orderId(current.order, key(protocolConfig.programId)) ||
+      !response.signature) throw new Error("Submitted order identity differs from the reviewed order");
     assertCurrent();
-    const signature = await wallet.sendTransaction(transaction);
     toast.add({
       type: "success",
-      title:
-        "Order confirmed: " +
-        signature.slice(0, 10) +
-        "… Fills and balances update after indexing.",
+      title: "Order confirmed: " + response.signature.slice(0, 10) +
+        "… Vault balances update after indexing.",
     });
     setCompletedContext(context);
     setPreparation(null);
@@ -249,33 +253,9 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       setPrice("");
     }
     setSubmissionCount((value) => value + 1);
+    void refreshStores(["positions", "wallet-orders", "payout-credits"]);
+    void refreshPermission();
   };
-  const approve = () =>
-    run(async (assertCurrent) => {
-      if (!preparation?.funding.approvalCall) return;
-      const [, fresh] = await Promise.all([
-        readiness.requireReady(),
-        solana().funding(preparation.order),
-      ]);
-      assertCurrent();
-      if (!fresh.approvalCall || !fresh.balanceSufficient)
-        throw new Error("Funding changed. Review the order again.");
-      verifyEnvelope(fresh.approvalCall, {
-        transaction: preparation.funding.approvalCall,
-      });
-      await wallet.sendTransaction(fresh.approvalCall);
-      toast.add({
-        type: "success",
-        title: "Order funding confirmed.",
-      });
-      setPreparation(null);
-      assertCurrent();
-      const fundedPreparation = await prepareAction(assertCurrent);
-      assertCurrent();
-      if (fundedPreparation.funding.approvalCall || !fundedPreparation.funding.balanceSufficient)
-        throw new Error("Confirmed funding is not available yet. Retry the order.");
-      await submitPreparation(fundedPreparation, assertCurrent);
-    });
   const submit = () =>
     run(async (assertCurrent) => {
       if (!preparation) throw new Error("Review a currently tradable order first.");
@@ -283,6 +263,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     });
   return {
     wallet,
+    permission,
     readiness,
     branch,
     setBranch,
@@ -307,7 +288,6 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     quoteExpired,
     preview,
     prepare,
-    approve,
     submit,
   };
 }

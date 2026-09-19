@@ -1,4 +1,4 @@
-name: Solana host verification
+name: Solana verification
 
 on:
   pull_request:
@@ -33,12 +33,68 @@ jobs:
       - name: Fast application and host Rust tests
         env:
           RUST_LOG: error
-        run: bun run test
+        run: |
+          bun run test
+          bun test packages/db/tests/boundaries.test.ts
       - name: Build copied public and administrative interfaces
         run: |
           bun run build:ui
           bun run build:admin-ui
 
-# This job is intentionally named host verification: it does not claim actual
-# SBF/validator, full program coverage, external reference data or production
-# deployment approval. Those release gates remain documented in MIGRATION.md.
+  sbf-costs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: probabl_test
+          POSTGRES_PASSWORD: local_ci_only
+          POSTGRES_DB: postgres
+        ports: ["25432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U probabl_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Install verified Agave 3.1.10
+        run: |
+          curl --fail --location --retry 3 https://github.com/anza-xyz/agave/releases/download/v3.1.10/solana-release-x86_64-unknown-linux-gnu.tar.bz2 --output "$RUNNER_TEMP/agave.tar.bz2"
+          echo "a7205ff29bcf0f7199740225ecae2b85a28ea9668892d5ec21bd9749882984a1  $RUNNER_TEMP/agave.tar.bz2" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/agave"
+          tar -xjf "$RUNNER_TEMP/agave.tar.bz2" -C "$RUNNER_TEMP/agave"
+          echo "$RUNNER_TEMP/agave/solana-release/bin" >> "$GITHUB_PATH"
+      - name: Build pinned SBF and run actual VM safety/cost gates
+        env:
+          RUST_LOG: error
+        run: |
+          cargo fetch --locked
+          cargo build-sbf --tools-version v1.52 --manifest-path programs/conditional-stocks/Cargo.toml -- --locked
+          BPF_OUT_DIR="$PWD/target/deploy" cargo test -p conditional-stocks --test cost_profile --test sbf_hardening --locked --offline -- --ignored --nocapture --test-threads=1
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Cross-market custody on disposable localhost validator
+        env:
+          TEST_DATABASE_URL: postgresql://probabl_test:local_ci_only@127.0.0.1:25432/postgres
+        run: |
+          bun install --frozen-lockfile
+          solana-test-validator --ledger "$RUNNER_TEMP/pool-ledger" --limit-ledger-size 2000000 --rpc-port 8911 --faucet-port 9911 --gossip-port 8921 --dynamic-port-range 12000-12100 --slots-per-epoch 64 --bpf-program CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3 target/deploy/conditional_stocks.so > "$RUNNER_TEMP/pool-validator.log" 2>&1 &
+          validator_pid=$!
+          trap 'kill "$validator_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if solana --url http://127.0.0.1:8911 cluster-version; then break; fi
+            if ! kill -0 "$validator_pid"; then tail -100 "$RUNNER_TEMP/pool-validator.log"; exit 1; fi
+            sleep 1
+          done
+          SOLANA_POOL_TEST_RPC=http://127.0.0.1:8911 bun run test:pools
+          SOLANA_DELEGATION_TEST_RPC=http://127.0.0.1:8911 bun run test:delegation
+          bun test packages/db/tests/boundaries.test.ts packages/db/tests/solana-custody.test.ts
+          SOLANA_TEST_RPC=http://127.0.0.1:8911 SOLANA_TEST_TOKEN_2022=0 bun scripts/solana/test-application.ts
+          SOLANA_TEST_RPC=http://127.0.0.1:8911 SOLANA_TEST_TOKEN_2022=1 bun scripts/solana/test-application.ts
+
+# Compiled VM fixtures are not a substitute for the full local-validator,
+# Token-2022, independent security review, or production approval release gates.

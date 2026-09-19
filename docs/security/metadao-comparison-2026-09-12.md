@@ -14,8 +14,7 @@ below remain; this does **not** mean there are no exploitable bugs.
 The custom program is retained. No MetaDAO code was vendored, linked, or substituted.
 Production instruction semantics, account layouts, token admission and UI behavior
 were not changed. Changes are tests, a test-only arbitrary-precision dependency,
-and this review record. The original EVM monorepo's complete file-by-file migration
-review is a different, still-unfinished task tracked in [MIGRATION.md](../../MIGRATION.md).
+and this review record. See [SECURITY.md](../../SECURITY.md) for release gates.
 
 ## Reference and reviewed scope
 
@@ -194,7 +193,7 @@ Custody and exchange have **0% host-instrumented coverage**: their CPI behavior 
 exercised by the separate SBF suite, which is not included in that percentage.
 No measured full-program SBF coverage or 100% contract coverage is claimed. The
 web2 application E2E/browser suites were not rerun in this review; earlier results
-are recorded separately in MIGRATION.md.
+are recorded separately in SECURITY.md.
 
 Tested local program: `CxMFWB9ZYJbHd56NB1nEaM71YKcgKfpEZwgDxJRLbbA3`.
 SBF file: `target/deploy/conditional_stocks.so`, 666,392 bytes, SHA-256

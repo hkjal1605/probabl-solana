@@ -38,7 +38,7 @@ function service(name, entry, memory) {
 }
 
 // Native orderbook projection and vault reconciliation belong to the indexer;
-// order/transaction preparation belongs to the API. No EVM workers or signers.
+// order/transaction preparation belongs to the API.
 module.exports = {
   apps: [
     service("indexer", "services/solana-indexer/src/main.ts", "384M"),

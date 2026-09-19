@@ -3,20 +3,11 @@ import { validateCloudflareEnvironment } from "../scripts/cloudflare-preflight";
 import { sanitizedEnvironmentModule } from "../scripts/cloudflare-sanitize";
 const valid = {
   NEXT_PUBLIC_APP_URL: "https://probabl-ui.account.workers.dev",
-  NEXT_PUBLIC_ROBINHOOD_RPC_URL: "https://rpc.robinhoodchain.com",
-  NEXT_PUBLIC_BLOCK_EXPLORER_URL: "https://explorer.robinhoodchain.com",
-  NEXT_PUBLIC_POLYMARKET_STREAM_URL: "wss://stream.probabl.com",
-  NEXT_PUBLIC_ROBINHOOD_CHAIN_ID: "4663",
-  NEXT_PUBLIC_ROBINHOOD_CHAIN_NAME: "Robinhood Chain",
-  NEXT_PUBLIC_CONDITIONAL_TOKENS_ADDRESS:
-    "0x1111111111111111111111111111111111111111",
-  NEXT_PUBLIC_EXCHANGE_ADDRESS: "0x2222222222222222222222222222222222222222",
-  NEXT_PUBLIC_ATOMIC_ORDER_ROUTER_ADDRESS:
-    "0x3333333333333333333333333333333333333333",
-  NEXT_PUBLIC_PAYOUT_VAULT_ADDRESS:
-    "0x4444444444444444444444444444444444444444",
-  NEXT_PUBLIC_POSITION_ROUTER_ADDRESS:
-    "0x5555555555555555555555555555555555555555",
+  NEXT_PUBLIC_API_URL: "https://api-solana.probabl.trade",
+  NEXT_PUBLIC_SOLANA_RPC_URL: "https://api.devnet.solana.com",
+  NEXT_PUBLIC_SOLANA_GENESIS_HASH: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  NEXT_PUBLIC_SOLANA_PROGRAM_ID: "8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg",
+  NEXT_PUBLIC_SOLANA_CONFIG: "6buYkVtSJjaoozCDsPFYrPhp5g1q1oLg2eLp7FpsZ1tF",
 };
 describe("Workers deployment guard", () => {
   test("default deployment skips env checks; strict deployment remains opt-in", async () => {
@@ -58,7 +49,7 @@ describe("Workers deployment guard", () => {
         validateCloudflareEnvironment({ ...valid, [key]: "" }).length,
       ).toBeGreaterThan(0);
   });
-  test("rejects local/placeholder URLs, insecure sockets, and invalid chain/address settings", () => {
+  test("rejects local/placeholder URLs and invalid Solana deployment settings", () => {
     for (const [key, value] of [
       ["NEXT_PUBLIC_APP_URL", "https://localhost"],
       ["NEXT_PUBLIC_APP_URL", "https://127.0.0.1"],
@@ -66,18 +57,11 @@ describe("Workers deployment guard", () => {
       ["NEXT_PUBLIC_APP_URL", "https://app.example.com"],
       ["NEXT_PUBLIC_APP_URL", "https://app.probabl.com/path"],
       ["NEXT_PUBLIC_APP_URL", "https://user:secret@app.probabl.com"],
-      ["NEXT_PUBLIC_POLYMARKET_STREAM_URL", "ws://stream.probabl.com"],
-      [
-        "NEXT_PUBLIC_POLYMARKET_STREAM_URL",
-        "wss://stream.probabl.com/already/path",
-      ],
-      ["NEXT_PUBLIC_ROBINHOOD_CHAIN_ID", "31337"],
-      ["NEXT_PUBLIC_ROBINHOOD_CHAIN_ID", "NaN"],
-      [
-        "NEXT_PUBLIC_EXCHANGE_ADDRESS",
-        "0x0000000000000000000000000000000000000000",
-      ],
-      ["NEXT_PUBLIC_CONDITIONAL_TOKENS_ADDRESS", "not-an-address"],
+      ["NEXT_PUBLIC_API_URL", "http://api-solana.probabl.trade"],
+      ["NEXT_PUBLIC_API_URL", "https://api-solana.probabl.trade/path"],
+      ["NEXT_PUBLIC_SOLANA_RPC_URL", "http://api.devnet.solana.com"],
+      ["NEXT_PUBLIC_SOLANA_PROGRAM_ID", "not-an-address"],
+      ["NEXT_PUBLIC_SOLANA_CONFIG", "11111111111111111111111111111111"],
       ["NEXT_PUBLIC_LOG_LEVEL", "trace"],
     ]) {
       expect(

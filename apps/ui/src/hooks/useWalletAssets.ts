@@ -45,3 +45,6 @@ export function useWalletAssets(markets: MarketView[]) {
   });
   return { ...query, assets, balances };
 }
+
+export type WalletAsset = ReturnType<typeof assetsForMarkets>[number];
+export type WalletAssetBalance = ReturnType<typeof useWalletAssets>["balances"][number];

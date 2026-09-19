@@ -7,11 +7,13 @@ import {
   quoteForExecution,
   quoteForReservation,
 } from "@conditional-stocks/domain";
-import { hex } from "@conditional-stocks/solana-client";
+import { orderSalt } from "@conditional-stocks/solana-client";
 
 export interface OrderFormValues extends MarketUnits {
   baseStep?: string;
   account: string;
+  delegate?: string;
+  delegateExpiresAt?: string;
   branch: "YES" | "NO";
   cutoff: string;
   funding: "whole" | "claim";
@@ -78,15 +80,17 @@ export const createOrder = (
   return {
     maxFeeBps,
     branch: values.branch === "YES" ? 0 : 1,
-    expiry: String(Math.min(Math.floor(nowMs / 1_000) + 30 * 86_400, cutoffSeconds - 1)),
+    expiry: String(Math.min(Math.floor(nowMs / 1_000) + 30 * 86_400, cutoffSeconds - 1,
+      values.delegateExpiresAt ? Number(values.delegateExpiresAt) - 1 : Number.MAX_SAFE_INTEGER)),
     fundingKind: values.funding === "whole" ? 0 : 1,
     limitPriceRawX18: preview.priceRawX18,
     maker: values.account,
+    ...(values.delegate ? { delegate: values.delegate } : {}),
     marketId: values.marketId,
     nonce: String(nowMs),
     quantity: preview.quantityRaw,
     recipient: values.account,
-    salt: options.salt ?? hex(crypto.getRandomValues(new Uint8Array(32))),
+    salt: options.salt ?? orderSalt(BigInt(nowMs), crypto.getRandomValues(new Uint8Array(32))),
     side: values.side === "buy" ? 0 : 1,
     tif: values.tif === "gtc" ? 0 : 1,
   };

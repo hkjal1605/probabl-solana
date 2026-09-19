@@ -3,6 +3,7 @@ use protocol_core as rules;
 
 pub const ASSETS: usize = 6;
 pub const MAX_MAKERS: usize = 8;
+pub const NONCE_BOUND_SALT: [u8; 8] = *b"PRBLOv02";
 pub const ADMIN_DELAY: i64 = 172_800;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, InitSpace)]
@@ -96,6 +97,13 @@ pub struct Market {
 }
 
 impl Market {
+    /// Metadata is immutable. Reserve the bounded resolution URI until it is
+    /// set, then compaction can reclaim unused bytes without a layout migration.
+    pub fn allocation_size(metadata_bytes: usize, evidence_bytes: Option<usize>) -> usize {
+        8 + Self::INIT_SPACE - 1024
+            + metadata_bytes.min(512)
+            + evidence_bytes.unwrap_or(512).min(512)
+    }
     pub fn liability(&self, asset: usize) -> Result<u128> {
         let extra = if asset < 2 {
             self.backing[asset]
@@ -105,20 +113,20 @@ impl Market {
         self.credits[asset]
             .checked_add(self.escrow[asset])
             .and_then(|n| n.checked_add(extra as u128))
-            .ok_or(error!(ProtocolError::Arithmetic))
+            .ok_or_else(|| error!(ProtocolError::Arithmetic))
     }
     pub fn credit(&mut self, wallet: &mut Wallet, asset: usize, amount: u64) -> Result<()> {
         wallet.balances[asset] = add(wallet.balances[asset], amount)?;
         self.credits[asset] = self.credits[asset]
             .checked_add(amount as u128)
-            .ok_or(error!(ProtocolError::Arithmetic))?;
+            .ok_or_else(|| error!(ProtocolError::Arithmetic))?;
         Ok(())
     }
     pub fn debit(&mut self, wallet: &mut Wallet, asset: usize, amount: u64) -> Result<()> {
         wallet.balances[asset] = sub(wallet.balances[asset], amount)?;
         self.credits[asset] = self.credits[asset]
             .checked_sub(amount as u128)
-            .ok_or(error!(ProtocolError::Insolvent))?;
+            .ok_or_else(|| error!(ProtocolError::Insolvent))?;
         Ok(())
     }
 }
@@ -141,6 +149,7 @@ pub struct Trader {
     pub config: Pubkey,
     pub owner: Pubkey,
     pub minimum_nonce: u64,
+    pub delegation_epoch: u64,
     pub bump: u8,
 }
 
@@ -160,6 +169,12 @@ pub struct OrderTerms {
 }
 
 impl OrderTerms {
+    /// The nonce is bound into the PDA seed so retired orders cannot be
+    /// recreated with a newer nonce and different terms.
+    pub fn bound_nonce(&self) -> Option<u64> {
+        (self.salt[..8] == NONCE_BOUND_SALT)
+            .then(|| u64::from_le_bytes(self.salt[8..16].try_into().expect("fixed salt slice")))
+    }
     pub fn asset(&self) -> usize {
         let collateral = if self.side == 0 { 1 } else { 0 };
         if self.funding == 0 {
@@ -175,6 +190,8 @@ impl OrderTerms {
 pub struct Order {
     pub market: Pubkey,
     pub owner: Pubkey,
+    /// Zero for owner-signed orders; otherwise the immutable grant's signing key.
+    pub delegate: Pubkey,
     pub terms: OrderTerms,
     pub remaining: u64,
     pub filled: u64, // Executed quantity only; cancellation never increases this counter.
@@ -182,7 +199,7 @@ pub struct Order {
     pub open_notional: u64,
     pub sequence: u64,
     pub fee_carry: u16,
-    pub status: u8, // 1 open, 2 filled, 3 cancelled; tombstones are never closed.
+    pub status: u8, // 1 open, 2 filled, 3 cancelled; retirement requires permanent replay rejection.
     pub bump: u8,
 }
 
@@ -202,11 +219,12 @@ pub struct Plan {
 }
 
 pub fn add(a: u64, b: u64) -> Result<u64> {
-    a.checked_add(b).ok_or(error!(ProtocolError::Arithmetic))
+    a.checked_add(b)
+        .ok_or_else(|| error!(ProtocolError::Arithmetic))
 }
 pub fn sub(a: u64, b: u64) -> Result<u64> {
     a.checked_sub(b)
-        .ok_or(error!(ProtocolError::InsufficientFunds))
+        .ok_or_else(|| error!(ProtocolError::InsufficientFunds))
 }
 pub fn checked<T>(value: rules::Result<T>) -> Result<T> {
     value.map_err(|err| match err {
@@ -281,4 +299,10 @@ pub enum ProtocolError {
     TokenDelta,
     #[msg("Redemption would discard a fractional raw unit; retain or combine the odd claim")]
     FractionalRedemption,
+    #[msg("Invalid trading delegation, scope, recipient or limits")]
+    InvalidDelegation,
+    #[msg("Trading delegation was revoked, expired or globally invalidated")]
+    DelegationInactive,
+    #[msg("Delegated order exceeds its per-order or remaining allowance")]
+    DelegateBudget,
 }
