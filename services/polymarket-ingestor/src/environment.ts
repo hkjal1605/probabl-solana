@@ -45,10 +45,16 @@ export const loadPolymarketEnvironment = (
     );
   }
   const standardNotionalX6 = BigInt(environment.POLYMARKET_STANDARD_NOTIONAL_X6 ?? "100000000");
-  const staleAfterMs = BigInt(environment.POLYMARKET_STALE_AFTER_MS ?? "30000");
+  const reconcileMs = positiveInteger(environment, "POLYMARKET_RECONCILE_MS", "30000");
+  const staleAfterMs = BigInt(environment.POLYMARKET_STALE_AFTER_MS ?? "90000");
   if (standardNotionalX6 <= 0n || staleAfterMs <= 0n) {
     throw new MarketDataError("INVALID_CONFIG", "probability thresholds must be positive");
   }
+  if (staleAfterMs < BigInt(reconcileMs) * 2n)
+    throw new MarketDataError(
+      "INVALID_CONFIG",
+      "POLYMARKET_STALE_AFTER_MS must cover at least two reconciliation intervals",
+    );
   return {
     clobUrl: url(environment, "POLYMARKET_CLOB_URL", "https://clob.polymarket.com"),
     gammaUrl: url(environment, "POLYMARKET_GAMMA_URL", "https://gamma-api.polymarket.com"),
@@ -56,7 +62,7 @@ export const loadPolymarketEnvironment = (
     internalToken,
     metadataPollMs: positiveInteger(environment, "POLYMARKET_METADATA_POLL_MS", "300000"),
     port: positiveInteger(environment, "POLYMARKET_PORT", "42073"),
-    reconcileMs: positiveInteger(environment, "POLYMARKET_RECONCILE_MS", "30000"),
+    reconcileMs,
     staleAfterMs,
     standardNotionalX6,
     websocketUrl: url(

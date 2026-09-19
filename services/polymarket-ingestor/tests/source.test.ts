@@ -5,6 +5,7 @@ import { OfficialPolymarketSource } from "../src/source.ts";
 test("Polymarket configuration requires credentials, supported protocols and positive thresholds", () => {
   const base = { POLYMARKET_INTERNAL_TOKEN: "local-fixture-token" };
   expect(loadPolymarketEnvironment(base).port).toBe(42073);
+  expect(loadPolymarketEnvironment(base).staleAfterMs).toBe(90_000n);
   for (const overrides of [
     { POLYMARKET_INTERNAL_TOKEN: "" },
     { POLYMARKET_PORT: "0" },
@@ -12,6 +13,7 @@ test("Polymarket configuration requires credentials, supported protocols and pos
     { POLYMARKET_METADATA_POLL_MS: "-1" },
     { POLYMARKET_STANDARD_NOTIONAL_X6: "0" },
     { POLYMARKET_STALE_AFTER_MS: "-1" },
+    { POLYMARKET_RECONCILE_MS: "30000", POLYMARKET_STALE_AFTER_MS: "59999" },
     { POLYMARKET_CLOB_URL: "file:///bad" },
     { POLYMARKET_GAMMA_URL: "ftp://bad" },
     { POLYMARKET_WS_URL: "file:///bad" },
