@@ -13,13 +13,16 @@ test("catalogue reads all books in one indexed batch and keeps one-sided executa
     }),
   );
   const paths: string[] = [];
+  const orderbookView = { value: null as string | null };
   try {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const path = url.pathname;
       paths.push(path);
       if (path === "/markets")
         return Response.json({ markets: markets.map((m) => ({ ...m, state: 2 })) });
-      if (path === "/orderbooks")
+      if (path === "/orderbooks") {
+        orderbookView.value = url.searchParams.get("view");
         return Response.json({
           books: Object.fromEntries(
             markets.map((m) => [
@@ -38,6 +41,7 @@ test("catalogue reads all books in one indexed batch and keeps one-sided executa
             ]),
           ),
         });
+      }
       if (path.endsWith("/polymarket"))
         return Response.json({
           metadata: {
@@ -55,9 +59,38 @@ test("catalogue reads all books in one indexed batch and keeps one-sided executa
     expect(read.every((m) => m.bookQuality === "available" && m.yes.bestAsk === 254.35)).toBe(true);
     expect(read.map((m) => m.createdAt)).toEqual(markets.map((m) => m.createdAt));
     expect(paths.filter((path) => path === "/orderbooks")).toHaveLength(1);
+    expect(orderbookView.value).toBe("levels");
     expect(paths.filter((path) => path.endsWith("/polymarket"))).toHaveLength(1);
     expect(paths.some((path) => path.startsWith("/orderbook/"))).toBe(false);
     expect(read.every((market) => market.probability.value === 0.42)).toBe(true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("catalogue starts the compact books request without waiting for the markets response", async () => {
+  const originalFetch = globalThis.fetch;
+  let releaseMarkets: ((response: Response) => void) | undefined;
+  let booksStarted = false;
+  try {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === "/markets")
+        return new Promise<Response>((resolve) => {
+          releaseMarkets = resolve;
+        });
+      if (url.pathname === "/orderbooks") {
+        booksStarted = true;
+        return Response.json({ books: {} });
+      }
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    }) as typeof fetch;
+    const read = marketsApi.liveMarkets();
+    await Promise.resolve();
+    expect(booksStarted).toBe(true);
+    expect(releaseMarkets).toBeDefined();
+    releaseMarkets?.(Response.json({ markets: [] }));
+    expect(await read).toEqual([]);
   } finally {
     globalThis.fetch = originalFetch;
   }

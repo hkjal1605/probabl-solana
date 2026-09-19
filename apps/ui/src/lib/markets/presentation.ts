@@ -1,6 +1,26 @@
 import { expireSpotPrice } from "@conditional-stocks/shared/spot-prices";
 import type { BranchBook, MarketView } from "@/types/api";
 
+export const MARKET_CATEGORIES = ["All", "Macro", "Earnings", "Policy", "Other"] as const;
+export type MarketCategory = (typeof MARKET_CATEGORIES)[number];
+
+export function marketCategoryPath(category: MarketCategory) {
+  return category === "All" ? "/" : `/category/${category.toLowerCase()}`;
+}
+
+export function marketCategoryFromSlug(slug: string): Exclude<MarketCategory, "All"> | null {
+  const category = MARKET_CATEGORIES.find(
+    (candidate) => candidate !== "All" && candidate.toLowerCase() === slug.toLowerCase(),
+  );
+  return category && category !== "All" ? category : null;
+}
+
+export function marketCategoryFromPathname(pathname: string): MarketCategory | null {
+  if (pathname === "/") return "All";
+  const match = /^\/category\/([^/]+)\/?$/.exec(pathname);
+  return match?.[1] ? marketCategoryFromSlug(match[1]) : null;
+}
+
 export function currentSpotUsd(market: MarketView, nowMs = Date.now()): number | null {
   const spot = market.spotReference && expireSpotPrice(market.spotReference, nowMs);
   return spot?.status === "available" &&
@@ -94,20 +114,25 @@ export function groupMarkets(markets: MarketView[]): MarketView[][] {
 }
 export function sortEventGroups(groups: MarketView[][], direction: "newest" | "oldest") {
   const created = (assets: MarketView[]) =>
-    Math.max(0, ...assets.map((m) => {
-      const at = Date.parse(m.createdAt ?? "");
-      return Number.isFinite(at) ? at : 0;
-    }));
+    Math.max(
+      0,
+      ...assets.map((m) => {
+        const at = Date.parse(m.createdAt ?? "");
+        return Number.isFinite(at) ? at : 0;
+      }),
+    );
   return [...groups].sort((a, b) => {
     const difference = created(b) - created(a);
-    return (direction === "oldest" ? -difference : difference) ||
-      eventKey(a[0]!).localeCompare(eventKey(b[0]!));
+    return (
+      (direction === "oldest" ? -difference : difference) ||
+      eventKey(a[0]!).localeCompare(eventKey(b[0]!))
+    );
   });
 }
 export function marketCategory(market: MarketView) {
   const question = market.question.toLowerCase();
   if (/fed|rate|inflation|cpi|gdp/.test(question)) return "Macro";
-  if (/export|tariff|election|policy|ban|regulat/.test(question)) return "Policy";
+  if (/export|tariff|election|policy|ban|regulat|\bact\b|\blaw\b/.test(question)) return "Policy";
   if (/revenue|earnings|deliver|quarter|profit/.test(question)) return "Earnings";
   return "Other";
 }

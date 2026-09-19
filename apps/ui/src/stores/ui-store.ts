@@ -1,7 +1,8 @@
 import { createStore } from "zustand/vanilla";
+import type { MarketCategory } from "@/lib/markets/presentation";
 
 export type DiscoveryFilters = {
-  category: string;
+  category: MarketCategory;
   lifecycle: "active" | "resolving" | "all";
   sort: "newest" | "oldest";
   view: "Feed" | "Matrix";

@@ -264,6 +264,36 @@ test("category and compact groups preserve single selection without changing def
   }
 });
 
+test("category selection moves a text-width underline between options", async () => {
+  function Categories() {
+    const [value, setValue] = useState("All");
+    return (
+      <Segmented
+        label="Categories"
+        options={["All", "Macro"]}
+        value={value}
+        onChange={setValue}
+        variant="category"
+      />
+    );
+  }
+  await render(<Categories />);
+  const group = host.querySelector<HTMLElement>('[data-slot="toggle-group"]'),
+    all = button("All"),
+    macro = button("Macro"),
+    indicator = host.querySelector<HTMLElement>('[data-slot="segmented-indicator"]');
+  if (!group || !all || !macro || !indicator) throw new Error("Missing category controls");
+  group.getBoundingClientRect = () => ({ left: 90, width: 120 }) as DOMRect;
+  all.getBoundingClientRect = () => ({ left: 100, width: 20 }) as DOMRect;
+  macro.getBoundingClientRect = () => ({ left: 140, width: 50 }) as DOMRect;
+  await act(async () => window.dispatchEvent(new Event("resize")));
+  expect(indicator.style.width).toBe("20px");
+  expect(indicator.style.transform).toBe("translate3d(10px, 0, 0)");
+  await click(macro);
+  expect(indicator.style.width).toBe("50px");
+  expect(indicator.style.transform).toBe("translate3d(50px, 0, 0)");
+});
+
 test("select renders labels before opening and updates the selected value", async () => {
   function Assets() {
     const [value, setValue] = useState("mint-address");

@@ -105,6 +105,16 @@ function aggregateBook(
 async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<MarketView[]> {
   const json = <T>(url: string): Promise<T> =>
     requestJson<T>(new URL(url).pathname + new URL(url).search, signal ? { signal } : {});
+  // Start the all-books projection with the market list. Once market identities
+  // arrive, their metadata reads can overlap the remaining orderbook transfer.
+  const batchPromise = marketId
+    ? Promise.resolve(null)
+    : json<{
+        books: Record<
+          string,
+          { orders: Record<string, unknown>[]; truncated?: boolean; unavailable?: boolean }
+        >;
+      }>(`${upstreamUrl("indexer")}/orderbooks?view=levels`).catch(() => null);
   const marketResponse = marketId
     ? {
         markets: [
@@ -114,14 +124,6 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
         ],
       }
     : await json<{ markets: Record<string, unknown>[] }>(`${upstreamUrl("indexer")}/markets`);
-  const batch = marketId
-    ? null
-    : await json<{
-        books: Record<
-          string,
-          { orders: Record<string, unknown>[]; truncated?: boolean; unavailable?: boolean }
-        >;
-      }>(`${upstreamUrl("indexer")}/orderbooks`).catch(() => null);
   // Sibling asset markets share one immutable Polymarket condition. Fetch its
   // metadata/probability once so one event cannot randomly diverge per asset.
   const attachments = new Map<string, Promise<Record<string, unknown>>>();
@@ -137,6 +139,7 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
       );
     }
   }
+  const batch = await batchPromise;
   return Promise.all(
     marketResponse.markets.map(async (market): Promise<MarketView> => {
       assertMarketUnits(market);

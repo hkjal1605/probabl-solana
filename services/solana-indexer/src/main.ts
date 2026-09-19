@@ -1,16 +1,17 @@
+import { createSolanaDatabase } from "@conditional-stocks/db/solana";
+import { hex, key, type MarketAccount, SolanaClient } from "@conditional-stocks/solana-client";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { createSolanaDatabase } from "@conditional-stocks/db/solana";
-import { persistSnapshot } from "./storage";
 import { reconcileLedger } from "./custody";
-import { payoutCredits } from "./payouts";
-import { SolanaClient, key, hex, type MarketAccount } from "@conditional-stocks/solana-client";
-import { snapshot, marketView, indexedOrder, liveOrder, type Snapshot } from "./projection.ts";
-import { createIndexStream, changedTopics } from "./stream";
-import { WalletIndex } from "./wallet-index";
 import { creationTimes, replayHistory } from "./history.ts";
+import { compactOrderbooks } from "./orderbook-levels.ts";
+import { payoutCredits } from "./payouts";
+import { indexedOrder, liveOrder, marketView, type Snapshot, snapshot } from "./projection.ts";
 import { reconcileVaults } from "./reconcile.ts";
-import { retiredOrderImages, restoreRetiredOrders } from "./retired-orders.ts";
+import { restoreRetiredOrders, retiredOrderImages } from "./retired-orders.ts";
+import { persistSnapshot } from "./storage";
+import { changedTopics, createIndexStream } from "./stream";
+import { WalletIndex } from "./wallet-index";
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -164,6 +165,22 @@ app.get("/orderbook/:id", (c) => {
 });
 app.get("/orderbooks", (c) => {
   const s = state();
+  if (c.req.query("view") === "levels")
+    return c.json({
+      books: compactOrderbooks(
+        s.markets.keys(),
+        [...s.orders.values()]
+          .filter((order) => liveOrder(order, s))
+          .map((order) => ({
+            market: order.market.toBase58(),
+            branch: order.terms.branch,
+            side: order.terms.side,
+            limitPriceRawX18: order.terms.price.toString(),
+            remaining: order.remaining.toString(),
+          })),
+      ),
+      slot: String(s.slot),
+    });
   const books: Record<string, { orders: ReturnType<typeof indexedOrder>[]; truncated: false }> = {};
   for (const id of s.markets.keys()) books[id] = { orders: [], truncated: false };
   for (const [id, order] of s.orders) {

@@ -6,6 +6,7 @@ import { SiteFooter } from "@/components/layout/SiteFooter";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { AppProviders } from "@/components/providers/AppProviders";
 import { protocolConfig } from "@/config/protocol";
+import { API_URL } from "@/services/constants";
 
 const aeonik = localFont({
   src: [
@@ -42,6 +43,10 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       data-scroll-behavior="smooth"
       suppressHydrationWarning
     >
+      <head>
+        <link rel="preconnect" href={API_URL} crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href={API_URL} />
+      </head>
       <body className="flex min-h-dvh flex-col text-sm">
         <AppProviders>
           <SiteHeader />

@@ -11,7 +11,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { OutcomePrice } from "../src/components/market/OutcomePrice";
 import { executionImpact, executionPoints } from "../src/lib/markets/history";
-import { groupMarkets, impactPercent, midpoint } from "../src/lib/markets/presentation";
+import {
+  groupMarkets,
+  impactPercent,
+  MARKET_CATEGORIES,
+  marketCategory,
+  marketCategoryFromPathname,
+  marketCategoryFromSlug,
+  marketCategoryPath,
+  midpoint,
+} from "../src/lib/markets/presentation";
 import { outcomeLabel, safeExternalUrl } from "../src/lib/markets/resolution";
 import { conditionalPositionRows } from "../src/lib/portfolio/positions";
 import {
@@ -24,6 +33,8 @@ import {
 import { createActionScope } from "../src/lib/trading/action-scope";
 import { marketPriceBound, quantityForSpend } from "../src/lib/trading/entry";
 import { previewOrder } from "../src/lib/trading/order";
+import { MarketsPageSkeleton } from "../src/modules/MarketsPageModule/components/MarketsPageSkeleton";
+import { FEATURED_MARKETS } from "../src/modules/MarketsPageModule/featured-markets";
 import { mergeOrderPages } from "../src/services/orders";
 import { createUiStore } from "../src/stores/ui-store";
 import { fixtureMarkets, fixtureState as state } from "./fixtures/protocol";
@@ -34,6 +45,51 @@ function required<T>(value: T | undefined | null): T {
   return value;
 }
 const account = PROGRAM_ID.toBase58();
+describe("market category routes", () => {
+  test("maps every visible category to its canonical URL and rejects unknown slugs", () => {
+    expect(marketCategoryPath("All")).toBe("/");
+    for (const category of ["Macro", "Earnings", "Policy", "Other"] as const) {
+      const path = `/category/${category.toLowerCase()}`;
+      expect(marketCategoryPath(category)).toBe(path);
+      expect(marketCategoryFromSlug(category.toLowerCase())).toBe(category);
+    }
+    expect(marketCategoryFromSlug("all")).toBeNull();
+    expect(marketCategoryFromSlug("unknown")).toBeNull();
+    expect(marketCategoryFromPathname("/")).toBe("All");
+    expect(marketCategoryFromPathname("/category/macro")).toBe("Macro");
+    expect(marketCategoryFromPathname("/category/earnings/")).toBe("Earnings");
+    expect(marketCategoryFromPathname("/markets/example")).toBeNull();
+  });
+});
+describe("markets loading state", () => {
+  test("reserves the banner and responsive card grid without loading text", () => {
+    const html = renderToStaticMarkup(createElement(MarketsPageSkeleton, { view: "Feed" }));
+    expect(html).toContain('aria-busy="true"');
+    expect(html.match(/data-variant="market"/g)).toHaveLength(6);
+    expect(html.match(/data-slot="skeleton"/g)?.length).toBeGreaterThan(30);
+    expect(html).not.toContain("Loading...");
+  });
+});
+describe("category featured markets", () => {
+  test("assigns a distinct live condition and optimized image to every category", async () => {
+    expect(Object.keys(FEATURED_MARKETS)).toEqual([...MARKET_CATEGORIES]);
+    expect(new Set(Object.values(FEATURED_MARKETS).map((item) => item.conditionId)).size).toBe(5);
+    expect(new Set(Object.values(FEATURED_MARKETS).map((item) => item.imageSrc)).size).toBe(5);
+    for (const definition of Object.values(FEATURED_MARKETS)) {
+      expect(definition.conditionId).toMatch(/^0x[a-f0-9]{64}$/);
+      expect(definition.imageSrc).toMatch(/^\/markets\/.+-feature\.webp$/);
+      expect(
+        await Bun.file(new URL(`../public${definition.imageSrc}`, import.meta.url)).exists(),
+      ).toBe(true);
+    }
+  });
+
+  test("classifies the selected Clarity Act event as policy", () => {
+    expect(marketCategory({ ...market, question: "Clarity Act signed into law in 2026?" })).toBe(
+      "Policy",
+    );
+  });
+});
 describe("canonical order windows", () => {
   test("keeps older resting orders and prefers the newest update across reads", () => {
     const order = required(state.orders[0]);
@@ -178,7 +234,10 @@ describe("Solana claim transaction construction", () => {
       config: account,
       genesisHash: "fixture",
     });
-    client.rememberMarket(key(account), {config: client.config, mints: [key(account), key("11111111111111111111111111111111")]});
+    client.rememberMarket(key(account), {
+      config: client.config,
+      mints: [key(account), key("11111111111111111111111111111111")],
+    });
     for (const action of ["split", "merge"] as const) {
       const ix = client.position(action, key(account), key(account), 0, 1_000_001n);
       const decoded = required(coder.instruction.decode(ix.data));

@@ -69,4 +69,6 @@ test("search uses the existing catalogue rather than adding per-query requests o
     "utf8",
   );
   expect(explorer).not.toMatch(/filters.query|Search markets|<Input/);
+  expect(explorer).toContain("window.history.pushState");
+  expect(explorer).not.toContain("router.push(");
 });
