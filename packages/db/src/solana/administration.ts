@@ -52,14 +52,18 @@ export async function provisionRuntimeRoles(
         await client.query(
           `GRANT CONNECT ON DATABASE ${identifier(database)} TO ${identifier(definition.role)}`,
         );
+        await client.query(`CREATE SCHEMA ${identifier(definition.schema)}`);
         await client.query(
-          `CREATE SCHEMA ${identifier(definition.schema)} AUTHORIZATION ${identifier(definition.role)}`,
+          `GRANT USAGE, CREATE ON SCHEMA ${identifier(definition.schema)} TO ${identifier(definition.role)}`,
         );
         await client.query(
           `ALTER ROLE ${identifier(definition.role)} IN DATABASE ${identifier(database)}
           SET search_path TO ${identifier(definition.schema)}, pg_catalog`,
         );
       }
+      await client.query(
+        `GRANT USAGE ON SCHEMA ${identifier(runtime.indexer.schema)} TO ${identifier(runtime.api.role)}`,
+      );
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -106,6 +110,9 @@ export async function resetRuntimeStorage(connectionString: string, database: st
           SET search_path TO ${identifier(definition.schema)}, pg_catalog`,
         );
       }
+      await client.query(
+        `GRANT USAGE ON SCHEMA ${identifier(runtime.indexer.schema)} TO ${identifier(runtime.api.role)}`,
+      );
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -123,9 +130,6 @@ export async function grantIndexedSnapshotRead(connectionString: string) {
       throw new Error("Unexpected indexer database identity");
     await client.query("BEGIN");
     try {
-      await client.query(
-        `GRANT USAGE ON SCHEMA ${identifier(runtime.indexer.schema)} TO ${identifier(runtime.api.role)}`,
-      );
       await client.query(
         `GRANT SELECT ON ${identifier(runtime.indexer.schema)}.solana_snapshots TO ${identifier(runtime.api.role)}`,
       );
