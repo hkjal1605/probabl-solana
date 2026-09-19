@@ -132,7 +132,7 @@ const config = settings({
   ttlSeconds: 86400,
   pollMs: 15000,
   cutoffBufferSeconds: 300,
-  maxFeedAgeMs: 600000,
+  maxFeedAgeMs: 900000,
   maxProbabilitySpreadX6: 200000,
   probabilityFloorX6: 20000,
   jumpBps: 500,

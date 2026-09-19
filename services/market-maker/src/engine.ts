@@ -446,19 +446,55 @@ export class Engine {
     if (!this.executor) throw new Error("Static placement requires explicit live execution");
     await this.executor.reconcilePending();
     for (const p of this.settings.markets) {
+      if (this.stopped) break;
       let stage = "snapshot";
       try {
         const before = await this.view(),
-          market = await this.validateMarket(before, p);
+          market = await this.validateMarket(before, p),
+          record = this.state.markets[p.market] ?? (this.state.markets[p.market] = {});
+        if (!record.fundComplete) throw new Error("Market lacks funded inventory");
+        const beforeOrders = owned(before, this.owner, p.market).filter(
+            ([, order]) => big(order.terms.expiry) > BigInt(Math.floor(Date.now() / 1000)),
+          ),
+          beforeMinimumNonce = big(
+            before.traders.get(this.owner.toBase58())?.minimum_nonce ?? bn(0),
+          ),
+          compatibleBeforeOrders = beforeOrders.filter(
+            ([, order]) =>
+              order.terms.funding === 1 &&
+              order.terms.tif === 0 &&
+              order.terms.recipient.equals(this.owner) &&
+              order.terms.max_fee_bps === before.config.maker_bps &&
+              big(order.terms.nonce) >= beforeMinimumNonce &&
+              big(order.remaining) > 0n,
+          );
+        if (compatibleBeforeOrders.length !== beforeOrders.length)
+          throw new Error("Static seed found an incompatible existing order");
+        const full = ([branch, side]: [number, number]) =>
+          compatibleBeforeOrders.filter(
+            ([, order]) => order.terms.branch === branch && order.terms.side === side,
+          ).length >= this.settings.quoteLevels;
+        if (
+          (
+            [
+              [0, 0],
+              [0, 1],
+              [1, 0],
+              [1, 1],
+            ] as [number, number][]
+          ).every(full)
+        ) {
+          log("static-market-complete", { market: p.market, alreadyPopulated: true });
+          continue;
+        }
         stage = "reference-feeds";
         const reference = await this.readReference(
-            this.origin,
-            this.client.deployment.genesisHash,
-            market,
-            p,
-            this.settings,
-          ),
-          record = this.state.markets[p.market] ?? (this.state.markets[p.market] = {});
+          this.origin,
+          this.client.deployment.genesisHash,
+          market,
+          p,
+          this.settings,
+        );
         record.spot = String(reference.spot);
         record.probability = String(reference.probability);
         record.observedAt = reference.observedAt;
@@ -470,10 +506,9 @@ export class Engine {
           stage = "base-top-up";
           await this.seedClaims(before, p.market, market, 0, needed);
         }
-        for (let step = 0; step < 4 * this.settings.quoteLevels; step++) {
+        for (let step = 0; step < 4 * this.settings.quoteLevels && !this.stopped; step++) {
           const s = await this.view(),
             m = await this.validateMarket(s, p);
-          if (!record.fundComplete) throw new Error("Market lacks funded inventory");
           const existing = owned(s, this.owner, p.market).filter(
             ([, o]) => big(o.terms.expiry) > BigInt(Math.floor(Date.now() / 1000)),
           );
@@ -499,25 +534,17 @@ export class Engine {
                 o.terms.tif === 0 &&
                 o.terms.recipient.equals(this.owner),
             );
-          if (
-            desired.length !== 4 * this.settings.quoteLevels &&
-            desired.length +
-              existing.filter(
-                ([, o]) =>
-                  !desired.some(
-                    (q) =>
-                      o.terms.branch === q.branch &&
-                      o.terms.side === q.side &&
-                      big(o.terms.price) === q.price,
-                  ),
-              ).length <
-              4 * this.settings.quoteLevels
-          )
+          if (desired.length !== 4 * this.settings.quoteLevels)
             throw new Error("Inventory cannot back every requested static level");
           const minimumNonce = big(s.traders.get(this.owner.toBase58())?.minimum_nonce ?? bn(0)),
             missing = new Map(
               desired
-                .filter((q) => !represented(q))
+                .filter(
+                  (q) =>
+                    existing.filter(
+                      ([, o]) => o.terms.branch === q.branch && o.terms.side === q.side,
+                    ).length < this.settings.quoteLevels && !represented(q),
+                )
                 .map((q) => [`${q.branch}:${q.side}:${q.price}`, q]),
             );
           for (const [, held] of existing) {
@@ -536,7 +563,23 @@ export class Engine {
             if (target) missing.delete(id);
           }
           const q = missing.values().next().value as Quote | undefined;
-          if (!q) break;
+          if (!q) {
+            const populated = ([branch, side]: [number, number]) =>
+              existing.filter(([, o]) => o.terms.branch === branch && o.terms.side === side)
+                .length >= this.settings.quoteLevels;
+            if (
+              !(
+                [
+                  [0, 0],
+                  [0, 1],
+                  [1, 0],
+                  [1, 1],
+                ] as [number, number][]
+              ).every(populated)
+            )
+              throw new Error("Static ladder could not fill every requested side");
+            break;
+          }
           const order = passiveOrder(
               this.owner,
               p.market,

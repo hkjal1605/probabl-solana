@@ -365,3 +365,55 @@ test("static placement refreshes and journals its bounded reference before signi
     observedAt: reference.observedAt,
   });
 });
+
+test("static placement resumes by side counts without repricing or duplicating a full book", async () => {
+  const s = book(),
+    state = initialState("test");
+  state.markets[id] = { fundStarted: true, fundComplete: true };
+  for (const branch of [0, 1])
+    for (const side of [0, 1]) s.orders.set(`${branch}:${side}`, order(branch, side));
+  let references = 0,
+    sends = 0;
+  const executor = {
+    reconcilePending: async () => {},
+    send: async () => sends++,
+  } as unknown as Executor;
+  const engine = new Engine(
+    { deployment: { genesisHash: "test" } } as SolanaClient,
+    owner,
+    config,
+    "https://example.com",
+    state,
+    () => {},
+    executor,
+    async () => {
+      references++;
+      return reference;
+    },
+  );
+  engine.view = async () => s;
+  engine.validateMarket = async () => market;
+  await engine.staticCycle();
+  expect(references).toBe(0);
+  expect(sends).toBe(0);
+});
+
+test("static placement honors shutdown before reading another market", async () => {
+  let views = 0;
+  const engine = new Engine(
+    {} as SolanaClient,
+    owner,
+    config,
+    "https://example.com",
+    initialState("test"),
+    () => {},
+    { reconcilePending: async () => {} } as Executor,
+  );
+  engine.stopped = true;
+  engine.view = async () => {
+    views++;
+    return book();
+  };
+  await engine.staticCycle();
+  expect(views).toBe(0);
+});
