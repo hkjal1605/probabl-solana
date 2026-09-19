@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
-import { verifyRuntimeStorage } from "@conditional-stocks/db/solana/administration";
+import { verifyRuntimeStorage } from "../../../packages/db/src/solana/administration.ts";
 
 const root = resolve(import.meta.dir, "../../..");
 for (const service of ["api", "indexer", "polymarket"] as const) {

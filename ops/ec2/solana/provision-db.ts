@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
-import { provisionRuntimeRoles } from "@conditional-stocks/db/solana/administration";
+import { provisionRuntimeRoles } from "../../../packages/db/src/solana/administration.ts";
 
 const root = resolve(import.meta.dir, "../../..");
 const envRoot = resolve(root, ".local/ec2/env");

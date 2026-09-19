@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseEnv } from "node:util";
-import { grantIndexedSnapshotRead } from "@conditional-stocks/db/solana/administration";
+import { grantIndexedSnapshotRead } from "../../../packages/db/src/solana/administration.ts";
 
 const root = resolve(import.meta.dir, "../../..");
 const env = parseEnv(readFileSync(resolve(root, ".local/ec2/env/indexer.env"), "utf8"));
