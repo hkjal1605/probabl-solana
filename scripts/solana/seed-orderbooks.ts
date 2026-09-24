@@ -48,7 +48,9 @@ const required = (name: string) => {
 if (!process.argv.includes("--execute")) throw new Error("Order-book seeding requires --execute");
 if (required("MM_GENESIS_HASH") !== GENESIS) throw new Error("Devnet only");
 const LEVELS = Number(process.env.SEED_LEVELS ?? 10);
-const CONCURRENCY = Number(process.env.SEED_CONCURRENCY ?? 4);
+const CONCURRENCY = Number(process.env.SEED_CONCURRENCY ?? 2);
+// Placements per transaction (falls back to one when a bundle does not fit).
+const BATCH = Number(process.env.SEED_BATCH ?? 4);
 if (!Number.isInteger(LEVELS) || LEVELS < 1 || LEVELS > 20) throw new Error("Invalid SEED_LEVELS");
 const api = new URL(process.env.MM_API_ORIGIN ?? "https://api-solana.probabl.trade").origin;
 const wallet = signer(required("MM_PRIVATE_KEY"), required("MM_WALLET_ADDRESS"));
@@ -73,25 +75,46 @@ const json = async <T>(path: string): Promise<T> => {
 const random = (low: number, high: number) => low + (high - low) * (crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32);
 const log = (event: string, fields: Record<string, unknown>) => console.log(JSON.stringify({ event, ...fields }));
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const rateLimited = (error: unknown) => /429|rate limit/i.test(String(error instanceof Error ? error.message : error));
+/** Retry RPC reads through the shared endpoint's rate limit. */
+async function rpc<T>(read: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++)
+    try {
+      return await read();
+    } catch (error) {
+      if (!rateLimited(error) || attempt >= 8) throw error;
+      await sleep(2_000 * attempt);
+    }
+}
+async function landed(signature: string, lastValidBlockHeight: number) {
+  while (true) {
+    const status = (await rpc(() => client.connection.getSignatureStatuses([signature]))).value[0];
+    if (status?.err) throw new Error(`Transaction failed on chain: ${JSON.stringify(status.err)}`);
+    if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") return true;
+    if ((await rpc(() => client.connection.getBlockHeight("confirmed"))) > lastValidBlockHeight) return false;
+    await sleep(1_500);
+  }
+}
 async function send(label: string, instructions: TransactionInstruction[]) {
   for (let attempt = 1; ; attempt++) {
-    const built = await client.prepareTransaction(owner, envelope(instructions, client.program));
+    const built = await rpc(() => client.prepareTransaction(owner, envelope(instructions, client.program)));
     built.transaction.sign([wallet]);
     const signature = bs58.encode(built.transaction.signatures[0]!);
     try {
-      await client.connection.sendRawTransaction(built.transaction.serialize(), { maxRetries: 3 });
-      const result = await client.connection.confirmTransaction(
-        { signature, blockhash: built.blockhash, lastValidBlockHeight: built.lastValidBlockHeight },
-        "confirmed",
-      );
-      if (result.value.err) throw new Error(`${label} failed on chain`);
-      return signature;
+      await rpc(() => client.connection.sendRawTransaction(built.transaction.serialize(), { maxRetries: 3 }));
     } catch (error) {
-      // A landed transaction is never resent: only an expired blockhash retries.
-      const status = (await client.connection.getSignatureStatuses([signature])).value[0];
-      if (status?.confirmationStatus && !status.err) return signature;
-      if (attempt >= 3 || status?.err) throw error;
+      // Simulation rejected it: nothing landed.
+      if (attempt >= 3) throw new Error(`${label}: ${error instanceof Error ? error.message.slice(0, 200) : error}`);
+      await sleep(2_000 * attempt);
+      continue;
     }
+    // A landed transaction is never resent; only an expired blockhash retries.
+    if (await landed(signature, built.lastValidBlockHeight)) {
+      await sleep(250);
+      return signature;
+    }
+    if (attempt >= 3) throw new Error(`${label}: blockhash expired`);
   }
 }
 
@@ -147,9 +170,9 @@ function ladders(m: MarketAccount, legs: Record<number, LiveLeg>, center: number
 
 async function seedMarket(id: string) {
   const marketKey = key(id);
-  let m = await client.market(marketKey);
+  let m = await rpc(() => client.market(marketKey));
   if (m.state !== 2) return log("skipped", { market: id, state: m.state });
-  const legs = await liveLegs(client.connection, m, client.config, client.program);
+  const legs = await rpc(() => liveLegs(client.connection, m, client.config, client.program));
   const spots = await json<{ bases: { collateral: number; mint: string; sharePriceUsd: number | null; spot: { priceUsd: number | null } | null; multiplierValue: number | null }[] }>(
     `/v1/markets/${id}/spot-prices`,
   );
@@ -168,7 +191,7 @@ async function seedMarket(id: string) {
   if (!planned.length) return log("complete", { market: id, placed: 0 });
 
   // Funding: one complete-set split per collateral covers both branch books.
-  const current = await client.wallet(marketKey, owner);
+  const current = await rpc(() => client.wallet(marketKey, owner));
   const setup: TransactionInstruction[] = current ? [] : [client.initializeWallet(marketKey, owner)];
   const balance = (asset: number) => (current ? big(current.balances[asset]!) : 0n);
   for (let collateral = 0; collateral <= m.bases; collateral++) {
@@ -209,12 +232,14 @@ async function seedMarket(id: string) {
   if (setup.length) await send(`${id}:wallet`, setup);
 
   const traderKey = traderAddress(client.config, owner, client.program);
-  const nonce = (await client.connection.getAccountInfo(traderKey))
-    ? big((await client.fetch<{ minimum_nonce: Parameters<typeof big>[0] }>("Trader", traderKey)).minimum_nonce)
+  const nonce = (await rpc(() => client.connection.getAccountInfo(traderKey)))
+    ? big((await rpc(() => client.fetch<{ minimum_nonce: Parameters<typeof big>[0] }>("Trader", traderKey))).minimum_nonce)
     : 0n;
-  let placed = 0;
-  for (const o of planned) {
-    m = await client.market(marketKey);
+  // Every placement advances its branch's sequence by exactly one; track it
+  // locally and re-read the market only when a bundle fails.
+  m = await rpc(() => client.market(marketKey));
+  const sequence = [big(m.sequence[0]!), big(m.sequence[1]!)];
+  const build = (o: Planned, offset: bigint) => {
     const now = BigInt(Math.floor(Date.now() / 1000));
     const order: OrderWire = {
       maker: owner.toBase58(),
@@ -238,14 +263,35 @@ async function seedMarket(id: string) {
       candidates: [],
       now,
       step: big(m.terms.step),
-      nextSequence: big(m.sequence[o.branch]!),
+      nextSequence: sequence[o.branch]! + offset,
       makerFeeBps: config.maker_bps,
       takerFeeBps: config.taker_bps,
       program: client.program,
       legs,
     });
-    await send(`${id}:order`, [client.placement(order, plan, m)]);
-    placed++;
+    return client.placement(order, plan, m);
+  };
+  let placed = 0,
+    batch = BATCH;
+  for (const branch of [0, 1] as const) {
+    const orders = planned.filter((o) => o.branch === branch);
+    for (let i = 0; i < orders.length; ) {
+      const bundle = orders.slice(i, i + batch);
+      try {
+        await send(`${id}:orders`, bundle.map((o, j) => build(o, BigInt(j))));
+      } catch (error) {
+        if (batch > 1) {
+          batch = 1; // Too large or rejected as a bundle: continue one by one.
+          m = await rpc(() => client.market(marketKey));
+          sequence[branch] = big(m.sequence[branch]!);
+          continue;
+        }
+        throw error;
+      }
+      sequence[branch]! += BigInt(bundle.length);
+      placed += bundle.length;
+      i += bundle.length;
+    }
   }
   log("complete", { market: id, placed, center });
 }
