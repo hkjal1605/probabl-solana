@@ -72,7 +72,20 @@ const json = async <T>(path: string): Promise<T> => {
   if (!response.ok) throw new Error(`${path} returned ${response.status}`);
   return (await response.json()) as T;
 };
-const random = (low: number, high: number) => low + (high - low) * (crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32);
+/** Deterministic per-market randomness (mulberry32 over the market id's
+ * digest): a re-run reproduces the same levels and sizes, so topping up a
+ * partially seeded book can never cross its existing orders. */
+function randomFor(id: string) {
+  const hash = digest(`seed-orderbooks:${id}`);
+  let state = new DataView(hash.buffer, hash.byteOffset, 4).getUint32(0);
+  return (low: number, high: number) => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return low + (high - low) * (((t ^ (t >>> 14)) >>> 0) / 2 ** 32);
+  };
+}
 const log = (event: string, fields: Record<string, unknown>) => console.log(JSON.stringify({ event, ...fields }));
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -126,7 +139,14 @@ interface Planned {
   quantity: bigint;
 }
 /** Random ladders around the first leg's share price. */
-function ladders(m: MarketAccount, legs: Record<number, LiveLeg>, center: number, existing: Map<string, number>, notional: [number, number]) {
+function ladders(
+  random: (low: number, high: number) => number,
+  m: MarketAccount,
+  legs: Record<number, LiveLeg>,
+  center: number,
+  existing: Map<string, number>,
+  notional: [number, number],
+) {
   const shareDecimals = m.terms.share_decimals,
     quoteDecimals = m.decimals[0]!,
     tick = big(m.terms.tick),
@@ -149,10 +169,11 @@ function ladders(m: MarketAccount, legs: Record<number, LiveLeg>, center: number
       const have = existing.get(`${branch}:${side}`) ?? 0;
       for (let level = 0; level < LEVELS; level++) {
         distance += random(0.002, 0.015);
+        const size = random(...notional);
         if (level < have) continue;
         const usd = side === 0 ? mid * (1 - distance) : mid * (1 + distance);
         const price = toPrice(usd, side === 1);
-        let quantity = (BigInt(Math.floor((random(...notional) / usd) * 10 ** shareDecimals)) / step) * step;
+        let quantity = (BigInt(Math.floor((size / usd) * 10 ** shareDecimals)) / step) * step;
         if (quantity < step) quantity = step;
         while (quote(quantity, price) < minNotional) quantity += step;
         planned.push({
@@ -181,13 +202,21 @@ async function seedMarket(id: string) {
   const spot = reference?.spot?.priceUsd ?? null;
   const center = reference?.sharePriceUsd ?? (spot && reference?.multiplierValue ? spot / reference.multiplierValue : spot);
   if (!center || !Number.isFinite(center) || center <= 0) return log("skipped", { market: id, reason: "no reference price" });
-  const book = await json<{ orders: { maker: string; branch: number; side: number; status: string }[] }>(`/orderbook/${id}?limit=2000`);
+  const book = await json<{ orders: { id: string; maker: string; branch: number; side: number; status: string }[] }>(`/orderbook/${id}?limit=2000`);
+  const own = book.orders.filter((order) => order.maker === owner.toBase58() && order.status === "open");
   const existing = new Map<string, number>();
-  for (const order of book.orders)
-    if (order.maker === owner.toBase58() && order.status === "open")
+  if (process.env.SEED_RESET === "1") {
+    // Cancel this wallet's resting orders first (releasing their reservations).
+    for (let i = 0; i < own.length; i += 8)
+      await send(`${id}:cancel`, [
+        client.orderMaintenance("cancel_orders", marketKey, owner, own.slice(i, i + 8).map((order) => key(order.id))),
+      ]);
+    if (own.length) log("cancelled", { market: id, orders: own.length });
+  } else
+    for (const order of own)
       existing.set(`${order.branch}:${order.side}`, (existing.get(`${order.branch}:${order.side}`) ?? 0) + 1);
   const native = m.bases >= 1 && m.mints[underlyingAsset(1)]!.equals(NATIVE_MINT);
-  const planned = ladders(m, legs, center, existing, native ? [2, 10] : [10, 100]);
+  const planned = ladders(randomFor(id), m, legs, center, existing, native ? [2, 10] : [10, 100]);
   if (!planned.length) return log("complete", { market: id, placed: 0 });
 
   // Funding: one complete-set split per collateral covers both branch books.
