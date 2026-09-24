@@ -1,16 +1,21 @@
 import { expect, test } from "bun:test";
-import { DEVNET_MARKET_SEED, validateMarketSeed } from "../seed-markets-policy.ts";
+import { MARKET_TICKERS } from "../devnet-policy.ts";
+import { DEVNET_MARKET_SEED, type SeedMarket, validateMarketSeed } from "../seed-markets-policy.ts";
 
-test("Devnet catalogue has three unique real-world conditions in every UI category", () => {
+test("Devnet catalogue: three assets per real-world event, every asset in at least two events", () => {
   expect(validateMarketSeed()).toBe(DEVNET_MARKET_SEED);
-  expect(DEVNET_MARKET_SEED).toHaveLength(12);
-  expect(new Set(DEVNET_MARKET_SEED.map((market) => market.category))).toEqual(
-    new Set(["Macro", "Earnings", "Policy", "Other"]),
-  );
+  for (const ticker of MARKET_TICKERS)
+    expect(DEVNET_MARKET_SEED.filter((market) => market.tickers.includes(ticker)).length).toBeGreaterThanOrEqual(2);
   expect(
     DEVNET_MARKET_SEED.every(
       (market) =>
         !/\b(?:btc|eth|sol|nvda|tsla|spy)\b.*\b(?:reach|hit|above|below)\b/i.test(market.question),
     ),
   ).toBe(true);
+});
+
+test("events with other than three distinct assets, or assets tied to one event, are rejected", () => {
+  const [first, ...rest] = DEVNET_MARKET_SEED as SeedMarket[];
+  expect(() => validateMarketSeed([{ ...first!, tickers: ["TSLA", "TSLA", "SPY"] }, ...rest])).toThrow("three distinct");
+  expect(() => validateMarketSeed(rest)).toThrow("fewer than two events");
 });

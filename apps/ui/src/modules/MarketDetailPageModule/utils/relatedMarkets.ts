@@ -11,7 +11,10 @@ export function relatedMarkets(current: MarketView, catalogue: MarketView[]): Ma
       (current.mapping.conditionId !== "" &&
         market.mapping.conditionId === current.mapping.conditionId &&
         market.mapping.yesIndex === current.mapping.yesIndex &&
-        market.mapping.noIndex === current.mapping.noIndex),
+        market.mapping.noIndex === current.mapping.noIndex &&
+        // An open event never offers frozen (halted or delisted) siblings; they
+        // appear once the current market itself is no longer open.
+        (current.lifecycle !== "open" || market.lifecycle !== "frozen")),
   );
   const assets = new Map<string, MarketView>();
   for (const market of related) {

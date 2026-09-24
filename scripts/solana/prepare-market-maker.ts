@@ -25,7 +25,7 @@ import {
   ASSETS,
   assertDevnet,
   isIssuer,
-  issuerLegs,
+  marketLegs,
   MARKET_TICKERS,
   parseDeployer,
   rawAmount,
@@ -44,6 +44,9 @@ const TARGET_SOL = 2_000_000_000n;
 /** Wallet top-ups in whole tokens: quote plus every issuer leg of every asset. */
 const TARGETS: Readonly<Record<string, string>> = Object.freeze({
   USDC: "5000",
+  // SOL legs are wrapped by the bot from its own balance.
+  BTC: "1",
+  ETH: "5",
   ...Object.fromEntries(ASSETS.filter(isIssuer).map((leg) => [leg.symbol, "5"])),
 });
 
@@ -88,7 +91,7 @@ const asset = (symbol: string) => {
   return match;
 };
 // One market per underlying asset and event, listing that asset's issuer legs in order.
-const rows = MARKET_TICKERS.map((ticker) => issuerLegs(ticker).map((leg) => asset(leg.symbol).mint));
+const rows = MARKET_TICKERS.map((ticker) => marketLegs(ticker).map((leg) => asset(leg.symbol).mint));
 const rowKey = (mints: string[]) => mints.join(",");
 const expectedRows = new Map(rows.map((mints, index) => [rowKey(mints), MARKET_TICKERS[index]!]));
 const quote = asset("USDC");
@@ -99,10 +102,12 @@ const response = await fetch(`${API}/markets`, {
 });
 if (!response.ok) throw new Error(`Market index returned ${response.status}`);
 const body = (await response.json()) as { markets?: IndexedMarket[] };
-const markets = body.markets;
-if (!Array.isArray(markets) || markets.length !== DEVNET_MARKET_SEED.length * rows.length)
+if (!Array.isArray(body.markets)) throw new Error("Invalid market index");
+// Frozen markets (removed from the demo catalogue) are never quoted.
+const markets = body.markets.filter((market) => market.state !== 3);
+if (markets.length !== DEVNET_MARKET_SEED.reduce((sum, seed) => sum + seed.tickers.length, 0))
   throw new Error("Indexer does not expose exactly the intended fresh market catalogue");
-const slugs = new Set(DEVNET_MARKET_SEED.map((entry) => entry.slug));
+const seeds = new Map(DEVNET_MARKET_SEED.map((entry) => [entry.slug, entry]));
 const groups = new Map<string, Set<string>>();
 const legsOf = (market: IndexedMarket) =>
   market.bases.toSorted((a, b) => a.collateral - b.collateral).map((leg) => leg.mint);
@@ -114,7 +119,7 @@ for (const market of markets) {
     market.quoteToken !== quote.mint ||
     !ticker ||
     !slug ||
-    !slugs.has(slug)
+    !seeds.get(slug)?.tickers.includes(ticker as (typeof MARKET_TICKERS)[number])
   )
     throw new Error(`Unexpected indexed market ${market.id}`);
   const group = groups.get(market.polymarketConditionId) ?? new Set<string>();
@@ -124,7 +129,7 @@ for (const market of markets) {
 }
 if (
   groups.size !== DEVNET_MARKET_SEED.length ||
-  [...groups.values()].some((group) => group.size !== rows.length)
+  [...groups.values()].some((group) => group.size !== 3)
 )
   throw new Error("Indexed event grouping is incomplete");
 
@@ -165,7 +170,8 @@ const config = settings({
   probabilityJumpX6: 100000,
   cooldownMs: 60000,
   maxDrawdownBps: 1000,
-  maxTransferFeeBps: 100,
+  // PreStocks OPENAI/KALSHI/ANTHROPIC charge the mainnet 3% transfer fee.
+  maxTransferFeeBps: 300,
   minSolLamports: "100000000",
   dailySolBudgetLamports: "10000000000",
 });

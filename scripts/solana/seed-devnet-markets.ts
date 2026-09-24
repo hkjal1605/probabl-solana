@@ -37,7 +37,7 @@ import {
 } from "../../apps/admin-ui/src/lib/market-batch.ts";
 import { DEFAULT_SHARE_DECIMALS } from "../../apps/admin-ui/src/lib/issuer-mints.ts";
 import { canonicalStringify } from "../../packages/market-data/src/index.ts";
-import { issuerLegs, MARKET_TICKERS, parseDeployer } from "./devnet-policy.ts";
+import { MARKET_TICKERS, marketLegs, parseDeployer } from "./devnet-policy.ts";
 import { DEVNET_MARKET_SEED, validateMarketSeed } from "./seed-markets-policy.ts";
 
 const PROGRAM = "53gtyz9nYzS7vwSbx2v7GeGLrMTas7vCATkjiKvAG1ra";
@@ -126,9 +126,10 @@ const asset = (symbol: string) => {
   if (!match) throw new Error(`Missing ${symbol} fixture mint`);
   return match.mint;
 };
-// One market per underlying asset and event; its base legs are that asset's
-// mock issuer tokens (xStocks / Ondo / Remora replicas) in policy order.
-const assetRows = MARKET_TICKERS.map((ticker) => issuerLegs(ticker).map((leg) => asset(leg.symbol)));
+// Every asset's base legs in policy order: issuer tokens (xStocks / Ondo /
+// PreStocks / Tessera replicas) or the crypto mock; each event lists the rows
+// of its own three assets.
+const assetRows = MARKET_TICKERS.map((ticker) => marketLegs(ticker).map((leg) => asset(leg.symbol)));
 if (assetRows.some((row) => row.length < 1 || row.length > MAX_BASES))
   throw new Error("Every seeded asset market lists 1-3 issuer tokens");
 if (config.quote_mint.toBase58() !== asset("USDC")) throw new Error("Unexpected quote mint");
@@ -427,7 +428,14 @@ function assertResumedPacket(plan: ReturnType<typeof buildBatchPlans>[number], v
     throw new Error("Stored seed evidence differs from the pinned market plan");
 }
 
+// Optional explicit subset (comma-separated Gamma market ids) of events to seed.
+const only = process.env.DEVNET_SEED_EVENTS
+  ? new Set(process.env.DEVNET_SEED_EVENTS.split(",").map((id) => id.trim()).filter(Boolean))
+  : null;
+if (only && [...only].some((id) => !DEVNET_MARKET_SEED.some((seed) => seed.gammaMarketId === id)))
+  throw new Error("DEVNET_SEED_EVENTS lists an event outside the reviewed catalogue");
 for (const [eventIndex, seed] of DEVNET_MARKET_SEED.entries()) {
+  if (only && !only.has(seed.gammaMarketId)) continue;
   const source = await api<MarketSource>(
     "/v1/admin/polymarket/metadata/fetch",
     { gammaMarketId: seed.gammaMarketId },
@@ -451,7 +459,8 @@ for (const [eventIndex, seed] of DEVNET_MARKET_SEED.entries()) {
   }
   save();
   const plans = buildBatchPlans({
-    rows: resolved.rows,
+    // The event's own three assets, each with its issuer legs.
+    rows: seed.tickers.map((ticker) => resolved.rows[MARKET_TICKERS.indexOf(ticker)]!),
     quote: verified.quote,
     source,
     shared: {
@@ -564,10 +573,10 @@ console.log(
   JSON.stringify({
     complete: true,
     events: DEVNET_MARKET_SEED.length,
-    markets: DEVNET_MARKET_SEED.length * assetRows.length,
+    markets: DEVNET_MARKET_SEED.reduce((sum, seed) => sum + seed.tickers.length, 0),
     assets: MARKET_TICKERS,
     legs: Object.fromEntries(
-      MARKET_TICKERS.map((ticker) => [ticker, issuerLegs(ticker).map((leg) => leg.symbol)]),
+      MARKET_TICKERS.map((ticker) => [ticker, marketLegs(ticker).map((leg) => leg.symbol)]),
     ),
   }),
 );

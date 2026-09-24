@@ -97,14 +97,23 @@ export const ISSUER_TOKEN_METADATA: Readonly<Record<string, TokenDisplayMetadata
 
 /**
  * Devnet replicas of mainnet issuer tokens (scripts/solana/mock-issuers.ts), keyed by
- * their deployment mint. The deployment scripts export `SYMBOL=mint` pairs as
- * NEXT_PUBLIC_SOLANA_ISSUER_REPLICA_MINTS; each replica displays exactly as the mainnet
- * token it replicates. An invalid list shows the plain fallback rather than a guess.
+ * their deployment mint. The API publishes the deployment's `SYMBOL=mint` pairs at
+ * /v1/tokens/replicas; NEXT_PUBLIC_SOLANA_ISSUER_REPLICA_MINTS is the build-time
+ * fallback. Each replica displays exactly as the mainnet token it replicates. An
+ * invalid list shows the plain fallback rather than a guess.
  */
-export function replicaTokenMetadata(value: string | undefined): Readonly<Record<string, TokenDisplayMetadata>> {
+export function replicaTokenMetadata(
+  value: string | Readonly<Record<string, string>> | undefined,
+): Readonly<Record<string, TokenDisplayMetadata>> {
   let mints: Record<string, string>;
   try {
-    mints = parseReplicaMints(value);
+    mints = parseReplicaMints(
+      typeof value === "object"
+        ? Object.entries(value)
+            .map(([symbol, mint]) => `${symbol}=${mint}`)
+            .join(",")
+        : value,
+    );
   } catch {
     mints = {};
   }

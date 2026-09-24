@@ -176,6 +176,38 @@ The API's public PM2 configuration sets `EVIDENCE_PUBLIC_BASE_URL` to
 Reference: [Cloudflare DNS API](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/create/),
 [Certbot webroot and renewal documentation](https://eff-certbot.readthedocs.io/en/stable/using.html#webroot).
 
+## Deployment: 2026-09-25 (fresh program)
+
+Application checkout `54dab50` (plus operator-side follow-ups). The previous
+program `8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg` was closed (its rent
+returned to the deployer); its accounts are unusable. Fresh identity:
+
+```text
+genesis: EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG
+program: 53gtyz9nYzS7vwSbx2v7GeGLrMTas7vCATkjiKvAG1ra
+config:  EfXom6mQxuw5gsHG4AujCgo1dQ3qWg5pN85RvY1ysn23
+frozen deployment lookup table: BJMmm3pT6CX3hQ1xK7sbrEQGf3xtpDvf4GpY52fB6EPs
+lookup keeper: 7PierXUPrUrskC5hi9j6ZmHmYNtCZzaAtGpN2vfi9iFJ (inside the indexer)
+```
+
+The database was reset with `reset-devnet.ts`, then migrated. Env changes were
+applied with `update-deployment.ts`, which now reads per-service settings as
+JSON on stdin (allowlisted names only; credentials are retained):
+
+```bash
+echo '{"indexer":{"YELLOWSTONE_GRPC_URL":"…","YELLOWSTONE_X_TOKEN":"…"}}' \
+  | bun ops/ec2/solana/update-deployment.ts --execute
+```
+
+The indexer streams from Alchemy's devnet Yellowstone endpoint with
+`YELLOWSTONE_COMPRESSION=none` (Alchemy rejects compressed requests) and relays
+events to the API on `127.0.0.1:42070`. The lookup-table keeper runs inside the
+indexer (`SOLANA_LOOKUP_KEEPER_KEYPAIR`, a server-only key in `.local/ec2/`);
+the market-maker wallet is pre-registered via `SOLANA_LOOKUP_KEEPER_OWNERS`.
+The API needs at least one frozen deployment table; create one before any
+market exists with `LOOKUP_TABLE_MINTS` (quote and issuer mints) in
+`scripts/solana/create-lookup-table.ts`.
+
 ## Deployment verification: 2026-09-19
 
 Application checkout: `22b5d98`, plus the new Solana deployment assets transferred

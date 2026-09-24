@@ -93,7 +93,14 @@ const app = new Hono();
 app.use("*", browserCors(origins));
 app.use("*", requestLogging(logger));
 // Devnet replicas of mainnet issuer tokens price as the token they replicate.
-configureDevnetIssuerReplicas(parseReplicaMints(process.env.SOLANA_ISSUER_REPLICA_MINTS));
+const replicaMints = Object.freeze(parseReplicaMints(process.env.SOLANA_ISSUER_REPLICA_MINTS));
+configureDevnetIssuerReplicas(replicaMints);
+// Public: which of this deployment's mints replicate which mainnet issuer token
+// (SYMBOL -> mint), so clients display them without a per-deployment build.
+app.get("/v1/tokens/replicas", (c) => {
+  c.header("Cache-Control", "public, max-age=300");
+  return c.json({ replicas: replicaMints });
+});
 const spotPrices = new JupiterSpotPrices(
   client.deployment.genesisHash,
   jupiterEnvironment(process.env),

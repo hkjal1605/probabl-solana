@@ -44,15 +44,19 @@ if (usingDevnetSecret) await assertDevnet(client.connection);
 const payer = keypairFile
   ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keypairFile, "utf8"))))
   : parseDeployer(process.env.DEVNET_DEPLOYER_PRIVATE_KEY);
-const markets = [
+const list = (value: string | undefined) => [
   ...new Set(
-    (process.env.LOOKUP_TABLE_MARKETS ?? required("LOOKUP_TABLE_MARKET"))
+    (value ?? "")
       .split(",")
       .map((v) => v.trim())
       .filter(Boolean),
   ),
-].map(key);
-if (!markets.length || markets.length > 64) throw new Error("Invalid market list");
+];
+const markets = list(process.env.LOOKUP_TABLE_MARKETS ?? process.env.LOOKUP_TABLE_MARKET).map(key);
+// Custody pools (mint, pool, pool vault) of assets, e.g. a deployment-wide
+// table created before any market exists.
+const mints = list(process.env.LOOKUP_TABLE_MINTS).map(key);
+if ((!markets.length && !mints.length) || markets.length > 64) throw new Error("Invalid market list");
 const marketAccounts = await Promise.all(markets.map((market) => client.market(market)));
 const owners = (process.env.LOOKUP_TABLE_OWNERS ?? "")
   .split(",")
@@ -72,6 +76,11 @@ const addresses = [
   TOKEN_2022_PROGRAM_ID,
   ComputeBudgetProgram.programId,
 ];
+for (const mint of mints) {
+  const pool = poolAddress(client.config, mint, client.program);
+  addresses.push(mint, pool, poolVaultAddress(pool, client.program));
+  for (const owner of owners) addresses.push(assetCreditAddress(pool, owner, client.program));
+}
 for (const [index, market] of markets.entries()) {
   addresses.push(market);
   const marketAccount = marketAccounts[index];

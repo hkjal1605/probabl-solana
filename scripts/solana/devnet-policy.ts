@@ -55,9 +55,25 @@ export type IssuerAssetSpec = Extract<AssetSpec, { kind: "issuer" }>;
 export const isIssuer = (asset: AssetSpec): asset is IssuerAssetSpec => asset.kind === "issuer";
 /** Underlying tickers with devnet markets, and their issuer legs in listing
  * order: tokenized stocks, then pre-IPO companies. */
-export const MARKET_TICKERS = ["NVDA", "TSLA", "SPY", "OPENAI", "SPACEX", "KALSHI", "ANTHROPIC"] as const;
+export const MARKET_TICKERS = [
+  "NVDA",
+  "TSLA",
+  "SPY",
+  "OPENAI",
+  "SPACEX",
+  "KALSHI",
+  "ANTHROPIC",
+  "BTC",
+  "ETH",
+  "SOL",
+] as const;
 export const issuerLegs = (ticker: string) =>
   ASSETS.filter(isIssuer).filter((asset) => asset.ticker === ticker);
+/** Base legs of an asset's market: its issuer tokens, or the crypto mock itself. */
+export const marketLegs = (ticker: string): AssetSpec[] =>
+  ["BTC", "ETH", "SOL"].includes(ticker)
+    ? ASSETS.filter((asset) => asset.symbol === ticker)
+    : issuerLegs(ticker);
 export const tokenProgram = (asset: AssetSpec) =>
   asset.kind === "issuer" ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
 export function parseDeployer(value: string | undefined): Keypair {

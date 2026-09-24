@@ -68,7 +68,10 @@ export function MarketsExplorer({
     setCategory(pathnameCategory);
     setFilters({ category: pathnameCategory });
   }, [pathnameCategory, setFilters]);
-  const groups = groupMarkets(markets);
+  // Active events never list frozen (halted or delisted) sibling markets.
+  const listed =
+    filters.lifecycle === "active" ? markets.filter((m) => m.lifecycle !== "frozen") : markets;
+  const groups = groupMarkets(listed);
   const featuredDefinition = FEATURED_MARKETS[category];
   const featured =
     groups.find((assets) =>
@@ -93,7 +96,7 @@ export function MarketsExplorer({
   );
   // Asset identity (all issuer legs of one stock), not a single mint or a
   // potentially shared display symbol, determines matrix columns.
-  const tokens = [...new Map(markets.map((m) => [marketAssetKey(m), m])).values()].sort((a, b) =>
+  const tokens = [...new Map(listed.map((m) => [marketAssetKey(m), m])).values()].sort((a, b) =>
     a.ticker.localeCompare(b.ticker),
   );
   const showSkeleton = query.isPending && markets.length === 0;

@@ -255,6 +255,8 @@ test("mainnet issuer tokens and their devnet replicas show the issuer's exact id
   ]);
   // Without that deployment configuration (or with a malformed one) nothing is guessed.
   expect(tokenMetadata(replicaOpenAi, SOLANA_DEVNET_GENESIS)).toBeUndefined();
+  // The API's published mapping (an object) is equivalent to the env list.
+  expect(replicaTokenMetadata({ OPENAI: replicaOpenAi, tOpenAI: replicaTOpenAi })).toEqual(replicas);
   expect(replicaTokenMetadata("OPENAI=bad")).toEqual({});
   expect(replicaTokenMetadata(`NVDAr=${replicaOpenAi}`)).toEqual({});
   // Stock markets keep the stock icon; issuers come from the catalog or conventions.

@@ -13,7 +13,12 @@ import {
   MAX_BASES,
   underlyingAsset,
 } from "@conditional-stocks/solana-client";
-import { marketTokenDisplay } from "../lib/tokens/devnet";
+import {
+  marketTokenDisplay,
+  REPLICA_TOKEN_METADATA,
+  replicaTokenMetadata,
+  type TokenDisplayMetadata,
+} from "../lib/tokens/devnet";
 import type {
   BranchBook,
   LegLiveView,
@@ -269,7 +274,29 @@ function parseAssetTable(market: Record<string, unknown>) {
   return { claimMints, quoteToken, quoteClaimMints };
 }
 
+// The deployment's issuer replica mints as published by the API, reused for five
+// minutes; the build-time list stays the fallback when the API cannot answer.
+let replicaRead:
+  | { at: number; value: Promise<Readonly<Record<string, TokenDisplayMetadata>>> }
+  | undefined;
+function replicaMetadata() {
+  if (replicaRead && Date.now() - replicaRead.at < 300_000) return replicaRead.value;
+  const read: NonNullable<typeof replicaRead> = {
+    at: Date.now(),
+    value: requestJson<{ replicas?: Record<string, string> }>("/v1/tokens/replicas").then(
+      (body) => ({ ...REPLICA_TOKEN_METADATA, ...replicaTokenMetadata(body.replicas ?? {}) }),
+      () => {
+        if (replicaRead === read) replicaRead = undefined;
+        return REPLICA_TOKEN_METADATA;
+      },
+    ),
+  };
+  replicaRead = read;
+  return read.value;
+}
+
 async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<MarketView[]> {
+  const replicasPromise = replicaMetadata();
   const json = <T>(url: string): Promise<T> =>
     requestJson<T>(new URL(url).pathname + new URL(url).search, signal ? { signal } : {});
   // Start the all-books projection with the market list. Once market identities
@@ -307,6 +334,7 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
     }
   }
   const batch = await batchPromise;
+  const replicas = await replicasPromise;
   return Promise.all(
     marketResponse.markets.map(async (market): Promise<MarketView> => {
       assertShareUnits(market);
@@ -363,6 +391,7 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
         table.quoteToken,
         process.env.NEXT_PUBLIC_SOLANA_GENESIS_HASH ?? "",
         text(record(metadata.asset).symbol, "STOCK"),
+        replicas,
       );
       const bases: MarketLegView[] = legs.map((leg, index) => {
         const shown = display.legs[index] ?? { symbol: display.ticker, issuer: null };
