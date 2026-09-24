@@ -53,6 +53,6 @@
     "happy-dom": "^20.14.5",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "wrangler": "4.129.1"
+    "wrangler": "4.136.1"
   }
 }
