@@ -134,7 +134,7 @@ export function sortEventGroups(groups: MarketView[][], direction: "newest" | "o
 }
 export function marketCategory(market: MarketView) {
   const question = market.question.toLowerCase();
-  if (/fed|rate|inflation|cpi|gdp/.test(question)) return "Macro";
+  if (/fed|rate|inflation|cpi|gdp|recession/.test(question)) return "Macro";
   if (/export|tariff|election|policy|ban|regulat|\bact\b|\blaw\b/.test(question)) return "Policy";
   if (/revenue|earnings|deliver|quarter|profit/.test(question)) return "Earnings";
   return "Other";

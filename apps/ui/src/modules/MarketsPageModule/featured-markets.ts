@@ -11,7 +11,7 @@ export const FEATURED_MARKETS: Record<MarketCategory, FeaturedMarketDefinition> 
     imageSrc: "/markets/us-china-tariff-feature.webp",
   },
   Macro: {
-    conditionId: "0xc60022fe066abd6f96c375adb09f38d92c4931f09c10b805354581b4e5465e93",
+    conditionId: "0x2bb4294142c311763ca6be27ceffcef132f5ac8281f98a62abe02f6e6a8c0107",
     imageSrc: "/markets/fed-rate-cut-feature.webp",
   },
   Earnings: {

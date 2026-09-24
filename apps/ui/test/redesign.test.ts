@@ -99,6 +99,12 @@ describe("category featured markets", () => {
       "Policy",
     );
   });
+
+  test("every seeded Devnet event renders under its reviewed category tab", async () => {
+    const { DEVNET_MARKET_SEED } = await import("../../../scripts/solana/seed-markets-policy.ts");
+    for (const seed of DEVNET_MARKET_SEED)
+      expect(marketCategory({ ...market, question: seed.question }), seed.slug).toBe(seed.category);
+  });
 });
 describe("canonical order windows", () => {
   test("keeps older resting orders and prefers the newest update across reads", () => {

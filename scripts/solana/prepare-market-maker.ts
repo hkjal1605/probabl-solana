@@ -39,13 +39,14 @@ const CONFIG = "EfXom6mQxuw5gsHG4AujCgo1dQ3qWg5pN85RvY1ysn23";
 const ADMIN = "4o2JYy6ktdZEfaUVHGwdCbvMyypZ1NRCDpyS1rfY9q8z";
 const EXPECTED_MARKET_MAKER = "9wYFs5Qt7dXAnU5ewPAvG21ncYjbAeDzawvTtVFmdj5Z";
 const API = "https://api-solana.probabl.trade";
-// Wallet rent is ~0.0022 SOL per market (84 markets ≈ 0.19 SOL); the rest pays fees.
-const TARGET_SOL = 2_000_000_000n;
+// Wallet rent is ~0.0022 SOL per market, and every resting order is a rent-paying
+// account (~0.002 SOL), across both branches and every issuer leg's asks.
+const TARGET_SOL = 8_000_000_000n;
 /** Wallet top-ups in whole tokens: quote plus every issuer leg of every asset. */
 const TARGETS: Readonly<Record<string, string>> = Object.freeze({
-  USDC: "5000",
+  USDC: "6000",
   // SOL legs are wrapped by the bot from its own balance.
-  BTC: "1",
+  BTC: "2",
   ETH: "5",
   ...Object.fromEntries(ASSETS.filter(isIssuer).map((leg) => [leg.symbol, "5"])),
 });

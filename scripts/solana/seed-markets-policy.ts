@@ -79,6 +79,54 @@ export const DEVNET_MARKET_SEED: readonly SeedMarket[] = [
     // Exchange-failure contagion across the major crypto assets.
     tickers: ["BTC", "ETH", "SOL"],
   },
+  {
+    category: "Macro",
+    gammaMarketId: "680951",
+    slug: "will-inflation-reach-more-than-5-in-2026-282-763",
+    question: "Will inflation reach more than 5% in 2026?",
+    // The inflation-hedge trade, equities, and Kalshi (the venue for CPI contracts).
+    tickers: ["BTC", "SPY", "KALSHI"],
+  },
+  {
+    category: "Policy",
+    gammaMarketId: "2382827",
+    slug: "us-x-china-tariff-agreement-by-december-31",
+    question: "US x China tariff agreement by December 31?",
+    // Nvidia's China chip sales, Tesla's China factory and sales, trade-war risk appetite.
+    tickers: ["NVDA", "TSLA", "BTC"],
+  },
+  {
+    category: "Policy",
+    gammaMarketId: "1720308",
+    slug: "law-banning-sports-prediction-markets-enacted-in-2026",
+    question: "Law banning sports prediction markets enacted in 2026?",
+    // Kalshi's core business; displaced volume moves to on-chain venues on Solana/Ethereum.
+    tickers: ["KALSHI", "SOL", "ETH"],
+  },
+  {
+    category: "Earnings",
+    gammaMarketId: "1632674",
+    slug: "sec-removes-quarterly-reporting-requirement",
+    question: "SEC removes quarterly reporting requirement?",
+    // Musk-backed semiannual reporting; a lighter burden eases the OpenAI and Anthropic IPOs.
+    tickers: ["TSLA", "OPENAI", "ANTHROPIC"],
+  },
+  {
+    category: "Earnings",
+    gammaMarketId: "4622920",
+    slug: "mu-quarterly-earnings-nongaap-eps-09-30-2026-32pt22",
+    question: "Will Micron (MU) beat quarterly earnings?",
+    // Micron's HBM feeds Nvidia GPUs: an AI-compute and S&P read-through.
+    tickers: ["NVDA", "SPY", "OPENAI"],
+  },
+  {
+    category: "Earnings",
+    gammaMarketId: "4572598",
+    slug: "tesla-roadster-delivered-by-december-31-2026",
+    question: "Tesla Roadster delivered by December 31, 2026?",
+    // Tesla execution, the Roadster's SpaceX option package, a top S&P weight.
+    tickers: ["TSLA", "SPACEX", "SPY"],
+  },
 ] as const;
 
 const categoryFor = (question: string): SeedCategory => {
@@ -112,5 +160,8 @@ export function validateMarketSeed(markets: readonly SeedMarket[] = DEVNET_MARKE
   for (const ticker of MARKET_TICKERS)
     if (markets.filter((market) => market.tickers.includes(ticker)).length < 2)
       throw new Error(`${ticker} is tied to fewer than two events`);
+  for (const category of ["Macro", "Earnings", "Policy", "Other"] as const)
+    if (markets.filter((market) => market.category === category).length < 3)
+      throw new Error(`Missing ${category} events`);
   return markets;
 }

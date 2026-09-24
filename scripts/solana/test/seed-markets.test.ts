@@ -14,8 +14,17 @@ test("Devnet catalogue: three assets per real-world event, every asset in at lea
   ).toBe(true);
 });
 
-test("events with other than three distinct assets, or assets tied to one event, are rejected", () => {
+test("events with other than three distinct assets, assets tied to one event, or thin tabs are rejected", () => {
   const [first, ...rest] = DEVNET_MARKET_SEED as SeedMarket[];
   expect(() => validateMarketSeed([{ ...first!, tickers: ["TSLA", "TSLA", "SPY"] }, ...rest])).toThrow("three distinct");
-  expect(() => validateMarketSeed(rest)).toThrow("fewer than two events");
+  const without = (...slugs: string[]) => DEVNET_MARKET_SEED.filter((market) => !slugs.includes(market.slug));
+  expect(() =>
+    validateMarketSeed(without("major-cex-insolvent-in-2026", "law-banning-sports-prediction-markets-enacted-in-2026")),
+  ).toThrow("is tied to fewer than two events");
+  expect(() => validateMarketSeed(without("mu-quarterly-earnings-nongaap-eps-09-30-2026-32pt22"))).toThrow(
+    "Missing Earnings events",
+  );
+  // Every UI category tab carries at least three events of three markets.
+  for (const category of ["Macro", "Earnings", "Policy", "Other"])
+    expect(DEVNET_MARKET_SEED.filter((market) => market.category === category).length).toBeGreaterThanOrEqual(3);
 });
