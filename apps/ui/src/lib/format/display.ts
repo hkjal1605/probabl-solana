@@ -1,4 +1,9 @@
-import { formatPriceRawX18, formatTokenAmount, type MarketUnits } from "@conditional-stocks/domain";
+import {
+  type AnyMarketUnits,
+  formatPriceRawX18,
+  formatShareAmount,
+  formatTokenAmount,
+} from "@conditional-stocks/domain";
 
 const compact = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2, notation: "compact" });
 const decimal = new Intl.NumberFormat("en-US", {
@@ -44,7 +49,10 @@ export const timeUntil = (value: string, now = Date.now()) => {
   return days > 0 ? `${days}d ${hours}h remaining` : `${hours}h remaining`;
 };
 // Approximate numbers are exclusively for visual formatting, never order construction.
-export const displayPrice = (value: string, units: MarketUnits) =>
+export const displayPrice = (value: string, units: AnyMarketUnits) =>
   Number(formatPriceRawX18(BigInt(value), units));
 export const tokenAmount = (value: string, decimals: number) =>
   Number(formatTokenAmount(BigInt(value), decimals));
+/** Share units (order quantities, fills, levels) as an approximate display number. */
+export const shareAmount = (value: string, units: AnyMarketUnits) =>
+  Number(formatShareAmount(BigInt(value), units));

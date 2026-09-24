@@ -1,7 +1,8 @@
 import { createSolanaDatabase } from "@conditional-stocks/db/solana";
 import { requestLogging } from "@conditional-stocks/shared/http";
-import { ReadCache } from "@conditional-stocks/shared/read-cache";
-import { SolanaClient } from "@conditional-stocks/solana-client";
+import { SolanaClient, underlyingAsset } from "@conditional-stocks/solana-client";
+import { LiveIndex, relayClientFactory, type GeyserClient } from "@conditional-stocks/solana-indexer/live";
+import YellowstoneClient from "@triton-one/yellowstone-grpc";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
@@ -10,11 +11,10 @@ import { logger } from "../common/logger.ts";
 import { JupiterSpotPrices, jupiterEnvironment } from "../integrations/jupiter/prices.ts";
 import { mountSolanaAdmin } from "./admin/routes.ts";
 import { mountAuthentication } from "./auth/routes.ts";
-import { indexedSnapshot } from "./chain/indexed-snapshot.ts";
 import { mountCustody } from "./custody/routes.ts";
 import { mountTradingReadiness } from "./health/readiness-routes.ts";
 import { mountHealth } from "./health/routes.ts";
-import { mountSpotPrices } from "./market-data/spot-routes.ts";
+import { mountMarketSpotPrices, mountSpotPrices } from "./market-data/spot-routes.ts";
 import { tradingSigner } from "./trading/delegated-orders.ts";
 import { createOrderPlan } from "./trading/plan.ts";
 import { mountTrading } from "./trading/routes.ts";
@@ -51,14 +51,50 @@ const delegateSigner = tradingSigner(
 
 await Promise.all([client.assertNetwork(), client.lookupTables()]);
 await db.verify();
+// Trading reads come from an in-process live index, one block behind the
+// chain, with no database round trip or snapshot decode per request. It reads
+// the indexer's loopback relay (INDEXER_RELAY_URL), so the host keeps a single
+// billed Yellowstone subscription; YELLOWSTONE_GRPC_URL is a standalone fallback.
+const relayUrl = process.env.INDEXER_RELAY_URL;
+const geyserToken = process.env.YELLOWSTONE_X_TOKEN || undefined;
+const live = new LiveIndex({
+  client,
+  geyser: relayUrl
+    ? relayClientFactory(relayUrl)
+    : ({ compression }) =>
+        new YellowstoneClient(
+          required("YELLOWSTONE_GRPC_URL"),
+          geyserToken,
+          { grpcMaxDecodingMessageSize: 64 * 1024 * 1024, ...(compression ? { grpcDefaultCompressionAlgorithm: 1 } : {}) },
+          { enabled: false },
+        ) as unknown as GeyserClient,
+  source: { compression: process.env.YELLOWSTONE_COMPRESSION !== "none" },
+  onError: (error) => logger.error("live.index.error", { error }),
+});
+await live.start();
+const legTimer = setInterval(() => live.refreshLegs(), 2_000);
+legTimer.unref?.();
+// Keeper-maintained lookup tables (indexer LookupKeeper) let placements carry
+// every protocol maker; refresh the list the shared client compiles with.
+const refreshLookupTables = async () => {
+  try {
+    client.useLookupTables(await db.lookupTables(domain));
+  } catch (error) {
+    logger.error("lookup.tables.refresh.failed", { error });
+  }
+};
+await refreshLookupTables();
+const lookupTimer = setInterval(() => void refreshLookupTables(), 5_000);
+lookupTimer.unref?.();
 
 const app = new Hono();
 app.use("*", browserCors(origins));
 app.use("*", requestLogging(logger));
-mountSpotPrices(
-  app,
-  new JupiterSpotPrices(client.deployment.genesisHash, jupiterEnvironment(process.env)),
+const spotPrices = new JupiterSpotPrices(
+  client.deployment.genesisHash,
+  jupiterEnvironment(process.env),
 );
+mountSpotPrices(app, spotPrices);
 app.use("*", async (c, next) =>
   bodyLimit({
     maxSize: /^\/v1\/admin\/evidence\/(creation|resolution)\/prepare$/.test(c.req.path)
@@ -75,8 +111,10 @@ app.onError(
 );
 
 mountHealth(app, db, client);
-const indexedReads = new ReadCache(1000);
-const readIndex = () => indexedReads.get("snapshot", () => indexedSnapshot(db, client, domain));
+const readIndex = async () => {
+  if (!live.health().healthy) throw new HTTPException(503, { message: "Live chain index unavailable" });
+  return live.confirmed();
+};
 mountTradingReadiness(app, {
   assertNetwork: async () => {}, // Domain-bound snapshots were verified by the indexer.
   configAccount: async () => (await readIndex()).config,
@@ -86,8 +124,29 @@ mountTradingReadiness(app, {
     return market;
   },
 });
+mountMarketSpotPrices(app, spotPrices, async (id) => {
+  const snapshot = await readIndex();
+  const market = snapshot.markets.get(id);
+  if (!market) throw new HTTPException(404, { message: "Unknown indexed market" });
+  // Streamed issuer state (pause, freeze, multiplier) of the confirmed view.
+  const legs = snapshot.legs?.get(id) ?? null;
+  return {
+    quoteMint: market.mints[0]!.toBase58(),
+    bases: Array.from({ length: market.bases }, (_, i) => {
+      const collateral = i + 1,
+        leg = legs?.[collateral];
+      return {
+        collateral,
+        mint: market.mints[underlyingAsset(collateral)]!.toBase58(),
+        multiplierValue: leg && leg.halt !== "unreadable" ? leg.multiplierValue : null,
+        tradable: leg ? leg.tradable : null,
+        halt: leg ? leg.halt : null,
+      };
+    }),
+  };
+});
 const authenticate = mountAuthentication(app, db, client, domain, origins);
-const prepare = createOrderPlan(client, db, domain);
+const prepare = createOrderPlan(client, readIndex);
 mountTrading(app, { client, db, domain, authenticate, readIndex, prepare, delegateSigner });
 mountCustody(app, client, authenticate, readIndex);
 const closeAdmin = await mountSolanaAdmin(app, db, client, domain, authenticate);
@@ -102,5 +161,6 @@ console.info(`Solana API listening on ${server.url}`);
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.on(signal, () => {
     closeAdmin();
+    live.stop();
     void server.stop().then(() => db.close());
   });

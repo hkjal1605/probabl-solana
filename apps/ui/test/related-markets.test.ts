@@ -5,13 +5,20 @@ import { fixtureMarkets } from "./fixtures/protocol";
 
 const seed = fixtureMarkets[0];
 if (!seed) throw new Error("Missing market fixture");
-const spy = { ...seed, id: "spy", ticker: "SPY", baseToken: "spy-mint" };
-const btc = { ...seed, id: "btc", ticker: "BTC", baseToken: "btc-mint", tradingOpen: "2026-01-01" };
+// Sibling markets of one event are different assets, each listing several issuers.
+const spy = { ...seed, id: "spy", ticker: "SPY", assetKey: "asset:SPY" };
+const btc = {
+  ...seed,
+  id: "btc",
+  ticker: "BTC",
+  assetKey: "asset:BTC",
+  tradingOpen: "2026-01-01",
+};
 const eth = {
   ...seed,
   id: "eth",
   ticker: "ETH",
-  baseToken: "eth-mint",
+  assetKey: "asset:ETH",
   lifecycle: "scheduled" as const,
 };
 
@@ -38,10 +45,19 @@ test("current asset remains available during catalogue loading; IDs are deduplic
   expect(relatedMarkets(spy, [spy, anotherQuote])).toHaveLength(2);
 });
 
-test("retried markets cannot duplicate one base and quote asset tab", () => {
+test("retried markets cannot duplicate one asset and quote tab", () => {
   const retry = { ...spy, id: "spy-retry", lifecycle: "frozen" as const };
   expect(relatedMarkets(spy, [retry]).map((market) => market.id)).toEqual(["spy"]);
   expect(relatedMarkets(retry, [spy]).map((market) => market.id)).toEqual(["spy-retry"]);
+  // A relisting with a different issuer subset is still the same asset tab.
+  const subset = { ...spy, id: "spy-subset", bases: spy.bases.slice(0, 1) };
+  expect(relatedMarkets(spy, [subset]).map((market) => market.id)).toEqual(["spy"]);
+});
+
+test("asset tabs never depend on a single base mint", () => {
+  // NVDA and TSLA markets may even share an issuer family; the asset identity decides.
+  const tsla = { ...spy, id: "tsla", ticker: "TSLA", assetKey: "asset:TSLA", bases: spy.bases };
+  expect(relatedMarkets(spy, [tsla]).map((market) => market.id)).toEqual(["spy", "tsla"]);
 });
 
 test("asset switches navigate by market ID and remount the trading workspace", async () => {

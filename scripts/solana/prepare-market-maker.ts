@@ -22,7 +22,15 @@ import {
 } from "@solana/web3.js";
 import { settings } from "../../services/market-maker/src/config.ts";
 import { signer } from "../../services/market-maker/src/execution.ts";
-import { assertDevnet, parseDeployer, rawAmount } from "./devnet-policy.ts";
+import {
+  ASSETS,
+  assertDevnet,
+  isIssuer,
+  issuerLegs,
+  MARKET_TICKERS,
+  parseDeployer,
+  rawAmount,
+} from "./devnet-policy.ts";
 import { DEVNET_MARKET_SEED } from "./seed-markets-policy.ts";
 
 const ROOT = resolve(import.meta.dir, "../..");
@@ -33,10 +41,15 @@ const ADMIN = "4o2JYy6ktdZEfaUVHGwdCbvMyypZ1NRCDpyS1rfY9q8z";
 const EXPECTED_MARKET_MAKER = "9wYFs5Qt7dXAnU5ewPAvG21ncYjbAeDzawvTtVFmdj5Z";
 const API = "https://api-solana.probabl.trade";
 const TARGET_SOL = 8_000_000_000n;
-const TARGETS = Object.freeze({ USDC: "5000", TSLA: "5", NVDA: "5", SPY: "5" });
+/** Wallet top-ups in whole tokens: quote plus every issuer leg of every asset. */
+const TARGETS: Readonly<Record<string, string>> = Object.freeze({
+  USDC: "5000",
+  ...Object.fromEntries(ASSETS.filter(isIssuer).map((leg) => [leg.symbol, "5"])),
+});
 
+/** Indexed market (protocolVersion 3): issuer legs in collateral order. */
 interface IndexedMarket {
-  baseToken: string;
+  bases: Array<{ collateral: number; mint: string }>;
   id: string;
   metadataUri: string;
   polymarketConditionId: string;
@@ -67,13 +80,16 @@ const deployment = JSON.parse(
 };
 if (deployment.programId !== PROGRAM || deployment.config !== CONFIG)
   throw new Error("Deployment record does not match the fresh Devnet program");
-const asset = (symbol: keyof typeof TARGETS) => {
+const asset = (symbol: string) => {
   const matches = deployment.assets.filter((value) => value.symbol === symbol);
   const match = matches[0];
   if (matches.length !== 1 || !match) throw new Error(`Missing unique ${symbol} fixture`);
   return match;
 };
-const bases = [asset("TSLA"), asset("NVDA"), asset("SPY")];
+// One market per underlying asset and event, listing that asset's issuer legs in order.
+const rows = MARKET_TICKERS.map((ticker) => issuerLegs(ticker).map((leg) => asset(leg.symbol).mint));
+const rowKey = (mints: string[]) => mints.join(",");
+const expectedRows = new Map(rows.map((mints, index) => [rowKey(mints), MARKET_TICKERS[index]!]));
 const quote = asset("USDC");
 
 const response = await fetch(`${API}/markets`, {
@@ -83,45 +99,54 @@ const response = await fetch(`${API}/markets`, {
 if (!response.ok) throw new Error(`Market index returned ${response.status}`);
 const body = (await response.json()) as { markets?: IndexedMarket[] };
 const markets = body.markets;
-if (!Array.isArray(markets) || markets.length !== DEVNET_MARKET_SEED.length * bases.length)
+if (!Array.isArray(markets) || markets.length !== DEVNET_MARKET_SEED.length * rows.length)
   throw new Error("Indexer does not expose exactly the intended fresh market catalogue");
 const slugs = new Set(DEVNET_MARKET_SEED.map((entry) => entry.slug));
 const groups = new Map<string, Set<string>>();
+const legsOf = (market: IndexedMarket) =>
+  market.bases.toSorted((a, b) => a.collateral - b.collateral).map((leg) => leg.mint);
 for (const market of markets) {
   const slug = new URL(market.metadataUri).pathname.split("/").filter(Boolean).at(-1);
+  const ticker = Array.isArray(market.bases) ? expectedRows.get(rowKey(legsOf(market))) : undefined;
   if (
     market.state !== 2 ||
     market.quoteToken !== quote.mint ||
-    !bases.some((value) => value.mint === market.baseToken) ||
+    !ticker ||
     !slug ||
     !slugs.has(slug)
   )
     throw new Error(`Unexpected indexed market ${market.id}`);
   const group = groups.get(market.polymarketConditionId) ?? new Set<string>();
-  if (group.has(market.baseToken)) throw new Error("Duplicate base in one event group");
-  group.add(market.baseToken);
+  if (group.has(ticker)) throw new Error("Duplicate asset in one event group");
+  group.add(ticker);
   groups.set(market.polymarketConditionId, group);
 }
 if (
   groups.size !== DEVNET_MARKET_SEED.length ||
-  [...groups.values()].some((group) => group.size !== bases.length)
+  [...groups.values()].some((group) => group.size !== rows.length)
 )
   throw new Error("Indexed event grouping is incomplete");
 
 const config = settings({
   markets: markets
     .toSorted((a, b) => a.id.localeCompare(b.id))
-    .map((market) => ({
-      market: market.id,
-      baseMint: market.baseToken,
-      quoteMint: market.quoteToken,
-      baseInventory: "0.2",
-      quoteInventory: "100",
-      orderQuote: "20",
-      gapBps: 1000,
-      basePriceMultiplier: "1",
-      quotePriceMultiplier: "1",
-    })),
+    .map((market) => {
+      // baseMints exactly equal the listed legs in leg order; the first
+      // (xStocks) leg is the price reference of multi-leg markets.
+      const baseMints = legsOf(market);
+      return {
+        market: market.id,
+        baseMints,
+        quoteMint: market.quoteToken,
+        baseInventories: baseMints.map(() => "0.2"),
+        quoteInventory: "100",
+        orderQuote: "20",
+        gapBps: 1000,
+        basePriceMultipliers: baseMints.map(() => "1"),
+        quotePriceMultiplier: "1",
+        ...(baseMints.length > 1 ? { referenceMints: [baseMints[0]!] } : {}),
+      };
+    }),
   allowStaleDevnetSpot: true,
   quoteLevels: 10,
   levelSpacingBps: 30,
@@ -189,7 +214,7 @@ if (execute) {
       }),
     ]);
   }
-  for (const symbol of Object.keys(TARGETS) as Array<keyof typeof TARGETS>) {
+  for (const [symbol, amount] of Object.entries(TARGETS)) {
     const fixture = asset(symbol);
     const mint = key(fixture.mint);
     const program = key(fixture.program);
@@ -199,7 +224,7 @@ if (execute) {
     const current = destinationInfo
       ? unpackAccount(destination, destinationInfo, program).amount
       : 0n;
-    const target = rawAmount(TARGETS[symbol], fixture.decimals);
+    const target = rawAmount(amount, fixture.decimals);
     if (current >= target) continue;
     const mintInfo = await supportedMint(connection, mint);
     if (!mintInfo.program.equals(program) || mintInfo.decimals !== fixture.decimals)

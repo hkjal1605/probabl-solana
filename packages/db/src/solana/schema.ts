@@ -1,5 +1,6 @@
 import type { Pool } from "pg";
-export const SNAPSHOT_VERSION = 3;
+/** 4: multi-issuer markets (12-asset layout, protocolVersion 3 JSON). */
+export const SNAPSHOT_VERSION = 4;
 /** Fresh schema only. Refuse to silently serve old custody data after a restart. */
 export async function initializeStorage(db: Pool) {
   const tx = await db.connect();
@@ -35,12 +36,17 @@ export async function initializeStorage(db: Pool) {
     );
     await tx.query(`CREATE TABLE IF NOT EXISTS solana_market_claims (
       domain text NOT NULL, market text NOT NULL, owner text NOT NULL, mint text NOT NULL,
-      asset integer NOT NULL CHECK(asset BETWEEN 2 AND 5),
+      asset integer NOT NULL CHECK(asset BETWEEN 1 AND 11 AND asset % 3 <> 0),
       available numeric(20,0) NOT NULL CHECK(available BETWEEN 0 AND 18446744073709551615),
       slot bigint NOT NULL, PRIMARY KEY(domain,market,owner,asset))`);
     await tx.query(
       "CREATE INDEX IF NOT EXISTS solana_claims_owner ON solana_market_claims(domain,owner)",
     );
+    // Keeper-maintained append-only address lookup tables (see solana-client lookup.ts).
+    await tx.query(`CREATE TABLE IF NOT EXISTS solana_lookup_tables (
+      domain text NOT NULL, address text NOT NULL, authority text NOT NULL,
+      created_slot bigint NOT NULL CHECK(created_slot>=0), created_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY(domain,address))`);
     await tx.query(`CREATE TABLE IF NOT EXISTS solana_history_cursors (
       domain text PRIMARY KEY, signature text NOT NULL, slot bigint NOT NULL, snapshot_slot bigint NOT NULL)`);
     await tx.query(`CREATE TABLE IF NOT EXISTS solana_events (

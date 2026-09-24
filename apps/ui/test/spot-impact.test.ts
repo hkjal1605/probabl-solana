@@ -7,8 +7,8 @@ const now = 1_800_000_000_000;
 const seed = fixtureMarkets[0];
 if (!seed) throw new Error("Missing market fixture");
 const spot: SpotPrice = {
-  mint: seed.baseToken,
-  sourceMint: seed.baseToken,
+  mint: seed.bases[0]!.mint,
+  sourceMint: seed.bases[0]!.mint,
   referenceSymbol: null,
   testAsset: true,
   valuationCompatible: false,
@@ -29,6 +29,14 @@ const market = {
 test("each branch is compared to spot independently, assuming a $1 quote", () => {
   expect(spotImpactPercent(market, "YES", now)).toBe(20);
   expect(spotImpactPercent(market, "NO", now)).toBe(-20);
+  // Any listed issuer leg of the asset is a valid spot reference.
+  expect(
+    spotImpactPercent(
+      { ...market, spotReference: { ...spot, mint: seed.bases[2]!.mint } },
+      "YES",
+      now,
+    ),
+  ).toBe(20);
   expect(spotImpactPercent({ ...market, quoteToken: "any-quote" }, "YES", now)).toBe(20);
   expect(spotImpactPercent({ ...market, no: { ...market.no, bestAsk: null } }, "YES", now)).toBe(
     20,

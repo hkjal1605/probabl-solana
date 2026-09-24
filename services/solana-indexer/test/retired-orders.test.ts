@@ -38,6 +38,7 @@ test("retired orders rebuild history without entering the live RPC account image
       side: 0,
       funding: 0,
       tif: 0,
+      bases: 1,
     },
   };
   const address = orderId(orderWire(order));

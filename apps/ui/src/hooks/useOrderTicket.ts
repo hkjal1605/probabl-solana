@@ -1,14 +1,18 @@
 "use client";
+import { formatTokenAmount } from "@conditional-stocks/domain";
 import {
   type AtomicPlan,
-  claimAddress,
+  claimAsset,
   fundingAsset,
+  isClaimAsset,
   key,
+  legBit,
   type OrderWire,
   orderId,
   parseAtomicPlan,
   parseOrder,
   quote,
+  underlyingAsset,
 } from "@conditional-stocks/solana-client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@/components/providers/WalletProvider";
@@ -21,6 +25,13 @@ import {
   useTradingPermission,
 } from "@/hooks/useTradingPermission";
 import { useTradingReadiness } from "@/hooks/useTradingReadiness";
+import {
+  assetMint,
+  buyMask,
+  defaultSellLeg,
+  legStatuses,
+  sellReservation,
+} from "@/lib/markets/legs";
 import { marketPriceBound } from "@/lib/trading/entry";
 import { createOrder, previewOrder } from "@/lib/trading/order";
 import { tradingPermissionApproval } from "@/lib/trading/permission";
@@ -33,7 +44,10 @@ import type { MarketView } from "@/types/api";
 interface Preparation {
   funding: {
     balanceSufficient: boolean;
+    /** Raw units of the funding asset (quote for buys, the delivered leg for sells). */
     amount: string;
+    decimals: number;
+    symbol: string;
   };
   order: OrderWire;
   orderHash: string;
@@ -54,10 +68,65 @@ export function useOrderTicket({ market }: { market: MarketView }) {
   const [branch, setBranch] = useState<"YES" | "NO">("YES"),
     [side, setSide] = useState<"buy" | "sell">("buy"),
     [tif, setTif] = useState<"gtc" | "ioc">("ioc"),
-    [funding, setFunding] = useState<"whole" | "claim">("whole");
+    [funding, setFunding] = useState<"whole" | "claim">("whole"),
+    // Buy: accepted issuer legs (null = every tradable leg). Sell: the one leg to
+    // deliver (null = the leg the wallet holds, else the first tradable leg).
+    [acceptedLegs, setAcceptedLegs] = useState<number[] | null>(null),
+    [chosenSellLeg, setSellLeg] = useState<number | null>(null);
+  const legs = useMemo(() => legStatuses(market), [market]);
+  const balanceOf = (mint: string | null, claim: boolean) => {
+    if (!mint || positions.data?.owner !== wallet.account) return 0n;
+    const balance = positions.data?.balances[mint];
+    return BigInt((claim ? balance?.creditBalances?.[market.id] : balance?.vaultAvailable) ?? "0");
+  };
+  // Holdings of each leg in the currently selected funding asset.
+  const holdings: Record<number, bigint> = {};
+  for (const status of legs)
+    holdings[status.collateral] = balanceOf(
+      assetMint(
+        market,
+        funding === "whole"
+          ? underlyingAsset(status.collateral)
+          : claimAsset(status.collateral, branch === "YES" ? 0 : 1),
+      ),
+      funding === "claim",
+    );
+  // The default sell issuer follows holdings, but it is part of the signed order
+  // (`bases`), so it is frozen while an action is in flight: a background balance
+  // update must not change (and thereby cancel) an order being submitted.
+  const [defaultLeg, setDefaultLeg] = useState(() => defaultSellLeg(market, holdings));
+  const nextDefaultLeg = defaultSellLeg(market, holdings);
+  const sellLeg = chosenSellLeg ?? defaultLeg;
+  const sellStatus = legs.find((status) => status.collateral === sellLeg) ?? null;
+  // Accepted issuers follow live leg state (a halted leg drops out), frozen like the
+  // default sell leg while an action is in flight.
+  const [acceptedMask, setAcceptedMask] = useState(() => buyMask(market, acceptedLegs));
+  const nextAcceptedMask = buyMask(market, acceptedLegs);
+  const bases = side === "buy" ? acceptedMask : sellLeg ? legBit(sellLeg) : 0;
+  const legError =
+    side === "buy"
+      ? acceptedMask === 0
+        ? legs.some((status) => status.tradable)
+          ? "Accept at least one issuer token."
+          : "Every issuer token of this market is halted."
+        : null
+      : !sellStatus
+        ? "No issuer token of this market can be delivered."
+        : !sellStatus.tradable
+          ? `${sellStatus.leg.symbol} is halted: ${sellStatus.reason}.`
+          : null;
+  const toggleAcceptedLeg = (collateral: number, accepted: boolean) =>
+    setAcceptedLegs((current) => {
+      const base =
+        current ?? legs.filter((status) => status.tradable).map((status) => status.collateral);
+      const next = accepted
+        ? [...new Set([...base, collateral])].sort((a, b) => a - b)
+        : base.filter((value) => value !== collateral);
+      return next;
+    });
   const initialMarketPrice = () => {
     try {
-      return marketPriceBound(market, "YES", "buy");
+      return marketPriceBound(market, "YES", "buy", 100, buyMask(market, null));
     } catch {
       return "";
     }
@@ -75,6 +144,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     side,
     tif,
     funding,
+    bases,
     quantity,
     price,
     maxFeeBps,
@@ -100,6 +170,11 @@ export function useOrderTicket({ market }: { market: MarketView }) {
   const [submissionCount, setSubmissionCount] = useState(0);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const { busy, run } = useAsyncAction(actionContext);
+  useEffect(() => {
+    if (busy) return;
+    if (nextDefaultLeg !== defaultLeg) setDefaultLeg(nextDefaultLeg);
+    if (nextAcceptedMask !== acceptedMask) setAcceptedMask(nextAcceptedMask);
+  }, [busy, nextDefaultLeg, defaultLeg, nextAcceptedMask, acceptedMask]);
   const preparation =
     review?.actionContext === actionContext && (busy || review.reviewContext === reviewContext)
       ? review.value
@@ -118,6 +193,23 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     ? BigInt(preparation.plan.deadline) <= BigInt(nowSeconds)
     : false;
   const preview = useMemo(() => previewOrder(quantity, price, market), [quantity, price, market]);
+  // Raw issuer units a sell reserves at the leg's live multiplier (rounded up, as on chain).
+  const reservation = useMemo(() => {
+    if (side !== "sell" || !sellStatus || !preview.valid) return null;
+    try {
+      const raw = sellReservation(BigInt(preview.quantityRaw), sellStatus);
+      return {
+        raw,
+        formatted: formatTokenAmount(raw, sellStatus.leg.decimals),
+        symbol: sellStatus.leg.symbol,
+        decimals: sellStatus.leg.decimals,
+        multiplierValue: sellStatus.multiplierValue,
+        liveKnown: sellStatus.liveKnown,
+      };
+    } catch {
+      return null;
+    }
+  }, [side, sellStatus, preview.valid, preview.quantityRaw]);
   const prepareAction = async (assertCurrent: () => void, background = false) => {
     if (
       !wallet.account ||
@@ -127,6 +219,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       !permission.grant
     )
       throw new Error("Deposit assets and enable trading in Portfolio before placing an order.");
+    if (legError) throw new Error(legError);
     assertCurrent();
     const candidate = parseOrder(
       createOrder({
@@ -135,6 +228,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
         delegate: permission.delegate,
         delegateExpiresAt: permission.grant.expiresAt,
         branch,
+        bases,
         cutoff: market.cutoff,
         funding,
         marketId: market.id,
@@ -158,23 +252,18 @@ export function useOrderTicket({ market }: { market: MarketView }) {
           authenticate: wallet.authenticate,
           assertCurrent,
         });
+    // Funding asset: quote (0) or quote claim for buys; the delivered leg's issuer
+    // token (3c) or its claim for sells. Underlying assets are pool credit.
     const asset = fundingAsset(candidate),
-      mint =
-        asset < 2
-          ? asset === 0
-            ? market.baseToken
-            : market.quoteToken
-          : String(claimAddress(key(market.id), asset, key(protocolConfig.programId))),
-      balance =
-        positions.data?.owner === wallet.account ? positions.data.balances[mint] : undefined,
-      available =
-        asset < 2
-          ? BigInt(balance?.vaultAvailable ?? "0")
-          : BigInt(balance?.creditBalances?.[market.id] ?? "0"),
-      required =
-        candidate.side === 0
-          ? quote(BigInt(candidate.quantity), BigInt(candidate.limitPriceRawX18), true)
-          : BigInt(candidate.quantity);
+      available = balanceOf(assetMint(market, asset), isClaimAsset(asset));
+    let required: bigint;
+    if (candidate.side === 0)
+      required = quote(BigInt(candidate.quantity), BigInt(candidate.limitPriceRawX18), true);
+    else {
+      if (!sellStatus || legBit(sellStatus.collateral) !== candidate.bases)
+        throw new Error("Choose the issuer token to deliver.");
+      required = sellReservation(BigInt(candidate.quantity), sellStatus);
+    }
     parseAtomicPlan(result.plan, candidate);
     assertCurrent();
     if (result.orderHash !== orderId(candidate) || result.atomicRouter !== protocolConfig.programId)
@@ -186,6 +275,12 @@ export function useOrderTicket({ market }: { market: MarketView }) {
       funding: {
         balanceSufficient: positions.isDataFresh && available >= required,
         amount: String(required),
+        decimals:
+          candidate.side === 0 ? market.quoteTokenDecimals : (sellStatus?.leg.decimals ?? 0),
+        symbol:
+          candidate.side === 0
+            ? (market.quoteTokenMetadata?.symbol ?? "USDC")
+            : (sellStatus?.leg.symbol ?? market.ticker),
       },
       order: candidate,
     };
@@ -198,6 +293,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
   const canReview = Boolean(
     wallet.account &&
       preview.valid &&
+      !legError &&
       readiness.ready &&
       positions.isDataFresh &&
       Boolean(permission?.active) &&
@@ -307,7 +403,7 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     setQuantity("");
     setTif("ioc");
     try {
-      setPrice(marketPriceBound(market, branch, side));
+      setPrice(marketPriceBound(market, branch, side, 100, bases));
     } catch {
       setPrice("");
     }
@@ -361,6 +457,18 @@ export function useOrderTicket({ market }: { market: MarketView }) {
     setTif,
     funding,
     setFunding,
+    legs,
+    bases,
+    acceptedMask,
+    acceptedLegs,
+    setAcceptedLegs,
+    toggleAcceptedLeg,
+    sellLeg,
+    sellStatus,
+    setSellLeg,
+    holdings,
+    legError,
+    reservation,
     quantity,
     setQuantity,
     maxFeeBps,

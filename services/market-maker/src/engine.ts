@@ -13,17 +13,46 @@ import {
   quote,
   planOrder,
   supportedMint,
+  liveLegs,
+  baseRaw,
+  ASSETS,
+  claimAsset,
+  underlyingAsset,
+  orderCollateral,
+  legBit,
+  legsOf,
+  singleBase,
   type OrderAccount,
   type OrderWire,
   type MarketAccount,
+  type LiveLeg,
 } from "@conditional-stocks/solana-client";
 import { snapshot, liveOrder, type Snapshot } from "@conditional-stocks/solana-indexer/projection";
 import { globalAvailable } from "@conditional-stocks/solana-indexer/custody";
-import { BPS, abs, max, min, units, type MarketPolicy, type Settings } from "./config.ts";
+import {
+  BPS,
+  abs,
+  max,
+  min,
+  seedUnits,
+  units,
+  type MarketPolicy,
+  type Settings,
+} from "./config.ts";
 import { fetchReference } from "./feeds.ts";
-import { equity, needsReplace, quotes, type Quote, type Reference } from "./strategy.ts";
+import {
+  equity,
+  needsReplace,
+  quotes,
+  shareUnits,
+  tradableMask,
+  type Book,
+  type Legs,
+  type Quote,
+  type Reference,
+} from "./strategy.ts";
 import type { Executor } from "./execution.ts";
-import type { State } from "./state.ts";
+import type { MarketState, State } from "./state.ts";
 import type { SolanaClient, PublicKey } from "@conditional-stocks/solana-client";
 import { SystemProgram } from "@solana/web3.js";
 import {
@@ -47,30 +76,62 @@ export function owned(s: Snapshot, owner: PublicKey, market?: string) {
 export function inventory(s: Snapshot, owner: PublicKey, market: string) {
   const balances = s.wallets
     .get(walletAddress(key(market), owner, s.program).toBase58())
-    ?.balances.map(big) ?? [0n, 0n, 0n, 0n, 0n, 0n];
+    ?.balances.map(big) ?? Array<bigint>(ASSETS).fill(0n);
+  if (balances.length !== ASSETS) throw new Error("Unexpected market wallet layout");
   for (const [, order] of owned(s, owner, market))
     balances[fundingAsset(orderWire(order))]! += big(order.reserved);
   return balances;
 }
+/** Per-leg seed, raw issuer units (0 for unseeded legs). */
+export function seeds(p: MarketPolicy, m: MarketAccount): bigint[] {
+  return p.baseInventories.map((value, i) => seedUnits(value, m.decimals[i + 1]!));
+}
+/** Target branch position in share units: explicit, or the seeds at live multipliers. */
+export function targetShares(p: MarketPolicy, m: MarketAccount, legs: Legs): bigint {
+  if (p.targetShares !== undefined) return units(p.targetShares, m.terms.share_decimals);
+  return seeds(p, m).reduce((sum, raw, i) => {
+    const leg = legs[i + 1];
+    if (!leg) throw new Error("Missing live leg state");
+    return sum + shareUnits(raw, leg.scale, leg.multiplier);
+  }, 0n);
+}
+/** Raw funding an order reserves: quote notional for bids, rounded-up issuer claims for asks. */
+export function reservation(
+  q: { side: number; bases: number; price: bigint; quantity: bigint },
+  legs: Legs,
+) {
+  if (q.side === 0) return quote(q.quantity, q.price, true);
+  const leg = legs[singleBase(q.bases) ?? 0];
+  if (!leg) throw new Error("Missing live leg state");
+  return baseRaw(q.quantity, leg.scale, leg.multiplier, true);
+}
+/** One book ladder: all bids of a branch, or one issuer's asks of a branch. */
+const ladders = (branch: number) => [
+  { branch, side: 0, bases: 0 },
+  ...[1, 2, 3].map((c) => ({ branch, side: 1, bases: legBit(c) })),
+];
+const inLadder = (
+  l: { branch: number; side: number; bases: number },
+  o: { branch: number; side: number; bases: number },
+) => o.branch === l.branch && o.side === l.side && (l.side === 0 || o.bases === l.bases);
 export function quoteChange(
   current: [string, OrderAccount][],
   desired: Quote[],
   now: bigint,
   s: Settings,
-  live?: { makerBps: number; minimumNonce: bigint },
+  live?: { makerBps: number; minimumNonce: bigint; legs?: Legs },
 ): { cancel?: string; quote?: Quote } | undefined {
   for (const branch of [0, 1] as const)
-    for (const side of [0, 1] as const) {
+    for (const ladder of ladders(branch)) {
+      const side = ladder.side;
       const ranked = current
-          .filter(([, o]) => o.terms.branch === branch && o.terms.side === side)
+          .filter(([, o]) => inLadder(ladder, o.terms))
           .sort(([, a], [, b]) => {
             const ap = big(a.terms.price),
               bp = big(b.terms.price);
             return ap === bp ? 0 : (ap > bp ? -1 : 1) * (side === 0 ? 1 : -1);
           }),
-        targets = desired
-          .filter((q) => q.branch === branch && q.side === side)
-          .sort((a, b) => a.level - b.level);
+        targets = desired.filter((q) => inLadder(ladder, q)).sort((a, b) => a.level - b.level);
       for (let level = 0; level < ranked.length; level++) {
         const [id, o] = ranked[level]!,
           target = targets[level];
@@ -81,9 +142,14 @@ export function quoteChange(
           !o.terms.recipient.equals(o.owner)
         )
           return { cancel: id };
+        // An ask whose reservation no longer covers the live conversion (the
+        // multiplier fell within its band) cannot deliver; re-reserve it.
+        const leg = side === 1 ? live?.legs?.[singleBase(o.terms.bases) ?? 0] : undefined;
         if (
           (live &&
             (o.terms.max_fee_bps !== live.makerBps || big(o.terms.nonce) < live.minimumNonce)) ||
+          o.terms.bases !== target.bases ||
+          (leg && baseRaw(big(o.remaining), leg.scale, leg.multiplier) > big(o.reserved)) ||
           big(o.remaining) > target.quantity ||
           needsReplace(
             { price: big(o.terms.price), remaining: big(o.remaining), expiry: big(o.terms.expiry) },
@@ -122,8 +188,39 @@ export function passiveOrder(
     side: q.side,
     fundingKind: 1,
     tif: 0,
+    bases: q.bases,
   };
 }
+/** Best foreign bid/ask per leg and branch. A bid counts on every leg it accepts. */
+export function foreignBook(s: Snapshot, owner: PublicKey, market: string): Book {
+  const best: Book = [{}, {}];
+  for (const [, o] of s.orders)
+    if (o.market.toBase58() === market && !o.owner.equals(owner) && liveOrder(o, s)) {
+      const tops = best[o.terms.branch as 0 | 1],
+        price = big(o.terms.price);
+      if (o.terms.side === 0)
+        for (const c of legsOf(o.terms.bases)) {
+          const top = (tops[c] ??= {});
+          top.bid = top.bid === undefined ? price : max(top.bid, price);
+        }
+      else {
+        const c = singleBase(o.terms.bases);
+        if (c === null) continue;
+        const top = (tops[c] ??= {});
+        top.ask = top.ask === undefined ? price : min(top.ask, price);
+      }
+    }
+  return best;
+}
+/** Persist the last safe observation; spot is per share unit. */
+function checkpoint(record: MarketState, r: Reference) {
+  record.spot = String(r.spot);
+  record.probability = String(r.probability);
+  record.observedAt = r.observedAt;
+  record.priceUnit = "share";
+}
+const halts = (legs: Record<number, LiveLeg>) =>
+  Object.fromEntries(Object.entries(legs).map(([c, l]) => [c, l.halt]));
 export class Engine {
   stopped = false;
   constructor(
@@ -165,7 +262,8 @@ export class Engine {
           ...new Set(
             batch.flatMap((address) => {
               const order = s.orders.get(address.toBase58())!;
-              return order.terms.funding === 0 ? [order.terms.side === 0 ? 1 : 0] : [];
+              const { funding, side, bases } = order.terms;
+              return funding === 0 ? [underlyingAsset(orderCollateral({ side, bases }))] : [];
             }),
           ),
         ];
@@ -230,31 +328,44 @@ export class Engine {
   }
   async validateMarket(s: Snapshot, p: MarketPolicy) {
     const market = s.markets.get(p.market),
-      now = BigInt(Math.floor(Date.now() / 1000));
+      now = BigInt(Math.floor(Date.now() / 1000)),
+      quoteReady = (1 << underlyingAsset(0)) | (1 << claimAsset(0, 0)) | (1 << claimAsset(0, 1));
     if (
       !market ||
       s.config.paused ||
       market.state !== 2 ||
-      market.vaults_initialized !== 63 ||
+      (market.vaults_initialized & quoteReady) !== quoteReady ||
       big(market.terms.trading_open) > now ||
       big(market.terms.trading_cutoff) <= now + BigInt(this.settings.cutoffBufferSeconds)
     )
       throw new Error("Market paused, closed, or near cutoff");
+    // Issuer legs are an exact, reviewed identity. A newly listed leg needs review.
     if (
-      market.mints[0]!.toBase58() !== p.baseMint ||
-      market.mints[1]!.toBase58() !== p.quoteMint ||
-      !market.mints[1]!.equals(s.config.quote_mint)
+      market.bases !== p.baseMints.length ||
+      p.baseMints.some((mint, i) => market.mints[underlyingAsset(i + 1)]!.toBase58() !== mint) ||
+      market.mints[0]!.toBase58() !== p.quoteMint ||
+      !market.mints[0]!.equals(s.config.quote_mint)
     )
       throw new Error("Market allocation identity changed");
-    const metadata = await Promise.all([
-      supportedMint(this.client.connection, key(p.baseMint)),
-      supportedMint(this.client.connection, key(p.quoteMint)),
-    ]);
-    if (metadata.some((m, i) => m.decimals !== market.decimals[i]))
-      throw new Error("Token decimals changed");
+    const metadata = await supportedMint(this.client.connection, key(p.quoteMint));
+    if (metadata.decimals !== market.decimals[0]) throw new Error("Token decimals changed");
     return this.client.rememberMarket(key(p.market), market);
   }
-  plan(s: Snapshot, m: MarketAccount, p: MarketPolicy, r: Reference) {
+  /** Live issuer state of every leg. Issuer pauses, frozen vaults, delistings,
+   * corporate actions and unreadable mints halt a leg rather than the market. */
+  async legs(market: MarketAccount): Promise<Record<number, LiveLeg>> {
+    const legs = await liveLegs(
+      this.client.connection,
+      market,
+      this.client.config,
+      this.client.program,
+    );
+    for (let c = 1; c <= market.bases; c++)
+      if (!legs[c] || legs[c]!.decimals !== market.decimals[c])
+        throw new Error("Issuer leg state is incomplete");
+    return legs;
+  }
+  plan(s: Snapshot, m: MarketAccount, p: MarketPolicy, r: Reference, legs: Legs) {
     const record = this.state.markets[p.market] ?? (this.state.markets[p.market] = {});
     const now = Date.now();
     if (record.halted) throw new Error("Persistent market drawdown halt");
@@ -264,7 +375,9 @@ export class Engine {
       (record.observedAt !== undefined && r.observedAt < record.observedAt)
     )
       throw new Error("Reference is stale or moved backwards");
-    if (record.spot) {
+    // Checkpoints from before multi-issuer markets priced raw base units; their
+    // spot is not comparable, but their movement (bps), peak and latches are.
+    if (record.spot && record.priceUnit === "share") {
       const move = (abs(r.spot - BigInt(record.spot)) * BPS) / BigInt(record.spot),
         probMove = abs(r.probability - BigInt(record.probability!));
       if (
@@ -278,40 +391,36 @@ export class Engine {
         record.movementAt = now;
       }
     }
-    record.spot = String(r.spot);
-    record.probability = String(r.probability);
-    record.observedAt = r.observedAt;
-    const target = units(p.baseInventory, m.decimals[0]!),
-      cash = units(p.quoteInventory, m.decimals[1]!);
-    const balances = this.executor
-      ? inventory(s, this.owner, p.market)
-      : [0n, 0n, target, target, cash, cash];
-    const mark = equity(balances, r, p.gapBps),
+    checkpoint(record, r);
+    const target = targetShares(p, m, legs),
+      cash = units(p.quoteInventory, m.decimals[0]!);
+    let balances: bigint[];
+    if (this.executor) balances = inventory(s, this.owner, p.market);
+    else {
+      balances = Array<bigint>(ASSETS).fill(0n);
+      balances[claimAsset(0, 0)] = balances[claimAsset(0, 1)] = cash;
+      for (const [i, raw] of seeds(p, m).entries())
+        balances[claimAsset(i + 1, 0)] = balances[claimAsset(i + 1, 1)] = raw;
+    }
+    const mark = equity(balances, r, p.gapBps, m.bases, legs),
       peak = max(mark, BigInt(record.peak ?? "0"));
     record.peak = String(peak);
     if (peak > 0n && (peak - mark) * BPS >= peak * BigInt(this.settings.maxDrawdownBps))
       record.halted = true;
     this.save();
     if (record.halted || now < (record.cooldownUntil ?? 0)) throw new Error("Risk circuit breaker");
-    const best: [{ bid?: bigint; ask?: bigint }, { bid?: bigint; ask?: bigint }] = [{}, {}];
-    for (const [, o] of s.orders)
-      if (o.market.toBase58() === p.market && !o.owner.equals(this.owner) && liveOrder(o, s)) {
-        const b = best[o.terms.branch as 0 | 1],
-          price = big(o.terms.price);
-        if (o.terms.side === 0) b.bid = b.bid === undefined ? price : max(b.bid, price);
-        else b.ask = b.ask === undefined ? price : min(b.ask, price);
-      }
     return quotes({
       market: m,
       reference: r,
       gapBps: p.gapBps,
       balances,
-      targetBase: target,
-      orderQuote: units(p.orderQuote, m.decimals[1]!),
+      legs,
+      targetShares: target,
+      orderQuote: units(p.orderQuote, m.decimals[0]!),
       makerBps: s.config.maker_bps,
       movementBps: BigInt(record.movement ?? "0"),
       settings: this.settings,
-      best,
+      best: foreignBook(s, this.owner, p.market),
     });
   }
   async cycle() {
@@ -325,8 +434,10 @@ export class Engine {
         .filter(([, m]) => m.state === 2)
         .map(([id, m]) => ({
           id,
-          baseMint: String(m.mints[0]),
-          quoteMint: String(m.mints[1]),
+          baseMints: Array.from({ length: m.bases }, (_, i) =>
+            String(m.mints[underlyingAsset(i + 1)]),
+          ),
+          quoteMint: String(m.mints[0]),
           configured: configured.has(id),
         })),
     });
@@ -334,11 +445,15 @@ export class Engine {
       if (this.stopped) break;
       let stage = "snapshot";
       try {
-        // Serial, atomic cancel/replace. Re-read balances, book sequence and feeds for each action.
-        for (let step = 0; step < 4 * this.settings.quoteLevels && !this.stopped; step++) {
+        // Serial, atomic cancel/replace. Re-read balances, book sequence, issuer
+        // state and feeds for each action. One bid and one ask ladder per leg per branch.
+        const steps = 2 * (1 + p.baseMints.length) * this.settings.quoteLevels;
+        for (let step = 0; step < steps && !this.stopped; step++) {
           stage = "market-and-token-validation";
           const s = await this.view(),
             m = await this.validateMarket(s, p);
+          stage = "issuer-legs";
+          const legs = await this.legs(m);
           stage = "reference-feeds";
           const r = await this.readReference(
             this.origin,
@@ -346,20 +461,24 @@ export class Engine {
             m,
             p,
             this.settings,
+            legs,
           );
           stage = "inventory-and-risk";
-          const desired = this.plan(s, m, p, r);
+          const desired = this.plan(s, m, p, r, legs);
           if (step === 0)
             log("risk", {
               market: p.market,
               peakQuoteRaw: this.state.markets[p.market]?.peak,
               movementBps: this.state.markets[p.market]?.movement ?? "0",
+              tradableLegs: tradableMask(m.bases, legs),
+              halts: halts(legs),
             });
           if (!this.executor) {
             log("dry-run", {
               market: p.market,
               assumedSeedInventory: true,
               spot: r.spot,
+              legSpots: r.legs,
               probability: r.probability,
               quotes: desired,
             });
@@ -373,6 +492,7 @@ export class Engine {
             {
               makerBps: s.config.maker_bps,
               minimumNonce: big(s.traders.get(this.owner.toBase58())?.minimum_nonce ?? bn(0)),
+              legs,
             },
           );
           if (!action) break;
@@ -393,9 +513,13 @@ export class Engine {
             const wallet = s.wallets.get(
               walletAddress(key(p.market), this.owner, this.client.program).toBase58(),
             );
-            const released = action.cancel ? big(s.orders.get(action.cancel)!.reserved) : 0n;
+            const cancelled = action.cancel ? s.orders.get(action.cancel) : undefined;
+            const released =
+              cancelled && fundingAsset(orderWire(cancelled)) === fundingAsset(o)
+                ? big(cancelled.reserved)
+                : 0n;
             const available = (wallet ? big(wallet.balances[fundingAsset(o)]!) : 0n) + released;
-            if (available < (q.side === 0 ? quote(q.quantity, q.price, true) : q.quantity))
+            if (available < reservation(q, legs))
               throw new Error("Seeded claim inventory is insufficient");
             const plan = planOrder({
               order: o,
@@ -406,6 +530,7 @@ export class Engine {
               makerFeeBps: s.config.maker_bps,
               takerFeeBps: s.config.taker_bps,
               program: this.client.program,
+              legs,
             });
             instructions.push(this.client.placement(o, plan, m));
             if (Date.now() - r.observedAt > this.settings.maxFeedAgeMs)
@@ -415,6 +540,7 @@ export class Engine {
               order: orderId(o, this.client.program),
               branch: q.branch,
               side: q.side,
+              bases: q.bases,
               level: q.level,
               price: q.price,
               quantity: q.quantity,
@@ -453,6 +579,25 @@ export class Engine {
           market = await this.validateMarket(before, p),
           record = this.state.markets[p.market] ?? (this.state.markets[p.market] = {});
         if (!record.fundComplete) throw new Error("Market lacks funded inventory");
+        stage = "issuer-legs";
+        let legs = await this.legs(market);
+        const seeded = seeds(p, market);
+        const ladder = (branch: number, side: number, bases: number) =>
+          side === 0 ? `${branch}:bid` : `${branch}:ask:${bases}`;
+        // Both consolidated bids, plus asks for every seeded tradable leg.
+        const required = (current: Legs) => {
+          const mask = tradableMask(market.bases, current);
+          if (!mask) throw new Error("No tradable issuer leg");
+          return [0, 1].flatMap((branch) => [
+            ladder(branch, 0, mask),
+            ...legsOf(mask)
+              .filter((c) => seeded[c - 1]! > 0n)
+              .map((c) => ladder(branch, 1, legBit(c))),
+          ]);
+        };
+        const count = (orders: [string, OrderAccount][], id: string) =>
+          orders.filter(([, o]) => ladder(o.terms.branch, o.terms.side, o.terms.bases) === id)
+            .length;
         const beforeOrders = owned(before, this.owner, p.market).filter(
             ([, order]) => big(order.terms.expiry) > BigInt(Math.floor(Date.now() / 1000)),
           ),
@@ -470,19 +615,10 @@ export class Engine {
           );
         if (compatibleBeforeOrders.length !== beforeOrders.length)
           throw new Error("Static seed found an incompatible existing order");
-        const full = ([branch, side]: [number, number]) =>
-          compatibleBeforeOrders.filter(
-            ([, order]) => order.terms.branch === branch && order.terms.side === side,
-          ).length >= this.settings.quoteLevels;
         if (
-          (
-            [
-              [0, 0],
-              [0, 1],
-              [1, 0],
-              [1, 1],
-            ] as [number, number][]
-          ).every(full)
+          required(legs).every(
+            (id) => count(compatibleBeforeOrders, id) >= this.settings.quoteLevels,
+          )
         ) {
           log("static-market-complete", { market: p.market, alreadyPopulated: true });
           continue;
@@ -494,21 +630,27 @@ export class Engine {
           market,
           p,
           this.settings,
+          legs,
         );
-        record.spot = String(reference.spot);
-        record.probability = String(reference.probability);
-        record.observedAt = reference.observedAt;
+        checkpoint(record, reference);
         this.save();
         const held = inventory(before, this.owner, p.market);
-        const target = units(p.baseInventory, market.decimals[0]!);
-        const needed = target - min(held[2]!, held[3]!);
-        if (needed > 0n) {
+        for (let c = 1; c <= market.bases; c++) {
+          const needed =
+            seeded[c - 1]! - min(held[claimAsset(c, 0)]!, held[claimAsset(c, 1)]!, seeded[c - 1]!);
+          if (needed <= 0n) continue;
+          if (!legs[c]?.tradable) {
+            log("static-leg-skipped", { market: p.market, collateral: c, halt: legs[c]?.halt });
+            continue;
+          }
           stage = "base-top-up";
-          await this.seedClaims(before, p.market, market, 0, needed);
+          await this.seedClaims(await this.view(), p.market, market, c, needed);
         }
-        for (let step = 0; step < 4 * this.settings.quoteLevels && !this.stopped; step++) {
+        const steps = 2 * (1 + market.bases) * this.settings.quoteLevels;
+        for (let step = 0; step < steps && !this.stopped; step++) {
           const s = await this.view(),
             m = await this.validateMarket(s, p);
+          legs = await this.legs(m);
           const existing = owned(s, this.owner, p.market).filter(
             ([, o]) => big(o.terms.expiry) > BigInt(Math.floor(Date.now() / 1000)),
           );
@@ -517,39 +659,43 @@ export class Engine {
             reference,
             gapBps: p.gapBps,
             balances: inventory(s, this.owner, p.market),
-            targetBase: units(p.baseInventory, m.decimals[0]!),
-            orderQuote: units(p.orderQuote, m.decimals[1]!),
+            legs,
+            targetShares: targetShares(p, m, legs),
+            orderQuote: units(p.orderQuote, m.decimals[0]!),
             makerBps: s.config.maker_bps,
             movementBps: 0n,
             settings: this.settings,
             best: [{}, {}],
           });
+          const ids = required(legs);
+          const planned = (id: string) =>
+            desired.filter((q) => ladder(q.branch, q.side, q.bases) === id).length;
+          if (ids.some((id) => planned(id) !== this.settings.quoteLevels))
+            throw new Error("Inventory cannot back every requested static level");
           const represented = (q: Quote) =>
             existing.some(
               ([, o]) =>
                 o.terms.branch === q.branch &&
                 o.terms.side === q.side &&
+                o.terms.bases === q.bases &&
                 big(o.terms.price) === q.price &&
                 o.terms.funding === 1 &&
                 o.terms.tif === 0 &&
                 o.terms.recipient.equals(this.owner),
             );
-          if (desired.length !== 4 * this.settings.quoteLevels)
-            throw new Error("Inventory cannot back every requested static level");
           const minimumNonce = big(s.traders.get(this.owner.toBase58())?.minimum_nonce ?? bn(0)),
             missing = new Map(
               desired
                 .filter(
                   (q) =>
-                    existing.filter(
-                      ([, o]) => o.terms.branch === q.branch && o.terms.side === q.side,
-                    ).length < this.settings.quoteLevels && !represented(q),
+                    count(existing, ladder(q.branch, q.side, q.bases)) <
+                      this.settings.quoteLevels && !represented(q),
                 )
-                .map((q) => [`${q.branch}:${q.side}:${q.price}`, q]),
+                .map((q) => [`${q.branch}:${q.side}:${q.bases}:${q.price}`, q]),
             );
           for (const [, held] of existing) {
             const terms = held.terms,
-              id = `${terms.branch}:${terms.side}:${big(terms.price)}`,
+              id = `${terms.branch}:${terms.side}:${terms.bases}:${big(terms.price)}`,
               target = missing.get(id);
             if (
               terms.funding !== 1 ||
@@ -564,19 +710,7 @@ export class Engine {
           }
           const q = missing.values().next().value as Quote | undefined;
           if (!q) {
-            const populated = ([branch, side]: [number, number]) =>
-              existing.filter(([, o]) => o.terms.branch === branch && o.terms.side === side)
-                .length >= this.settings.quoteLevels;
-            if (
-              !(
-                [
-                  [0, 0],
-                  [0, 1],
-                  [1, 0],
-                  [1, 1],
-                ] as [number, number][]
-              ).every(populated)
-            )
+            if (ids.some((id) => count(existing, id) < this.settings.quoteLevels))
               throw new Error("Static ladder could not fill every requested side");
             break;
           }
@@ -592,9 +726,8 @@ export class Engine {
             wallet = s.wallets.get(
               walletAddress(key(p.market), this.owner, this.client.program).toBase58(),
             ),
-            available = wallet ? big(wallet.balances[fundingAsset(order)]!) : 0n,
-            required = q.side === 0 ? quote(q.quantity, q.price, true) : q.quantity;
-          if (available < required) throw new Error("Static order is not fully backed");
+            available = wallet ? big(wallet.balances[fundingAsset(order)]!) : 0n;
+          if (available < reservation(q, legs)) throw new Error("Static order is not fully backed");
           const plan = planOrder({
             order,
             candidates: [],
@@ -604,12 +737,14 @@ export class Engine {
             makerFeeBps: s.config.maker_bps,
             takerFeeBps: s.config.taker_bps,
             program: this.client.program,
+            legs,
           });
           stage = "execution";
           log("static-quote", {
             market: p.market,
             branch: q.branch,
             side: q.side,
+            bases: q.bases,
             level: q.level,
             price: q.price,
             quantity: q.quantity,
@@ -631,8 +766,9 @@ export class Engine {
     }
   }
 
-  /** Allocate the requested amount into THIS market. Reuse unreserved global
-   * credit first; never count a shared deposit as inventory in every market. */
+  /** Allocate the requested amount of one collateral (0 = quote, 1.. = issuer leg)
+   * into THIS market. Reuse unreserved global credit first; never count a shared
+   * deposit as inventory in every market. */
   private async seedClaims(
     s: Snapshot,
     id: string,
@@ -642,7 +778,7 @@ export class Engine {
   ) {
     if (!this.executor) throw new Error("Claim seeding requires explicit execution");
     this.client.rememberMarket(key(id), market);
-    const mint = market.mints[collateral]!;
+    const mint = market.mints[underlyingAsset(collateral)]!;
     const available = globalAvailable(s, String(this.owner), String(mint));
     const deficit = amount > available ? amount - available : 0n;
     if (deficit && mint.equals(NATIVE_MINT)) {
@@ -674,18 +810,22 @@ export class Engine {
     if (!s.wallets.has(String(walletAddress(key(id), this.owner, this.client.program))))
       instructions.push(this.client.initializeWallet(key(id), this.owner));
     if (deficit) {
+      // Fee-aware Token-2022 deposit into the protocol-wide pool of this mint.
       const deposit = await this.client.depositForCredit(
         key(id),
         this.owner,
         mint,
-        collateral,
+        underlyingAsset(collateral),
         deficit,
       );
       if (deposit.fee * BPS > deposit.gross * BigInt(this.settings.maxTransferFeeBps))
         throw new Error("Issuer transfer fee exceeds funding policy");
       instructions.push(deposit.instruction);
     }
-    instructions.push(this.client.position("split", key(id), this.owner, collateral, amount));
+    instructions.push(
+      this.client.positionCredit(key(id), this.owner, collateral),
+      this.client.position("split", key(id), this.owner, collateral, amount),
+    );
     await this.executor.send(instructions, false, () => !this.stopped);
   }
 
@@ -707,23 +847,27 @@ export class Engine {
         owned(s, this.owner, p.market).length
       )
         throw new Error("Funding requires an empty dedicated market wallet");
+      const legs = await this.legs(m);
       const reference = await this.readReference(
         this.origin,
         this.client.deployment.genesisHash,
         m,
         p,
         this.settings,
+        legs,
       );
-      record.spot = String(reference.spot);
-      record.probability = String(reference.probability);
-      record.observedAt = reference.observedAt;
+      checkpoint(record, reference);
       record.fundStarted = true;
       this.save(); // Never automatically top up losses, including after restart.
-      for (const collateral of [0, 1]) {
-        const amount = units(
-          collateral === 0 ? p.baseInventory : p.quoteInventory,
-          m.decimals[collateral]!,
-        );
+      const amounts = [units(p.quoteInventory, m.decimals[0]!), ...seeds(p, m)];
+      for (const [collateral, amount] of amounts.entries()) {
+        if (amount === 0n) continue;
+        // A paused, frozen, delisted or corporate-action leg cannot be split; the
+        // static top-up can seed it after the issuer resumes.
+        if (collateral > 0 && !legs[collateral]?.tradable) {
+          log("fund-leg-skipped", { market: p.market, collateral, halt: legs[collateral]?.halt });
+          continue;
+        }
         await this.seedClaims(await this.view(), p.market, m, collateral, amount);
       }
       record.fundComplete = true;

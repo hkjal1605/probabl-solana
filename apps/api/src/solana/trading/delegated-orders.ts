@@ -14,7 +14,12 @@ import {
   type SolanaClient,
 } from "@conditional-stocks/solana-client";
 import type { Snapshot } from "@conditional-stocks/solana-indexer/projection";
-import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
+import {
+  Keypair,
+  PublicKey,
+  type TransactionInstruction,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import bs58 from "bs58";
 
 const MAX_STALE_REPLANS = 4;
@@ -163,9 +168,12 @@ export async function submitDelegatedOrder(input: {
   owner: string;
   order: OrderWire;
   snapshot: (queries: Pick<SolanaQueries, "snapshot">) => Promise<Snapshot>;
+  /** Replans against `snapshot`; `prefix` instructions share the placement
+   * transaction, so the plan's maker count is sized for them too. */
   prepare: (
     order: OrderWire,
     snapshot?: Snapshot,
+    prefix?: TransactionInstruction[],
   ) => Promise<{ plan: import("@conditional-stocks/solana-client").AtomicPlan }>;
 }) {
   const { client, db, domain, signer, owner } = input;
@@ -204,15 +212,17 @@ export async function submitDelegatedOrder(input: {
           )
         )
           throw new Error("Trading permission is inactive");
-        const { plan } = await input.prepare(order, snapshot);
         const marketKey = key(order.marketId);
         // Account creation is a live execution concern. An indexed absence may be
         // stale immediately after the owner's first order in this market.
         const wallet = await client.wallet(marketKey, key(owner));
-        const instructions = [
-          ...(!wallet ? [client.initializeWallet(marketKey, key(owner), signer.publicKey)] : []),
-          client.placement(order, plan, market),
-        ];
+        const prefix = !wallet
+          ? [client.initializeWallet(marketKey, key(owner), signer.publicKey)]
+          : [];
+        // Each replan re-reads live issuer legs and falls back to fewer makers
+        // when the multi-leg placement (plus any wallet initializer) is too large.
+        const { plan } = await input.prepare(order, snapshot, prefix);
+        const instructions = [...prefix, client.placement(order, plan, market)];
         built = await client.prepareTransaction(
           signer.publicKey,
           envelope(instructions, client.program),

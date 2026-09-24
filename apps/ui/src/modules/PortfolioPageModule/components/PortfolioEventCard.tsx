@@ -8,12 +8,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LineTabsList, LineTabsTrigger } from "@/components/ui/line-tabs";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { OrdersClient } from "@/modules/OrdersPageModule/components/OrdersClient";
+import { positionHasClaims } from "@/services/index-stream";
 import type { IndexedOrder, MarketView, PositionView } from "@/types/api";
 
-const hasClaims = (position: PositionView) =>
-  [position.stockYes, position.stockNo, position.quoteYes, position.quoteNo].some(
-    (amount) => BigInt(amount) > 0n,
-  );
+const hasClaims = positionHasClaims;
 
 export function PortfolioEventCard({
   markets,

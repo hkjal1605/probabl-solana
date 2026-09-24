@@ -1,7 +1,9 @@
 import {
   address,
   big,
+  collateralOf,
   envelope,
+  isClaimAsset,
   key,
   type SolanaClient,
   unsigned,
@@ -37,11 +39,14 @@ export async function prepareVaultTransfer(
       throw new Error("Invalid market claim transfer");
     const market = s.markets.get(body.marketId),
       asset = Number(body.tokenId);
+    // A claim asset (3c + 1 + branch) of a listed collateral whose claim
+    // vault exists. Underlying (3c) stays protocol-wide global credit.
     if (
       !market ||
-      !Number.isInteger(asset) ||
-      asset < 2 ||
-      asset > 5 ||
+      !/^\d{1,2}$/.test(body.tokenId ?? "") ||
+      !isClaimAsset(asset) ||
+      collateralOf(asset) > market.bases ||
+      !(market.vaults_initialized & (1 << asset)) ||
       !market.mints[asset]?.equals(mint)
     )
       throw new Error("Claim mint does not belong to this market");

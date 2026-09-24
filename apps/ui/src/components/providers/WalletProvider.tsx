@@ -10,7 +10,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { protocolConfig } from "@/config/protocol";
-import { requestJson } from "@/services/protocol-api-service";
+import { api, requestJson } from "@/services/protocol-api-service";
 import { createWalletController, type WalletState } from "@/lib/wallet/controller";
 import { browserStorage } from "@/lib/wallet/session";
 
@@ -35,6 +35,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       storage: browserStorage,
       origin: () => window.location.origin,
       client: () => new SolanaClient(protocolConfig),
+      lookupTables: api.lookupTables,
       request: requestJson,
       clearCache: clearWalletStores,
     }),

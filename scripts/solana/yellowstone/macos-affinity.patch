@@ -1,0 +1,50 @@
+diff --git a/yellowstone-grpc-geyser/Cargo.toml b/yellowstone-grpc-geyser/Cargo.toml
+index 20bc933..9087b82 100644
+--- a/yellowstone-grpc-geyser/Cargo.toml
++++ b/yellowstone-grpc-geyser/Cargo.toml
+@@ -17,7 +17,6 @@ crate-type = ["cdylib", "rlib"]
+ name = "config-check"
+ 
+ [dependencies]
+-affinity = { workspace = true }
+ anyhow = { workspace = true }
+ base64 = { workspace = true }
+ bincode = { workspace = true }
+@@ -108,3 +107,6 @@ solana-transaction = { workspace = true, features = ["bincode", "blake3"] }
+ 
+ [lints]
+ workspace = true
++
++[target.'cfg(target_os = "linux")'.dependencies]
++affinity = { workspace = true }
+diff --git a/yellowstone-grpc-geyser/src/config.rs b/yellowstone-grpc-geyser/src/config.rs
+index c8130de..00d64d2 100644
+--- a/yellowstone-grpc-geyser/src/config.rs
++++ b/yellowstone-grpc-geyser/src/config.rs
+@@ -124,11 +124,14 @@ fn parse_taskset(taskset: &str) -> Result<Vec<usize>, String> {
+     vec.sort();
+ 
+     if let Some(set_max_index) = vec.last().copied() {
++        #[cfg(target_os = "linux")]
+         let max_index = affinity::get_thread_affinity()
+             .map_err(|_err| "failed to get affinity".to_owned())?
+             .into_iter()
+             .max()
+             .unwrap_or(0);
++        #[cfg(not(target_os = "linux"))]
++        let max_index = std::thread::available_parallelism().map_or(1, |n| n.get()) - 1;
+ 
+         if set_max_index > max_index {
+             return Err(format!("core index must be in the range [0, {max_index}]"));
+diff --git a/yellowstone-grpc-geyser/src/plugin/entry.rs b/yellowstone-grpc-geyser/src/plugin/entry.rs
+index 57686bd..1b4a778 100644
+--- a/yellowstone-grpc-geyser/src/plugin/entry.rs
++++ b/yellowstone-grpc-geyser/src/plugin/entry.rs
+@@ -92,6 +92,7 @@ impl GeyserPlugin for Plugin {
+         }
+         if let Some(tokio_cpus) = config.tokio.affinity.clone() {
+             builder.on_thread_start(move || {
++                #[cfg(target_os = "linux")]
+                 affinity::set_thread_affinity(&tokio_cpus).expect("failed to set affinity")
+             });
+         }

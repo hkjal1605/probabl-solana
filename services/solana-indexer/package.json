@@ -6,7 +6,8 @@
   "exports": {
     "./custody": "./src/custody.ts",
     "./projection": "./src/projection.ts",
-    "./retired-orders": "./src/retired-orders.ts"
+    "./retired-orders": "./src/retired-orders.ts",
+    "./live": "./src/live/index.ts"
   },
   "scripts": {
     "start": "bun src/main.ts",
@@ -20,7 +21,9 @@
     "@solana/spl-token": "0.4.14",
     "@coral-xyz/anchor": "0.32.1",
     "hono": "4.13.5",
-    "pg": "8.23.0"
+    "pg": "8.23.0",
+    "@triton-one/yellowstone-grpc": "5.0.9",
+    "bs58": "6.0.0"
   },
   "devDependencies": {
     "@types/pg": "8.23.1"

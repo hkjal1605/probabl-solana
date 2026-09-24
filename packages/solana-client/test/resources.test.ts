@@ -19,9 +19,10 @@ import {
   compileTransactionMessage,
   budgetedInstructions,
   SIZING_BLOCKHASH,
+  UNIT_MULTIPLIER,
   type OrderWire,
-  type MarketAccount,
 } from "../src/index";
+import { marketAccount } from "./market-fixture";
 
 function fixture(count = 8, funding = 0, recipients = false) {
   const owner = Keypair.generate().publicKey,
@@ -31,7 +32,7 @@ function fixture(count = 8, funding = 0, recipients = false) {
     genesisHash: "test",
     config: Keypair.generate().publicKey.toBase58(),
   });
-  client.rememberMarket(market, {config: client.config, mints: [Keypair.generate().publicKey, Keypair.generate().publicKey]} as MarketAccount);
+  client.rememberMarket(market, marketAccount({ config: client.config, market }));
   const order: OrderWire = {
     maker: owner.toBase58(),
     recipient: (recipients ? Keypair.generate().publicKey : owner).toBase58(),
@@ -46,6 +47,7 @@ function fixture(count = 8, funding = 0, recipients = false) {
     tif: 0,
     fundingKind: funding,
     maxFeeBps: 1000,
+    bases: 1,
   };
   const makers = Array.from({ length: count }, () => {
     const maker = Keypair.generate().publicKey.toBase58();
@@ -63,8 +65,10 @@ function fixture(count = 8, funding = 0, recipients = false) {
       order: o,
       orderHash: orderId(o),
       remaining: 100n,
+      reserved: 100n,
       sequence: BigInt(i),
     })),
+    legs: { 1: { scale: 1n, multiplier: UNIT_MULTIPLIER, tradable: true } },
     now: 1n,
     step: 1n,
     nextSequence: BigInt(count),
@@ -93,21 +97,28 @@ test("new salt binds the exact u64 nonce without reducing random suffix entropy"
 });
 
 test("no-mint routes use readonly token accounts; mixed funding writes only affected collateral", () => {
-  for (const f of [fixture(0), fixture(8, 1)]) {
-    expect(f.ix.keys.slice(12, 20).every((a) => !a.isWritable)).toBe(true);
-    expect(f.ix.keys.slice(20, 20 + f.plan.makers.length).every((a) => a.isWritable)).toBe(true);
-  }
+  // Named 10, quote claims 10..14, then 7 accounts for the one touched leg.
+  const resting = fixture(0);
+  expect(resting.ix.keys).toHaveLength(10 + 4 + 2 + 1);
+  expect(resting.ix.keys.slice(10, 14).every((a) => !a.isWritable)).toBe(true);
+  const claims = fixture(8, 1);
+  expect(claims.ix.keys.slice(10, 21).every((a) => !a.isWritable)).toBe(true);
+  expect(claims.ix.keys.slice(21, 21 + claims.plan.makers.length).every((a) => a.isWritable)).toBe(true);
   const f = fixture(1, 1);
   const maker = { ...f.plan.makers[0]!, fundingKind: 0 };
   const ix = f.client.placement(f.order, { ...f.plan, makers: [maker] });
-  expect(ix.keys.slice(12, 16).every((a) => a.isWritable)).toBe(true);
-  expect(ix.keys.slice(16, 20).every((a) => !a.isWritable)).toBe(true);
+  // Quote claims readonly (claim-funded buyer); the leg's pool, vault and mint
+  // readonly; the leg's claim mints/vaults writable (underlying-funded ask).
+  expect(ix.keys.slice(10, 14).every((a) => !a.isWritable)).toBe(true);
+  expect(ix.keys.slice(14, 17).every((a) => !a.isWritable)).toBe(true);
+  expect(ix.keys.slice(17, 21).every((a) => a.isWritable)).toBe(true);
 });
 
 test("eight-maker sizing rejects early without LUTs and fits with frozen address tables", async () => {
   const f = fixture(8, 0, false);
   const instructions = budgetedInstructions([f.ix], f.client.program);
-  expect(computeUnits([f.ix], f.client.program)).toBe(282_000);
+  // 100k base + 35k one leg + 8k taker frame + 8 x 11k legs + 9 x 6k participants + 4 x 8k minting claims.
+  expect(computeUnits([f.ix], f.client.program)).toBe(317_000);
   expect(() => compileTransactionMessage(f.owner, instructions, SIZING_BLOCKHASH)).toThrow(
     "packet limit",
   );
@@ -177,7 +188,7 @@ test("bounded maintenance instructions use indexed addresses with no account rea
   f.client.connection.getAccountInfo = async () => {
     throw new Error("unexpected RPC");
   };
-  const ix = f.client.orderMaintenance("retire_orders", f.market, f.owner, keys, [0,1]);
+  const ix = f.client.orderMaintenance("retire_orders", f.market, f.owner, keys, [0, 3]);
   expect(ix.keys).toHaveLength(16);
   expect(computeUnits([ix], f.client.program)).toBe(170_000);
   expect(() => f.client.orderMaintenance("cancel_orders", f.market, f.owner, [])).toThrow();

@@ -1,15 +1,18 @@
 import {
-  assertMarketUnits,
+  assertShareUnits,
+  formatShareAmount,
   formatTokenAmount,
-  type MarketUnits,
   parsePriceRawX18,
-  parseTokenAmount,
+  parseShareAmount,
   quoteForExecution,
   quoteForReservation,
+  type ShareUnits,
 } from "@conditional-stocks/domain";
-import { orderSalt } from "@conditional-stocks/solana-client";
+import { MAX_BASES, orderSalt, singleBase } from "@conditional-stocks/solana-client";
 
-export interface OrderFormValues extends MarketUnits {
+export interface OrderFormValues extends ShareUnits {
+  /** Issuer-leg bitmask: legs a buy accepts, or the single leg a sell delivers. */
+  bases: number;
   baseStep?: string;
   account: string;
   delegate?: string;
@@ -28,11 +31,11 @@ export interface OrderFormValues extends MarketUnits {
 export const previewOrder = (
   quantity: string,
   price: string,
-  units: MarketUnits & { baseStep?: string },
+  units: ShareUnits & { baseStep?: string },
 ) => {
   try {
-    assertMarketUnits(units);
-    const quantityRaw = parseTokenAmount(quantity, units.baseTokenDecimals);
+    assertShareUnits(units);
+    const quantityRaw = parseShareAmount(quantity, units);
     const priceRawX18 = parsePriceRawX18(price, units);
     if (quantityRaw <= 0n || quantityRaw >= 1n << 64n) throw new Error("invalid quantity");
     if (
@@ -48,7 +51,7 @@ export const previewOrder = (
       cost: Number(formatTokenAmount(reservationRaw, units.quoteTokenDecimals)),
       costRaw: reservationRaw.toString(),
       priceRawX18: priceRawX18.toString(),
-      qty: Number(formatTokenAmount(quantityRaw, units.baseTokenDecimals)),
+      qty: Number(formatShareAmount(quantityRaw, units)),
       quantityRaw: quantityRaw.toString(),
       valid: true as const,
     };
@@ -73,6 +76,17 @@ export const createOrder = (
   const preview = previewOrder(values.quantity, values.price, values);
   if (!preview.valid) throw new Error("Quantity and price must be positive decimal values.");
   if (!Number.isSafeInteger(cutoffSeconds)) throw new Error("Trading cutoff is invalid.");
+  if (
+    !Number.isInteger(values.bases) ||
+    values.bases <= 0 ||
+    values.bases >= 1 << MAX_BASES ||
+    (values.side === "sell" && singleBase(values.bases) === null)
+  )
+    throw new Error(
+      values.side === "sell"
+        ? "Choose exactly one issuer token to deliver."
+        : "Accept at least one tradable issuer token.",
+    );
   const maxFeeBps = values.maxFeeBps ?? 0;
   if (!Number.isInteger(maxFeeBps) || maxFeeBps < 0 || maxFeeBps > 1_000) {
     throw new Error("Maximum fee must be an integer from 0 to 1000 bps.");
@@ -80,8 +94,13 @@ export const createOrder = (
   return {
     maxFeeBps,
     branch: values.branch === "YES" ? 0 : 1,
-    expiry: String(Math.min(Math.floor(nowMs / 1_000) + 30 * 86_400, cutoffSeconds - 1,
-      values.delegateExpiresAt ? Number(values.delegateExpiresAt) - 1 : Number.MAX_SAFE_INTEGER)),
+    expiry: String(
+      Math.min(
+        Math.floor(nowMs / 1_000) + 30 * 86_400,
+        cutoffSeconds - 1,
+        values.delegateExpiresAt ? Number(values.delegateExpiresAt) - 1 : Number.MAX_SAFE_INTEGER,
+      ),
+    ),
     fundingKind: values.funding === "whole" ? 0 : 1,
     limitPriceRawX18: preview.priceRawX18,
     maker: values.account,
@@ -93,5 +112,6 @@ export const createOrder = (
     salt: options.salt ?? orderSalt(BigInt(nowMs), crypto.getRandomValues(new Uint8Array(32))),
     side: values.side === "buy" ? 0 : 1,
     tif: values.tif === "gtc" ? 0 : 1,
+    bases: values.bases,
   };
 };

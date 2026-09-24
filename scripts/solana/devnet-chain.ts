@@ -1,6 +1,7 @@
 import {
   type ConfigAccount,
   coder,
+  decodeSupportedMint,
   configAddress,
   key,
   mintExtensions,
@@ -40,11 +41,13 @@ import {
   type AssetPlan,
   type AssetSpec,
   type DeploymentPlan,
+  isIssuer,
   NATIVE_MINT,
   PROGRAM_ID,
   rawAmount,
   tokenProgram,
 } from "./devnet-policy.ts";
+import { ISSUERS, issuerExtensionTypes, issuerMetadata, mockIssuerInstructions } from "./mock-issuers.ts";
 
 export interface ChainContext {
   connection: Connection;
@@ -61,8 +64,13 @@ export function assetPlan(spec: AssetSpec, mint: PublicKey, owner: PublicKey): A
     program: tokenProgram(spec).toBase58(),
     decimals: spec.decimals,
     initialRaw: rawAmount(spec.units, spec.decimals).toString(),
-    name: spec.kind === "native" ? "Wrapped Devnet SOL" : "Devnet Mock " + spec.symbol,
-    metadataSymbol: spec.kind === "native" ? "SOL" : "d" + spec.symbol,
+    name:
+      spec.kind === "native"
+        ? "Wrapped Devnet SOL"
+        : isIssuer(spec)
+          ? issuerMetadata(spec.profile, spec.ticker).name
+          : "Devnet Mock " + spec.symbol,
+    metadataSymbol: spec.kind === "native" ? "SOL" : isIssuer(spec) ? spec.symbol : "d" + spec.symbol,
     feeBps: spec.feeBps,
   };
 }
@@ -89,6 +97,29 @@ export async function assetInstructions(ctx: ChainContext, spec: AssetSpec, mint
       ],
     };
   if (!mint) throw new Error("Missing mock mint signer");
+  if (isIssuer(spec)) {
+    // Same Token-2022 extension set and order as the mainnet issuer (the
+    // deployer is the mock issuer authority), created, issued and funded in
+    // one atomic step. The ATA create is not idempotent: a retry cannot refill.
+    const issuer = await mockIssuerInstructions({
+      connection: ctx.connection,
+      payer: owner,
+      authority: owner,
+      profile: spec.profile,
+      ticker: spec.ticker,
+      mint,
+    });
+    if (issuer.symbol !== asset.metadataSymbol || issuer.decimals !== spec.decimals)
+      throw new Error("Issuer fixture differs from the asset policy");
+    return {
+      asset,
+      instructions: [
+        ...issuer.instructions,
+        createAta,
+        createMintToCheckedInstruction(mintKey, ata, owner, BigInt(asset.initialRaw), spec.decimals, [], program),
+      ],
+    };
+  }
   const metadata = {
     mint: mintKey,
     updateAuthority: owner,
@@ -97,10 +128,7 @@ export async function assetInstructions(ctx: ChainContext, spec: AssetSpec, mint
     uri: "",
     additionalMetadata: [],
   };
-  const extensions =
-    spec.kind === "token2022"
-      ? [ExtensionType.MetadataPointer, ...(spec.feeBps ? [ExtensionType.TransferFeeConfig] : [])]
-      : [];
+  const extensions: ExtensionType[] = [];
   const space = extensions.length ? getMintLen(extensions) : MINT_SIZE;
   // Allocate fixed extensions first; InitializeMetadata reallocates using the
   // already funded rent. Creation, metadata, ATA and initial mint are atomic.
@@ -210,15 +238,24 @@ export async function verifyAsset(ctx: ChainContext, asset: AssetPlan, reuseExis
     commitment: "finalized",
   });
   const mint = unpackMint(mintKey, result.value[0] ?? null, program);
-  const expectedExtensions =
-    spec.kind === "token2022" ? [18, 19, ...(spec.feeBps ? [1] : [])].sort((a, b) => a - b) : [];
+  const expectedExtensions = isIssuer(spec) ? issuerExtensionTypes(spec.profile) : [];
   if (
     JSON.stringify(mintExtensions(mint.tlvData).sort((a, b) => a - b)) !==
     JSON.stringify(expectedExtensions)
   )
     throw new Error("Unexpected mock mint extension set");
-  if (!mint.isInitialized || mint.decimals !== spec.decimals || mint.freezeAuthority)
+  // Mock issuers keep the issuer's freeze authority (the deployer); others have none.
+  if (
+    !mint.isInitialized ||
+    mint.decimals !== spec.decimals ||
+    (isIssuer(spec) ? !mint.freezeAuthority?.equals(owner) : !!mint.freezeAuthority)
+  )
     throw new Error("Mock mint initialization/decimals/freeze mismatch");
+  if (isIssuer(spec)) {
+    const issuer = decodeSupportedMint(mintKey, result.value[0] ?? null).issuer;
+    if (issuer.controls !== ISSUERS[spec.profile].admitted || issuer.paused || issuer.transferHookProgram)
+      throw new Error("Mock issuer controls differ from the replicated issuer configuration");
+  }
   if (spec.kind === "native") {
     if (!mintKey.equals(NATIVE_MINT) || mint.mintAuthority)
       throw new Error("SOL must be canonical wrapped native SOL");
@@ -242,7 +279,7 @@ export async function verifyAsset(ctx: ChainContext, asset: AssetPlan, reuseExis
     throw new Error("Deployer token account identity/authority mismatch");
   // A user may have transferred, burned or unwrapped their allocation since
   // deployment. Verification reports current balance; it does not remint/top up.
-  if (spec.kind === "token2022") {
+  if (isIssuer(spec)) {
     const pointer = getMetadataPointerState(mint),
       metadata = await getTokenMetadata(ctx.connection, mintKey, "finalized", program);
     if (

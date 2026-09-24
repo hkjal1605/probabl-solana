@@ -28,11 +28,15 @@ test("market search handles case, whitespace, symbols, questions, names and exac
     id: "BTC-market",
     ticker: "BTC",
     question: "Will the clarity act pass?",
-    baseToken: "ExactMintAddress",
+    bases: [{ ...seed.bases[0]!, mint: "ExactMintAddress", symbol: "BTCx", issuer: "xStocks" }],
   };
   const eth = { ...seed, id: "ETH-market", ticker: "ETH", question: btc.question };
   expect(searchMarkets([btc, eth], "  BTC   clarity  ").items).toEqual([btc]);
   expect(searchMarkets([btc, eth], "EXACTMINTADDRESS").items).toEqual([btc]);
+  // Issuer symbols and every listed issuer mint are searchable.
+  expect(searchMarkets([btc, eth], "btcx").items).toEqual([btc]);
+  expect(searchMarkets([btc, eth], "NVDAon").items).toEqual([eth]);
+  expect(searchMarkets([btc, eth], seed.bases[2]!.mint).items).toEqual([eth]);
   expect(searchMarkets([btc, eth], "clarity").total).toBe(2);
   expect(searchMarkets([btc, eth], "eth-market").items).toEqual([eth]);
   expect(searchMarkets([btc, eth], "nothing matches").total).toBe(0);

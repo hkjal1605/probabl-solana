@@ -36,7 +36,10 @@ interface Dependencies {
   sources(): WalletSources;
   storage(): SessionStorage | null;
   origin(): string;
-  client(): Pick<SolanaClient, "assertNetwork" | "prepareTransaction" | "connection">;
+  client(): Pick<SolanaClient, "assertNetwork" | "prepareTransaction" | "connection"> &
+    Partial<Pick<SolanaClient, "useLookupTables">>;
+  /** Keeper lookup tables to compile with; unavailable tables fall back to the deployment's frozen ones. */
+  lookupTables?(): Promise<string[]>;
   request<T>(path: string, options: { body: unknown }): Promise<T>;
   clearCache(): void;
 }
@@ -340,6 +343,15 @@ export function createWalletController(deps: Dependencies) {
     publish({ status: "signing" });
     try {
       const client = deps.client();
+      if (deps.lookupTables && client.useLookupTables) {
+        try {
+          client.useLookupTables(await deps.lookupTables());
+        } catch {
+          // Compile with frozen deployment tables only; an oversized
+          // transaction is then rejected before any wallet prompt.
+        }
+        check();
+      }
       const built = await client.prepareTransaction(
         owner,
         { ...value, value: "0" },

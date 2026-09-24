@@ -1,9 +1,18 @@
 import type { SolanaDatabase } from "@conditional-stocks/db/solana";
-import { getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token";
-import { decodeSupportedMint, key, type SolanaClient } from "@conditional-stocks/solana-client";
+import { getAssociatedTokenAddressSync, unpackAccount, unpackMint } from "@solana/spl-token";
+import type { AccountInfo, PublicKey } from "@solana/web3.js";
+import {
+  claimAsset,
+  decodeSupportedMint,
+  isClaimAsset,
+  key,
+  type SolanaClient,
+  tokenProgram,
+} from "@conditional-stocks/solana-client";
 import { ReadCache } from "@conditional-stocks/shared/read-cache";
 import type { Snapshot } from "./projection";
 import { globalAvailable, reservedUnderlying } from "./custody";
+import { positionView } from "./positions";
 
 export interface WalletImage {
   owner: string;
@@ -11,6 +20,26 @@ export interface WalletImage {
   blockNumber: string;
   positions: Record<string, unknown>[];
   balances: Record<string, Record<string, unknown>>;
+}
+
+/** Custody-relevant mint metadata. A whitelisted issuer can later configure a
+ * transfer hook, which halts custody transfers of that token; its balances must
+ * still be indexed rather than failing every wallet image. */
+function mintMetadata(mint: PublicKey, info: AccountInfo<Buffer> | null) {
+  try {
+    const decoded = decodeSupportedMint(mint, info);
+    return { ...decoded, paused: decoded.issuer.paused, halted: decoded.issuer.paused };
+  } catch (error) {
+    if (!info || !(error instanceof Error) || !/transfer hook/.test(error.message)) throw error;
+    const program = tokenProgram(info.owner);
+    return {
+      ...unpackMint(mint, info, program),
+      program,
+      extensions: [] as number[],
+      paused: false,
+      halted: true,
+    };
+  }
 }
 
 /** Shared active-wallet index. Browser reads never start separate per-token RPC loops. */
@@ -84,11 +113,16 @@ export class WalletIndex {
   private async read(ownerString: string): Promise<WalletImage> {
     const s = this.state(),
       owner = key(ownerString);
+    // Every pool (quote and issuer tokens) plus every initialized claim mint
+    // of every listed collateral.
     const mintMap = new Map([...s.pools.values()].map((p) => [String(p.mint), p.mint]));
     for (const market of s.markets.values())
-      for (let asset = 2; asset < 6; asset++)
-        if (market.vaults_initialized & (1 << asset))
-          mintMap.set(String(market.mints[asset]), market.mints[asset]!);
+      for (let c = 0; c <= market.bases; c++)
+        for (const branch of [0, 1]) {
+          const asset = claimAsset(c, branch);
+          if (market.vaults_initialized & (1 << asset))
+            mintMap.set(String(market.mints[asset]), market.mints[asset]!);
+        }
     const mints = [...mintMap.values()];
     let externalSlot = s.slot;
     const batch = async (addresses: ReturnType<typeof key>[]) => {
@@ -110,7 +144,7 @@ export class WalletIndex {
       ownerString + ":" + mints.join(","),
       async () => {
         const mintInfos = await this.mintReads.get(mints.join(","), () => batch(mints));
-        const metadata = mints.map((mint, i) => decodeSupportedMint(mint, mintInfos[i] ?? null));
+        const metadata = mints.map((mint, i) => mintMetadata(mint, mintInfos[i] ?? null));
         const atas = mints.map((mint, i) =>
           getAssociatedTokenAddressSync(mint, owner, true, metadata[i]!.program),
         );
@@ -141,7 +175,8 @@ export class WalletIndex {
       for (const [id, market] of s.markets) {
         const asset = market.mints.findIndex((m) => m.equals(mint));
         const wallet = credits.get(id);
-        if (asset >= 2 && wallet) creditBalances[id] = wallet.balances[asset]!.toString();
+        if (isClaimAsset(asset) && wallet)
+          creditBalances[id] = wallet.balances[asset]!.toString();
       }
       balances[mint.toBase58()] = {
         account: ownerString,
@@ -150,6 +185,9 @@ export class WalletIndex {
         tokenProgram: meta.program.toBase58(),
         extensions: meta.extensions,
         issuerCanFreeze: meta.freezeAuthority !== null,
+        /** Issuer pause / transfer-hook state of the token (custody transfers halt). */
+        issuerPaused: meta.paused,
+        custodyHalted: meta.halted,
         amountFormat: "raw-units-decimal-formatted",
         canonicalBalance: String(account?.amount ?? 0n),
         vaultAvailable: globalAvailable(s, ownerString, String(mint)).toString(),
@@ -160,34 +198,15 @@ export class WalletIndex {
         observedAt,
       };
     }
-    const positions = [...s.markets].flatMap(([id, market]) => {
-      if (market.vaults_initialized !== 63) return [];
-      const wallet = credits.get(id);
-      const amounts = market.mints
-        .slice(2)
-        .map((mint, i) =>
-          String(
-            (external.get(mint.toBase58()) ?? 0n) +
-              BigInt(wallet?.balances[i + 2]?.toString() ?? "0"),
-          ),
+    const positions = [...s.markets].flatMap(([id, market]) =>
+      positionView(id, market, (asset) => {
+        const mint = market.mints[asset]!;
+        return (
+          (external.get(mint.toBase58()) ?? 0n) +
+          BigInt(credits.get(id)?.balances[asset]?.toString() ?? "0")
         );
-      if (amounts.every((a) => a === "0")) return [];
-      return [
-        {
-          marketId: id,
-          conditionId: id,
-          stockYes: amounts[0],
-          stockNo: amounts[1],
-          quoteYes: amounts[2],
-          quoteNo: amounts[3],
-          redeemable: market.state === 6 || market.state === 7,
-          baseTokenDecimals: market.decimals[0],
-          quoteTokenDecimals: market.decimals[1],
-          protocolVersion: 2,
-          priceFormat: "raw-unit-ratio-x18",
-        },
-      ];
-    });
+      }),
+    );
     const image = {
       owner: ownerString,
       observedAt,

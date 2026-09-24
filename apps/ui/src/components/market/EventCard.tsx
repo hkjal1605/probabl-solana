@@ -45,7 +45,10 @@ export function EventCard({ markets }: { markets: MarketView[] }) {
             <Link href={`/markets/${market.id}`}>{market.question}</Link>
           </CardTitle>
         </div>
-        <ProbabilityGauge probability={market.probability} conditionId={market.mapping.conditionId} />
+        <ProbabilityGauge
+          probability={market.probability}
+          conditionId={market.mapping.conditionId}
+        />
       </CardHeader>
       <CardContent className="px-0">
         <Table>
@@ -70,7 +73,7 @@ export function EventCard({ markets }: { markets: MarketView[] }) {
                     >
                       <TokenIdentity
                         symbol={asset.ticker}
-                        metadata={asset.baseTokenMetadata}
+                        metadata={asset.assetMetadata}
                         showName={false}
                       />
                     </Link>

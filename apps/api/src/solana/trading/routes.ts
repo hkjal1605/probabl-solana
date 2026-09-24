@@ -13,10 +13,9 @@ import type { Keypair } from "@solana/web3.js";
 import type { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { Authenticate } from "../auth/routes.ts";
-import { indexedSnapshot } from "../chain/indexed-snapshot.ts";
 import { submitDelegatedOrder, tradingPermission } from "./delegated-orders.ts";
 import { mountOrderReview } from "./order-review.ts";
-import type { createOrderPlan } from "./plan.ts";
+import { assertOrderLegs, type createOrderPlan } from "./plan.ts";
 
 export function mountTrading(
   app: Hono,
@@ -32,6 +31,12 @@ export function mountTrading(
 ) {
   const { client, db, domain, authenticate, readIndex, prepare, delegateSigner } = options;
   mountOrderReview(app, prepare);
+  // Frozen deployment tables are configured client-side; these are the
+  // keeper's growing tables that let one placement carry every maker.
+  app.get("/v1/lookup-tables", (c) => {
+    c.header("cache-control", "no-store");
+    return c.json({ tables: client.keeperLookupTableAddresses() });
+  });
   app.get("/v1/trading/permission", async (c) => {
     const owner = address(c.req.query("owner"));
     return c.json(tradingPermission(await readIndex(), client, delegateSigner, owner));
@@ -49,7 +54,7 @@ export function mountTrading(
         signer: delegateSigner,
         owner,
         order,
-        snapshot: (queries) => indexedSnapshot(queries, client, domain),
+        snapshot: () => readIndex(),
         prepare,
       }),
     );
@@ -63,9 +68,10 @@ export function mountTrading(
     const plan = parseAtomicPlan(body.plan, order);
     if (BigInt(plan.deadline) <= BigInt(Math.floor(Date.now() / 1000)))
       throw new Error("Quote expired");
-    const snapshot = await indexedSnapshot(db, client, domain);
+    const snapshot = await readIndex();
     const market = snapshot.markets.get(order.marketId);
     if (!market) throw new Error("Unknown market");
+    assertOrderLegs(order, market);
     const transaction = envelope([client.placement(order, plan, market)], client.program);
     const built = await client.prepareTransaction(key(owner), transaction);
     const simulation = await client.connection.simulateTransaction(built.transaction, {

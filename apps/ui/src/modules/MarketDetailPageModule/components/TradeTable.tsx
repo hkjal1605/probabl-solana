@@ -12,9 +12,10 @@ import {
   displayPrice,
   formatNumber,
   formatTime,
+  shareAmount,
   shortAddress,
-  tokenAmount,
 } from "@/lib/format/display";
+import { legByCollateral } from "@/lib/markets/legs";
 import type { MarketView, TradeView } from "@/types/api";
 export function TradeTable({ market, trades }: { market: MarketView; trades: TradeView[] }) {
   if (!trades.length) return <EmptyState>No indexed fills for this market yet.</EmptyState>;
@@ -39,7 +40,12 @@ export function TradeTable({ market, trades }: { market: MarketView; trades: Tra
               {formatNumber(displayPrice(trade.executionPriceRawX18, market))}
             </TableCell>
             <TableCell className="tabular-nums">
-              {formatNumber(tokenAmount(trade.fillQuantity, market.baseTokenDecimals), 4)}
+              {formatNumber(shareAmount(trade.fillQuantity, market), 4)}
+              {trade.base !== undefined && (
+                <span className="ml-1 text-xs text-muted-foreground">
+                  {legByCollateral(market, trade.base)?.symbol}
+                </span>
+              )}
             </TableCell>
             <TableCell className="text-xs font-medium text-muted-foreground">
               {formatTime(new Date(Number(trade.blockTimestamp) * 1000).toISOString())}

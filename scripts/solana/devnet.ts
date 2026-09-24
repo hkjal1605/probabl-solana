@@ -200,9 +200,13 @@ export async function fundingPlan(
       Math.max(0, allocationRent - prepaidBufferLamports) +
       (await connection.getMinimumBalanceForRentExemption(36));
   }
+  // Every non-native mint (issuer mocks with extensions and metadata stay below
+  // 1 KiB) and one token account per asset (issuer ATAs carry account
+  // extensions), plus one spare account.
+  const mints = ASSETS.filter((spec) => spec.kind !== "native").length;
   const fixtureRent =
-    (await connection.getMinimumBalanceForRentExemption(1024)) * 6 +
-    (await connection.getMinimumBalanceForRentExemption(256)) * 8;
+    (await connection.getMinimumBalanceForRentExemption(1024)) * mints +
+    (await connection.getMinimumBalanceForRentExemption(256)) * (ASSETS.length + 1);
   const wrap = BigInt(plan.assets.find((a) => a.symbol === "SOL")!.initialRaw);
   const required = BigInt(programRent + fixtureRent) + wrap + 100_000_000n;
   const balance = BigInt(await connection.getBalance(new PublicKey(plan.deployer), "finalized"));

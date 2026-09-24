@@ -55,18 +55,23 @@ mock.module("../../src/lib/trading/order", () => ({
   previewOrder: (quantity: string, price: string) => ({
     valid: Number(quantity) > 0 && Number(price) > 0,
   }),
-  createOrder: (value: unknown) => value,
+  createOrder: (value: Record<string, unknown>) => ({
+    ...value,
+    side: value.side === "buy" ? 0 : 1,
+    limitPriceRawX18: "1",
+  }),
 }));
 mock.module("../../src/lib/trading/permission", () => ({
   tradingPermissionApproval: () => ({}),
 }));
 mock.module("../../src/lib/trading/rpc", () => ({ solana: () => ({}) }));
+const sdk = await import("@conditional-stocks/solana-client");
 mock.module("@conditional-stocks/solana-client", () => ({
+  ...sdk,
   parseOrder: (value: unknown) => value,
   parseAtomicPlan: () => {},
   orderId: () => "hash",
-  fundingAsset: () => 1,
-  claimAddress: () => "claim",
+  fundingAsset: () => 0,
   quote: () => 1n,
   key: (value: string) => value,
 }));

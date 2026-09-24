@@ -1,5 +1,5 @@
 import { canonicalStringify } from "@conditional-stocks/market-data";
-import { supportedMint } from "./tokens.ts";
+import { decodeSupportedMint, ALL_ISSUER_CONTROLS, issuerState } from "./tokens.ts";
 import {
   SolanaClient,
   envelope,
@@ -7,6 +7,7 @@ import {
   type Envelope,
   wireInstruction,
 } from "./transactions.ts";
+import { PublicKey } from "@solana/web3.js";
 import {
   key,
   digest,
@@ -19,6 +20,14 @@ import {
   vaultAddress,
   poolAddress, poolVaultAddress,
   TOKEN_PROGRAM_ID,
+  COLLATERALS,
+  MAX_BASES,
+  QUOTE,
+  claimAsset,
+  underlyingAsset,
+  type AssetPoolAccount,
+  type MarketAccount,
+  coder,
 } from "./protocol.ts";
 import {
   assertEvidenceIntegrity,
@@ -32,6 +41,10 @@ export type AdminAction =
   | "create-market"
   | "begin-resolution"
   | "resolve-market";
+/** Stable market identity: the canonical creation config, including its
+ * ordered issuer-token list. */
+export const marketIdFromConfig = (config: CreationEvidencePacket["config"]) =>
+  digest("PROBABL_SOLANA_MARKET_V1:" + canonicalStringify(config));
 export interface AdminTransaction extends Envelope {
   from: string;
   chainId: 1;
@@ -68,7 +81,7 @@ export function evidenceTransaction(
     if (action !== "create-market")
       throw new Error("Action does not match the evidence packet");
     const c = p.config,
-      id = digest("PROBABL_SOLANA_MARKET_V1:" + canonicalStringify(c)),
+      id = marketIdFromConfig(c),
       market = marketAddress(client.config, id, client.program);
     expectedMarketId = market.toBase58();
     from = deployment.marketAdmin;
@@ -81,6 +94,7 @@ export function evidenceTransaction(
       metadata_uri: c.metadataUri,
       trading_open: bn(c.tradingOpen),
       trading_cutoff: bn(c.tradingCutoff),
+      share_decimals: Number(c.shareDecimals),
       tick: bn(c.priceTickRawX18),
       step: bn(c.baseStep),
       min_notional: bn(c.minNotional),
@@ -89,6 +103,9 @@ export function evidenceTransaction(
       max_wallet: bn(c.maxWalletOpenNotional),
       max_market: bn(c.maxMarketOpenNotional),
     };
+    // The market lists the quote only; `initializeMarketVaults` then lists the
+    // evidence's issuer tokens (add_base) and creates every claim mint.
+    const quotePool = poolAddress(client.config, key(c.quoteToken), client.program);
     ix = client.ix(
       "create_market",
       { id: [...id], terms },
@@ -96,8 +113,9 @@ export function evidenceTransaction(
         admin: key(from),
         config: client.config,
         market,
-        base_mint: key(c.baseToken),
         quote_mint: key(c.quoteToken),
+        quote_pool: quotePool,
+        quote_vault: poolVaultAddress(quotePool, client.program),
         system_program: SystemProgram.programId,
       },
     );
@@ -132,7 +150,8 @@ export function evidenceTransaction(
       ix = client.ix(
         "resolve",
         { yes, no, evidence: [...evidence], uri: p.sourceReference },
-        { actor: key(from), config: client.config, market },
+        // The resolver pays the rent for the evidence URI bytes it adds.
+        { actor: key(from), config: client.config, market, system_program: SystemProgram.programId },
       );
     } else throw new Error("Action does not match the evidence packet");
   }
@@ -173,49 +192,115 @@ export function lifecycleTransaction(
   };
 }
 
+/** Admission bits a pool needs for a mint: exactly its issuer controls. */
+export async function mintAdmission(client: SolanaClient, mint: PublicKey) {
+  const info = await client.connection.getAccountInfo(mint, "confirmed");
+  const decoded = decodeSupportedMint(mint, info, ALL_ISSUER_CONTROLS);
+  return { program: decoded.program, admitted: decoded.issuer.controls, issuer: decoded.issuer, decimals: decoded.decimals };
+}
+
+async function existingPool(client: SolanaClient, mint: PublicKey): Promise<AssetPoolAccount | null> {
+  const info = await client.connection.getAccountInfo(poolAddress(client.config, mint, client.program), "confirmed");
+  if (!info) return null;
+  if (!info.owner.equals(client.program)) throw new Error("Pool address is not owned by the program");
+  return coder.accounts.decode("AssetPool", info.data) as AssetPoolAccount;
+}
+
+/** List one issuer token as the market's next base leg: creates its custody
+ * pool first (admitting exactly the mint's issuer controls) when missing. */
+export async function addBaseInstructions(client: SolanaClient, market: PublicKey, admin: PublicKey, mint: PublicKey) {
+  const { program, admitted } = await mintAdmission(client, mint);
+  const pool = poolAddress(client.config, mint, client.program);
+  const current = await existingPool(client, mint);
+  if (current && current.admitted !== admitted)
+    throw new Error(`Pool admits issuer controls ${current.admitted} but the mint now uses ${admitted}; issuer configuration changed`);
+  return [
+    ...(current ? [] : [client.initializePool(mint, admin, program, admitted)]),
+    client.ix("add_base", {}, {
+      admin, config: client.config, market, mint, pool,
+      vault: poolVaultAddress(pool, client.program), token_program: program,
+    }),
+  ];
+}
+
+export function initializeClaimsInstruction(client: SolanaClient, market: PublicKey, payer: PublicKey, collateral: number) {
+  if (!Number.isInteger(collateral) || collateral < 0 || collateral >= COLLATERALS) throw new Error("Invalid collateral");
+  const yes = claimAsset(collateral, 0), no = claimAsset(collateral, 1);
+  return client.ix("initialize_claims", { collateral }, {
+    payer, market,
+    yes_mint: claimAddress(market, yes, client.program),
+    no_mint: claimAddress(market, no, client.program),
+    yes_vault: vaultAddress(market, yes, client.program),
+    no_vault: vaultAddress(market, no, client.program),
+    token_program: TOKEN_PROGRAM_ID,
+    system_program: SystemProgram.programId,
+  });
+}
+
+/** Everything a created market still needs before it can open, in order:
+ * list each issuer token (pool + add_base) not yet listed, then create the
+ * claim mints of every collateral. `baseTokens` is the evidence's ordered list;
+ * already-listed legs must match it exactly. */
 export async function initializeMarketVaults(
   client: SolanaClient,
   marketId: string,
   payer: string,
+  baseTokens: readonly string[] = [],
 ): Promise<AdminTransaction[]> {
   const market = key(marketId),
     m = await client.market(market),
+    admin = key(payer),
     result: AdminTransaction[] = [];
-  for (let asset = 0; asset < 6; asset++)
-    if (!(m.vaults_initialized & (1 << asset))) {
-      const mint = m.mints[asset]!;
-      const pool = asset < 2 ? poolAddress(client.config, mint, client.program) : null;
-      const tokenProgram = asset < 2 ? (await supportedMint(client.connection, mint)).program : TOKEN_PROGRAM_ID;
-      const initialize = pool && !(await client.connection.getAccountInfo(pool)) ? [client.initializePool(mint, key(payer), tokenProgram)] : [];
-      result.push({
-        ...envelope(
-          [
-            ...initialize,
-            client.ix(
-              asset < 2 ? "initialize_asset" : "initialize_claim",
-              { asset },
-              {
-                payer: key(payer),
-                market,
-                mint:
-                  asset < 2
-                    ? m.mints[asset]!
-                    : claimAddress(market, asset, client.program),
-                ...(pool ? { pool } : {}),
-                vault: pool ? poolVaultAddress(pool, client.program) : vaultAddress(market, asset, client.program),
-                token_program: tokenProgram,
-                system_program: SystemProgram.programId,
-              },
-            ),
-          ],
-          client.program,
-        ),
-        from: payer,
-        chainId: 1,
-      });
-    }
+  if (baseTokens.length > MAX_BASES || new Set(baseTokens).size !== baseTokens.length)
+    throw new Error(`A market lists 1-${MAX_BASES} distinct issuer tokens`);
+  for (let c = 1; c <= m.bases; c++)
+    if (baseTokens.length && m.mints[underlyingAsset(c)]!.toBase58() !== baseTokens[c - 1])
+      throw new Error("Listed issuer legs differ from the market evidence");
+  const tx = (instructions: ReturnType<SolanaClient["ix"]>[]) => ({
+    ...envelope(instructions, client.program), from: payer, chainId: 1 as const,
+  });
+  for (const [index, token] of baseTokens.entries())
+    if (index + 1 > m.bases) result.push(tx(await addBaseInstructions(client, market, admin, key(token))));
+  const listed = Math.max(m.bases, baseTokens.length);
+  for (let c = QUOTE; c <= listed; c++) {
+    const bits = (1 << claimAsset(c, 0)) | (1 << claimAsset(c, 1));
+    if ((m.vaults_initialized & bits) !== bits) result.push(tx([initializeClaimsInstruction(client, market, admin, c)]));
+  }
   return result;
 }
+
+/** Delist (guardian or market admin) or relist (market admin) a base leg. */
+export function setBaseTransaction(
+  deployment: Deployment,
+  actor: string,
+  marketId: string,
+  collateral: number,
+  active: boolean,
+): AdminTransaction {
+  if (!Number.isInteger(collateral) || collateral < 1 || collateral > MAX_BASES) throw new Error("Invalid base leg");
+  const client = new SolanaClient(deployment);
+  return {
+    ...envelope([client.ix("set_base", { collateral, active }, { actor: key(actor), config: client.config, market: key(marketId) })], client.program),
+    from: actor,
+    chainId: 1,
+  };
+}
+
+/** Whitelist an additional issuer token on an existing market. */
+export async function addBaseTransaction(client: SolanaClient, marketId: string, admin: string, mint: string): Promise<AdminTransaction[]> {
+  const market = key(marketId), m = await client.market(market);
+  if (m.bases >= MAX_BASES) throw new Error(`Markets list at most ${MAX_BASES} issuer tokens`);
+  for (let c = 0; c <= m.bases; c++)
+    if (m.mints[underlyingAsset(c)]!.toBase58() === mint) throw new Error("Token is already listed on this market");
+  const listing = await addBaseInstructions(client, market, key(admin), key(mint));
+  return [
+    { ...envelope(listing, client.program), from: admin, chainId: 1 },
+    { ...envelope([initializeClaimsInstruction(client, market, key(admin), m.bases + 1)], client.program), from: admin, chainId: 1 },
+  ];
+}
+
+export type { MarketAccount };
+export { issuerState };
 
 export async function preflightAdmin(
   client: SolanaClient,

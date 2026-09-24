@@ -152,8 +152,13 @@ fn lifecycle_nonce_and_quote_boundaries() {
     assert_eq!(guard(10, 20, 30, (1, 2, 3), (1, 2, 3)), Ok(()));
     assert!(guard(20, 20, 30, (1, 2, 3), (1, 2, 3)).is_err());
     assert!(guard(10, 31, 30, (1, 2, 3), (1, 2, 3)).is_err());
-    assert!(guard(10, 20, 30, (1, 2, 3), (2, 2, 3)).is_err());
+    // Orders placed since planning never invalidate a plan; a plan from a
+    // future book or at other fee rates does.
+    assert_eq!(guard(10, 20, 30, (1, 2, 3), (2, 2, 3)), Ok(()));
+    assert_eq!(guard(10, 20, 30, (1, 2, 3), (u64::MAX, 2, 3)), Ok(()));
+    assert!(guard(10, 20, 30, (2, 2, 3), (1, 2, 3)).is_err());
     assert!(guard(10, 20, 30, (1, 2, 3), (1, 3, 3)).is_err());
+    assert!(guard(10, 20, 30, (1, 2, 3), (1, 2, 4)).is_err());
     assert!(!releasable(OPEN, 10, 20, 1, 1));
     assert!(releasable(FROZEN, 10, 20, 1, 1));
     assert!(releasable(OPEN, 20, 20, 1, 1));
@@ -249,4 +254,56 @@ proptest! {
             prop_assert_eq!(redemption(yes,no,1,1),Err(Error::FractionalRedemption));
         }
     }
+}
+
+#[test]
+fn crossing_is_strictly_between_opposite_sides() {
+    assert!(crosses(0, 60, 1, 60));
+    assert!(crosses(0, 61, 1, 60));
+    assert!(!crosses(0, 59, 1, 60));
+    assert!(crosses(1, 60, 0, 60));
+    assert!(crosses(1, 59, 0, 60));
+    assert!(!crosses(1, 61, 0, 60));
+    for (a, b) in [
+        (0, 0),
+        (1, 1),
+        (0, SIDE_NONE),
+        (1, SIDE_NONE),
+        (SIDE_NONE, 0),
+    ] {
+        assert!(!crosses(a, 100, b, 1));
+        assert!(!crosses(a, 1, b, 100));
+    }
+}
+
+#[test]
+fn resting_orders_never_cross_placements_their_plan_could_not_see() {
+    const WINDOW: usize = 4;
+    // Placements 0..6 retained modulo 4: 2 = ask@50, 3 = bid@40, 4 = filled, 5 = ask@70.
+    let mut ring = [(0u128, SIDE_NONE); WINDOW];
+    for (sequence, price, side) in [(2usize, 50, 1), (3, 40, 0), (4, 55, SIDE_NONE), (5, 70, 1)] {
+        ring[sequence % WINDOW] = (price, side);
+    }
+    let entry = |slot: usize| ring[slot];
+    // Nothing placed since planning.
+    assert_eq!(race_free(WINDOW, 6, 6, 0, 1_000, entry), Ok(()));
+    // A bid below every newer ask and a same-side newer bid is fine.
+    assert_eq!(race_free(WINDOW, 3, 6, 0, 49, entry), Ok(()));
+    // A bid at or above a newer ask it never matched is rejected.
+    assert_eq!(
+        race_free(WINDOW, 3, 6, 0, 70, entry),
+        Err(Error::StaleQuote)
+    );
+    // Placements that did not rest never conflict.
+    assert_eq!(race_free(WINDOW, 4, 6, 0, 69, entry), Ok(()));
+    // An ask at or below a newer bid is rejected; above it is fine.
+    assert_eq!(
+        race_free(WINDOW, 3, 6, 1, 40, entry),
+        Err(Error::StaleQuote)
+    );
+    assert_eq!(race_free(WINDOW, 3, 6, 1, 41, entry), Ok(()));
+    // Beyond the retained window fails closed.
+    assert_eq!(race_free(WINDOW, 1, 6, 0, 1, entry), Err(Error::StaleQuote));
+    assert_eq!(race_free(WINDOW, 7, 6, 0, 1, entry), Err(Error::StaleQuote));
+    assert_eq!(race_free(0, 6, 6, 0, 1, entry), Err(Error::StaleQuote));
 }

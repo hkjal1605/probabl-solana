@@ -14,6 +14,7 @@ import {
   getOrCreateAssociatedTokenAccount,
   mintTo,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
 } from "@solana/spl-token";
 import {
   SolanaClient,
@@ -37,11 +38,13 @@ import {
   orderWire,
   orderSalt,
   budgetedInstructions,
+  baseRaw,
   type OrderWire,
   type TraderAccount,
   type DelegateLimits,
 } from "../src/index";
 import { initializeMarketVaults } from "../src/admin";
+import { mockIssuerInstructions } from "../../../scripts/solana/mock-issuers.ts";
 import { decodeSnapshot, liveOrder } from "../../../services/solana-indexer/src/projection";
 
 const rpc = process.env.SOLANA_DELEGATION_TEST_RPC;
@@ -52,6 +55,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
     attacker = Keypair.generate();
   let client: SolanaClient,
     base: PublicKey,
+    issuer: PublicKey,
     quote: PublicKey,
     table: AddressLookupTableAccount | undefined;
   const markets: PublicKey[] = [];
@@ -127,6 +131,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
       tif: 0,
       fundingKind: 0,
       maxFeeBps: 50,
+      bases: 1,
       ...changes,
     };
   }
@@ -151,6 +156,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
       nextSequence: big(m.sequence[o.branch]!),
       makerFeeBps: 0,
       takerFeeBps: 0,
+      program: client.program,
     });
     return client.placement(o, plan, m);
   }
@@ -180,6 +186,29 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
       );
     base = await createMint(connection(), admin, admin.publicKey, null, 6);
     quote = await createMint(connection(), admin, admin.publicKey, null, 6);
+    // Ondo-configured mock issuer (Token-2022 issuer controls, 9 decimals, live multiplier).
+    const ondo = await mockIssuerInstructions({
+      connection: connection(),
+      payer: admin.publicKey,
+      authority: admin.publicKey,
+      profile: "ondo",
+      ticker: "NVDA",
+    });
+    issuer = ondo.mint.publicKey;
+    {
+      // Token-2022 setup only: no protocol compute profile applies.
+      const latest = await connection().getLatestBlockhash();
+      const tx = new VersionedTransaction(
+        new TransactionMessage({
+          payerKey: admin.publicKey,
+          recentBlockhash: latest.blockhash,
+          instructions: ondo.instructions,
+        }).compileToV0Message(),
+      );
+      tx.sign([admin, ondo.mint]);
+      const signature = await connection().sendRawTransaction(tx.serialize());
+      await connection().confirmTransaction({ ...latest, signature }, "confirmed");
+    }
     await send([
       client.ix(
         "initialize",
@@ -197,8 +226,10 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
           system_program: SystemProgram.programId,
         },
       ),
+      client.initializePool(quote, admin.publicKey, TOKEN_PROGRAM_ID, 0),
     ]);
-    for (let i = 0; i < 2; i++) {
+    // Two single-leg markets plus one market listing [base, issuer].
+    for (let i = 0; i < 3; i++) {
       const id = digest(`delegate-market-${i}-${admin.publicKey}`),
         m = marketAddress(client.config, id),
         uri = "ipfs://delegate-test";
@@ -216,8 +247,10 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
               metadata_uri: uri,
               trading_open: bn(0),
               trading_cutoff: bn(now() + 7200n),
+              share_decimals: 6,
               tick: bn(10n ** 18n),
-              step: bn(1),
+              // One step must deliver at least two raw units of every leg.
+              step: bn(2),
               min_notional: bn(1),
               max_quantity: bn(1_000_000),
               max_order: bn(10_000_000),
@@ -228,8 +261,9 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
           {
             admin: admin.publicKey,
             config: client.config,
-            base_mint: base,
             quote_mint: quote,
+            quote_pool: poolAddress(client.config, quote),
+            quote_vault: poolVaultAddress(poolAddress(client.config, quote)),
             market: m,
             system_program: SystemProgram.programId,
           },
@@ -239,6 +273,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
         client,
         m.toBase58(),
         admin.publicKey.toBase58(),
+        i === 2 ? [base.toBase58(), issuer.toBase58()] : [base.toBase58()],
       ))
         await send(unwrap(tx));
       await send([
@@ -263,6 +298,33 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
         await mintTo(connection(), admin, mint, ata.address, admin, 1_000_000n);
         await send([client.depositPool(owner.publicKey, mint, 100_000n)], owner);
       }
+    for (const owner of [alice, bob]) {
+      const ata = await getOrCreateAssociatedTokenAccount(
+        connection(),
+        admin,
+        issuer,
+        owner.publicKey,
+        false,
+        "confirmed",
+        undefined,
+        TOKEN_2022_PROGRAM_ID,
+      );
+      await mintTo(
+        connection(),
+        admin,
+        issuer,
+        ata.address,
+        admin,
+        10n ** 12n,
+        [],
+        undefined,
+        TOKEN_2022_PROGRAM_ID,
+      );
+      await send(
+        [client.depositPool(owner.publicKey, issuer, 10n ** 11n, TOKEN_2022_PROGRAM_ID)],
+        owner,
+      );
+    }
     // Compress only public test addresses; no production table or key is used.
     const [create, address] = AddressLookupTableProgram.createLookupTable({
       authority: admin.publicKey,
@@ -274,8 +336,9 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
       client.config,
       base,
       quote,
+      issuer,
       TOKEN_PROGRAM_ID,
-      ...[base, quote].flatMap((mint) => {
+      ...[base, quote, issuer].flatMap((mint) => {
         const pool = poolAddress(client.config, mint);
         return [
           pool,
@@ -285,7 +348,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
       }),
       ...markets.flatMap((m) => [
         m,
-        ...[2, 3, 4, 5].flatMap((a) => [claimAddress(m, a), vaultAddress(m, a)]),
+        ...[1, 2, 4, 5, 7, 8].flatMap((a) => [claimAddress(m, a), vaultAddress(m, a)]),
         ...[alice, bob].flatMap((o) => [
           walletAddress(m, o.publicKey),
           traderAddress(client.config, o.publicKey),
@@ -308,7 +371,10 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
         authority: admin.publicKey,
       }),
     ]);
-    table = (await connection().getAddressLookupTable(address)).value!;
+    // The RPC forwards transactions only once their lookup table is rooted.
+    const extended = await connection().getSlot("confirmed");
+    while ((await connection().getSlot("finalized")) <= extended) await Bun.sleep(200);
+    table = (await connection().getAddressLookupTable(address, { commitment: "finalized" })).value!;
   }, 120_000);
 
   test("owner approval creates an immutable scoped capability; delegate-only signatures trade owner balances", async () => {
@@ -348,8 +414,9 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
     await send([await placement(buy, [sell])], bob);
     expect((await client.order(new PublicKey(orderId(sell)))).status).toBe(2);
     const after = await client.wallet(markets[0]!, alice.publicKey);
-    expect(big(after!.balances[4]!) - big(before!.balances[4]!)).toBe(20n);
-    expect(big(after!.balances[3]!) - big(before!.balances[3]!)).toBe(10n);
+    // Quote YES (asset 1) for the fill; leg-1 NO (asset 5) from the split underlying.
+    expect(big(after!.balances[1]!) - big(before!.balances[1]!)).toBe(20n);
+    expect(big(after!.balances[5]!) - big(before!.balances[5]!)).toBe(10n);
     expect(await client.wallet(markets[0]!, delegate.publicKey)).toBeNull();
     expect(await client.assetCredit(quote, delegate.publicKey)).toBeNull();
   }, 30_000);
@@ -380,8 +447,10 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
     await expect(
       connection().sendRawTransaction(signedBeforeRevocation.serialize(), { skipPreflight: false }),
     ).rejects.toThrow("DelegationInactive");
-    await expect(send([await placement(await order(bob), [sell])], bob)).rejects.toThrow(
-      "DelegationInactive",
+    // A maker whose grant was revoked is skipped: an immediate-or-cancel taker
+    // left with nothing to fill fails as stale, touching nothing.
+    await expect(send([await placement(await order(bob, undefined, { tif: 1 }), [sell])], bob)).rejects.toThrow(
+      "StalePlan",
     );
     expect(
       await image([
@@ -411,9 +480,14 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
       await expect(send([await placement(await order(alice, delegate))], delegate)).rejects.toThrow(
         "DelegationInactive",
       );
-    await expect(send([await placement(await order(bob), [resting])], bob)).rejects.toThrow(
-      "DelegationInactive",
+    await expect(send([await placement(await order(bob, undefined, { tif: 1 }), [resting])], bob)).rejects.toThrow(
+      "StalePlan",
     );
+    // A resting taker simply rests instead of filling the invalidated maker.
+    const rests = await order(bob);
+    await send([await placement(rests, [resting])], bob);
+    expect(big((await client.order(new PublicKey(orderId(rests)))).filled)).toBe(0n);
+    expect(big((await client.order(new PublicKey(orderId(resting)))).filled)).toBe(0n);
     await send([await placement(await order(bob), [ownerOrder])], bob);
     await send(
       [await client.cancel(new PublicKey(orderId(resting)), attacker.publicKey)],
@@ -466,7 +540,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
       ),
     ).rejects.toThrow("InvalidDelegation");
     await expect(
-      send([await placement(await order(alice, delegate, { quantity: "11" }))], delegate),
+      send([await placement(await order(alice, delegate, { quantity: "12" }))], delegate),
     ).rejects.toThrow("DelegateBudget");
     for (const attack of ["recipient", "fees", "expiry", "salt"] as const) {
       const ix = await placement(await order(alice, delegate));
@@ -528,7 +602,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
             markets[0]!,
             alice.publicKey,
             keys,
-            [1],
+            [0],
             a.delegate.publicKey,
           ),
         ],
@@ -543,7 +617,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
           markets[0]!,
           alice.publicKey,
           [keys[0]!],
-          [1],
+          [0],
           a.delegate.publicKey,
         ),
       ],
@@ -578,7 +652,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
       client.invalidateNonce(alice.publicKey, 1n),
       client.ix(
         "transfer_credit",
-        { asset: 2, amount: bn(1) },
+        { asset: 4, amount: bn(1) },
         {
           owner: alice.publicKey,
           market: markets[0]!,
@@ -590,8 +664,8 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
         .withdraw(
           markets[0]!,
           alice.publicKey,
-          claimAddress(markets[0]!, 2),
-          2,
+          claimAddress(markets[0]!, 4),
+          4,
           1n,
           delegate.publicKey,
         )
@@ -610,7 +684,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
       markets[0]!,
       alice.publicKey,
       [new PublicKey(orderId(o))],
-      [1],
+      [0],
     );
     retire.keys[0]!.pubkey = delegate.publicKey;
     await expect(send([retire], delegate)).rejects.toThrow("Unauthorized");
@@ -626,11 +700,11 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
     for (const attack of ["missing", "foreign", "readonly", "signer"] as const) {
       const ix = await placement(await order(alice, good.delegate));
       if (attack === "missing") {
-        ix.keys[11]!.pubkey = client.program;
-        ix.keys[11]!.isWritable = false;
+        ix.keys[9]!.pubkey = client.program;
+        ix.keys[9]!.isWritable = false;
       }
-      if (attack === "foreign") ix.keys[11]!.pubkey = grantKey(foreign.delegate, bob.publicKey);
-      if (attack === "readonly") ix.keys[11]!.isWritable = false;
+      if (attack === "foreign") ix.keys[9]!.pubkey = grantKey(foreign.delegate, bob.publicKey);
+      if (attack === "readonly") ix.keys[9]!.isWritable = false;
       if (attack === "signer") ix.keys[0]!.pubkey = attacker.publicKey;
       await expect(send([ix], attack === "signer" ? attacker : good.delegate)).rejects.toThrow();
     }
@@ -643,7 +717,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
     const { delegate } = await approve();
     const sell = await order(alice, delegate, { side: 1 });
     await send([await placement(sell)], delegate);
-    const taker = await order(bob),
+    const taker = await order(bob, undefined, { tif: 1 }),
       original = await placement(taker, [sell]);
     const absent = await placement(taker, [sell]);
     absent.keys.pop();
@@ -670,7 +744,8 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
     await send([client.revokeDelegate(alice.publicKey, delegate.publicKey)], alice);
     snap = await getSnapshot();
     expect(liveOrder(snap.orders.get(orderId(sell))!, snap, now())).toBe(false);
-    await expect(send([original], bob)).rejects.toThrow("DelegationInactive");
+    // The revoked maker is skipped; the IOC taker then has nothing to fill.
+    await expect(send([original], bob)).rejects.toThrow("StalePlan");
     await send([await client.cancel(new PublicKey(orderId(sell)), attacker.publicKey)], attacker);
   }, 30_000);
 
@@ -749,8 +824,8 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
     const sell = await order(owner, delegate, { side: 1 });
     await send([await placement(sell)], delegate);
     await send([client.invalidateNonce(owner.publicKey, 1n)], owner);
-    await expect(send([await placement(await order(bob), [sell])], bob)).rejects.toThrow(
-      "InvalidTerms",
+    await expect(send([await placement(await order(bob, undefined, { tif: 1 }), [sell])], bob)).rejects.toThrow(
+      "StalePlan",
     );
     await send(
       [
@@ -759,7 +834,7 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
           markets[0]!,
           owner.publicKey,
           [new PublicKey(orderId(sell))],
-          [0],
+          [3],
         ),
       ],
       owner,
@@ -774,6 +849,61 @@ describe.skipIf(!rpc)("trading-only delegation on compiled Solana program", () =
     await expect(send([changed], delegate)).rejects.toThrow("InvalidTerms");
     expect(await available(base, owner.publicKey)).toBe(100n);
   }, 30_000);
+
+  test("multi-leg market: a delegated bid accepting two issuer legs fills both, and a delegated single-leg ask fills with its grant", async () => {
+    const m = markets[2]!,
+      marketId = m.toBase58();
+    const { delegate } = await approve({ maxOrderQuote: 1000n, totalQuote: 1000n });
+    const market = await client.market(m);
+    expect(market.bases).toBe(2);
+    const leg1 = market.legs[0]!,
+      leg2 = market.legs[1]!;
+    const asks = [1, 2].map((bases) => ({ bases }));
+    const makerAsks: OrderWire[] = [];
+    for (const { bases } of asks) {
+      const ask = await order(bob, undefined, { marketId, side: 1, bases });
+      await send([await placement(ask)], bob);
+      makerAsks.push(ask);
+    }
+    const before = await client.wallet(m, alice.publicKey),
+      quoteBefore = await available(quote);
+    const bid = await order(alice, delegate, { marketId, bases: 3, quantity: "20" });
+    const ix = await placement(bid, makerAsks);
+    // touched = both legs of the filled asks.
+    expect((coder.instruction.decode(ix.data)!.data as { touched: number }).touched).toBe(3);
+    await send([ix], delegate);
+    for (const ask of makerAsks)
+      expect((await client.order(new PublicKey(orderId(ask)))).status).toBe(2);
+    const after = await client.wallet(m, alice.publicKey);
+    const raw2 = baseRaw(10n, big(leg2.scale), big(leg2.multiplier));
+    expect(big(after!.balances[4]!) - big(before!.balances[4]!)).toBe(
+      baseRaw(10n, big(leg1.scale), big(leg1.multiplier)),
+    );
+    expect(big(after!.balances[7]!) - big(before!.balances[7]!)).toBe(raw2);
+    expect(raw2).toBeLessThan(10_000n); // live multiplier above 1.0
+    expect(await available(quote)).toBe(quoteBefore - 40n);
+    expect(
+      big((await client.delegation(alice.publicKey, delegate.publicKey)).remaining_quote),
+    ).toBe(960n);
+    // Delegated ask of the issuer leg only; the filling buyer's plan carries its grant.
+    const issuerBefore = await available(issuer);
+    const ask = await order(alice, delegate, { marketId, side: 1, bases: 2 });
+    await send([await placement(ask)], delegate);
+    const reserved = big((await client.order(new PublicKey(orderId(ask)))).reserved);
+    expect(reserved).toBe(baseRaw(10n, big(leg2.scale), big(leg2.multiplier), true));
+    expect(await available(issuer)).toBe(issuerBefore - reserved);
+    const buy = await order(bob, undefined, { marketId, bases: 2 });
+    const fill = await placement(buy, [ask]);
+    expect(
+      (coder.instruction.decode(fill.data)!.data as { delegations: number; touched: number })
+        .delegations,
+    ).toBe(1);
+    await send([fill], bob);
+    expect((await client.order(new PublicKey(orderId(ask)))).status).toBe(2);
+    // Round-down delivery; the reservation surplus returns to the owner's pool credit.
+    expect(await available(issuer)).toBe(issuerBefore - raw2);
+    expect(await client.assetCredit(issuer, delegate.publicKey)).toBeNull();
+  }, 60_000);
 
   test("a trade-only key can perform a permissionless release after owner nonce invalidation", async () => {
     const owner = Keypair.generate();

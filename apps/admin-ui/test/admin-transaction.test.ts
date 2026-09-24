@@ -15,12 +15,30 @@ import {
 import { Buffer } from "buffer";
 import { gammaMarket } from "../../../packages/market-data/tests/helpers";
 import { signReviewedTransaction } from "../src/lib/admin-transaction";
+import type { MintInfo } from "../src/lib/issuer-mints";
 import { buildBatchPlans, defaultMarketCaps } from "../src/lib/market-batch";
 
 function fixture() {
   // Ephemeral test keys and mocked RPC only; never load a deployment private key.
   const owner = Keypair.generate(),
     pubkey = () => Keypair.generate().publicKey.toBase58();
+  const leg = (decimals: number): MintInfo => ({
+    address: pubkey(),
+    decimals,
+    standard: "Token-2022",
+    symbol: null,
+    name: null,
+    issuer: {
+      controls: 0,
+      controlNames: [],
+      paused: false,
+      defaultFrozen: false,
+      transferHookExtension: false,
+      multiplier: "4607182418800017408",
+      multiplierValue: 1,
+      nextMultiplier: null,
+    },
+  });
   const deployment = {
     rpcUrl: "http://127.0.0.1:8899",
     config: pubkey(),
@@ -41,19 +59,14 @@ function fixture() {
     owner: deployment.marketAdmin,
     source,
     nowMs,
-    quote: { address: pubkey(), decimals: 6, standard: "SPL Token" },
+    quote: { ...leg(6), standard: "SPL Token" },
     shared: {
       tradingOpen: String(nowMs / 1000),
       tradingCutoff: "1798761600",
       metadataUri: source.normalized.canonicalUrl,
       sourceUrls: source.normalized.canonicalUrl,
     },
-    rows: [
-      {
-        mint: { address: pubkey(), decimals: 6, standard: "Token-2022" },
-        caps: defaultMarketCaps(6, 6),
-      },
-    ],
+    rows: [{ legs: [leg(8), leg(9)], shareDecimals: 6, caps: defaultMarketCaps(6, 6) }],
   });
   if (!plan) throw new Error("Missing fixture plan");
   const packet = buildCreationEvidence({
@@ -111,10 +124,15 @@ function autoFeeWallet(owner: Keypair) {
 
 test("reproduces the old create-market mismatch and pins fees before admin simulation/signing", async () => {
   const f = fixture();
-  const old = { transaction: new VersionedTransaction(new TransactionMessage({
-    payerKey: f.owner.publicKey, recentBlockhash: f.latest.blockhash,
-    instructions: unwrap(f.transaction, f.client.program),
-  }).compileToV0Message()) };
+  const old = {
+    transaction: new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: f.owner.publicKey,
+        recentBlockhash: f.latest.blockhash,
+        instructions: unwrap(f.transaction, f.client.program),
+      }).compileToV0Message(),
+    ),
+  };
   const wallet = autoFeeWallet(f.owner);
   await expect(signReviewedTransaction(old.transaction, wallet.sign)).rejects.toThrow(
     "No transaction was sent",
@@ -248,10 +266,15 @@ test("admin fee pinning never accepts remote fee instructions and checks packet 
     ],
     f.client.program,
   );
-  const plain = { transaction: new VersionedTransaction(new TransactionMessage({
-    payerKey: f.owner.publicKey, recentBlockhash: f.latest.blockhash,
-    instructions: unwrap(oversized, f.client.program),
-  }).compileToV0Message()) };
+  const plain = {
+    transaction: new VersionedTransaction(
+      new TransactionMessage({
+        payerKey: f.owner.publicKey,
+        recentBlockhash: f.latest.blockhash,
+        instructions: unwrap(oversized, f.client.program),
+      }).compileToV0Message(),
+    ),
+  };
   expect(plain.transaction.serialize().length).toBeLessThanOrEqual(1232);
   await expect(preflightAdmin(f.client, { ...f.transaction, ...oversized })).rejects.toThrow(
     "packet limit",

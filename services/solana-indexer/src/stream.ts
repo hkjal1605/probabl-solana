@@ -1,23 +1,88 @@
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { type MarketAccount, underlyingAsset } from "@conditional-stocks/solana-client";
 import type { Snapshot } from "./projection";
 import { marketView } from "./projection";
 import type { WalletIndex } from "./wallet-index";
+
+/** Base-leg lifecycle as a market update: a listing (program `Change` kind 15,
+ * amount = scale) or a delist/relist (kind 16, amount 0/1). */
+export type MarketEvent =
+  | { marketId: string; kind: "base-listed"; collateral: number; mint: string | null; scale: string }
+  | { marketId: string; kind: "base-active"; collateral: number; active: boolean };
 
 export interface IndexUpdate {
   slot: number;
   observedAt: number;
   markets: string[];
   owners: string[];
+  /** Leg listings and active toggles observed between the two snapshots. */
+  marketEvents: MarketEvent[];
+}
+const MAX_STREAM_EVENTS = 64;
+
+/** A finalized `Change` event of kind 15/16 in the indexed JSON shape. */
+export function legEvent(
+  signature: string,
+  index: number,
+  blockTime: string | number,
+  data: Record<string, unknown>,
+) {
+  const kind = Number(data.kind),
+    collateral = Number(data.asset),
+    amount = String(data.amount);
+  const common = {
+    id: signature + ":" + index,
+    marketId: String(data.market),
+    collateral,
+    blockTimestamp: String(blockTime),
+    transactionHash: signature,
+    confirmation: "finalized" as const,
+  };
+  if (kind === 15) return { ...common, kind: "base-listed" as const, scale: amount };
+  if (kind === 16) return { ...common, kind: "base-active" as const, active: amount !== "0" };
+  throw new Error("Not a base-leg change event");
 }
 
-export function changedTopics(previous: Snapshot | undefined, next: Snapshot): IndexUpdate {
-  const before = new Map(previous?.rawAccounts?.map((a) => [a.address, a.data]));
-  const after = new Map(next.rawAccounts?.map((a) => [a.address, a.data]));
+/** Leg listings/toggles between two program images of one market. */
+function legChanges(id: string, before: MarketAccount | undefined, after: MarketAccount) {
+  const events: MarketEvent[] = [];
+  if (!before) return events;
+  for (let c = 1; c <= after.bases; c++) {
+    const leg = after.legs[c - 1]!;
+    if (c > before.bases)
+      events.push({
+        marketId: id,
+        kind: "base-listed",
+        collateral: c,
+        mint: after.mints[underlyingAsset(c)]?.toBase58() ?? null,
+        scale: leg.scale.toString(),
+      });
+    else if (before.legs[c - 1]!.active !== leg.active)
+      events.push({ marketId: id, kind: "base-active", collateral: c, active: leg.active });
+  }
+  return events;
+}
+
+/** Topics invalidated between two snapshots. `changed` is the exact set of
+ * changed account addresses when the caller knows it (live stream commits);
+ * otherwise raw account images are compared. */
+export function changedTopics(
+  previous: Snapshot | undefined,
+  next: Snapshot,
+  changed?: ReadonlySet<string>,
+): IndexUpdate {
   const markets = new Set<string>(),
-    owners = new Set<string>();
-  for (const id of new Set([...before.keys(), ...after.keys()])) {
-    if (before.get(id) === after.get(id)) continue;
+    owners = new Set<string>(),
+    marketEvents: MarketEvent[] = [];
+  let addresses: Iterable<string>;
+  if (changed) addresses = changed;
+  else {
+    const before = new Map(previous?.rawAccounts?.map((a) => [a.address, a.data]));
+    const after = new Map(next.rawAccounts?.map((a) => [a.address, a.data]));
+    addresses = [...new Set([...before.keys(), ...after.keys()])].filter((id) => before.get(id) !== after.get(id));
+  }
+  for (const id of addresses) {
     if (
       ![previous, next].some(
         (s) =>
@@ -30,11 +95,12 @@ export function changedTopics(previous: Snapshot | undefined, next: Snapshot): I
       )
     )
       for (const market of next.markets.keys()) markets.add(market);
+    const afterMarket = next.markets.get(id);
+    if (afterMarket) marketEvents.push(...legChanges(id, previous?.markets.get(id), afterMarket));
     for (const s of [previous, next]) {
       if (!s) continue;
       if (s.markets.has(id)) {
-        const beforeMarket = previous?.markets.get(id),
-          afterMarket = next.markets.get(id);
+        const beforeMarket = previous?.markets.get(id);
         if (
           !beforeMarket ||
           !afterMarket ||
@@ -54,11 +120,24 @@ export function changedTopics(previous: Snapshot | undefined, next: Snapshot): I
       if (credit) owners.add(credit.owner.toBase58());
     }
   }
+  // Live issuer state changes (pause, freeze, multiplier) also invalidate the
+  // market view even when no program account changed.
+  for (const [id, market] of next.markets) {
+    const before = previous?.legs?.get(id),
+      after = next.legs?.get(id);
+    if (
+      previous?.markets.has(id) &&
+      JSON.stringify(marketView(id, market, undefined, before)) !==
+        JSON.stringify(marketView(id, market, undefined, after))
+    )
+      markets.add(id);
+  }
   return {
     slot: next.slot,
     observedAt: next.observedAt,
     markets: [...markets],
     owners: [...owners],
+    marketEvents: marketEvents.slice(-MAX_STREAM_EVENTS),
   };
 }
 
@@ -80,6 +159,7 @@ export function createIndexStream() {
           let pending: IndexUpdate | undefined;
           let reset = true;
           let walletStamp = 0;
+          let wake: (() => void) | undefined;
           const listener = (value: IndexUpdate) => {
             // Bounded coalescing: slow clients get one complete invalidation set,
             // not an unbounded queue of every intermediate indexer tick.
@@ -88,8 +168,13 @@ export function createIndexStream() {
                   ...value,
                   markets: [...new Set([...pending.markets, ...value.markets])],
                   owners: [...new Set([...pending.owners, ...value.owners])],
+                  marketEvents: [...pending.marketEvents, ...value.marketEvents].slice(
+                    -MAX_STREAM_EVENTS,
+                  ),
                 }
               : value;
+            // Push as soon as a slot commits, not on a polling timer.
+            wake?.();
           };
           listeners.add(listener);
           stream.onAbort(() => {
@@ -108,6 +193,7 @@ export function createIndexStream() {
                     observedAt: s.observedAt,
                     markets: [],
                     owners: [],
+                    marketEvents: [],
                   }),
                   wallet: wallet && wallet.observedAt !== walletStamp ? wallet : undefined,
                   readiness: Object.fromEntries(
@@ -147,8 +233,19 @@ export function createIndexStream() {
               } catch {
                 await stream.writeSSE({ event: "unavailable", data: "{}" });
                 reset = true;
+                // Retry promptly while the index recovers.
+                await stream.sleep(1000);
+                continue;
               }
-              await stream.sleep(2000);
+              // Wait for the next commit, with a heartbeat for idle connections.
+              await Promise.race([
+                new Promise<void>((resolve) => {
+                  wake = resolve;
+                  if (pending) resolve();
+                }),
+                stream.sleep(15_000),
+              ]);
+              wake = undefined;
             }
           } finally {
             listeners.delete(listener);

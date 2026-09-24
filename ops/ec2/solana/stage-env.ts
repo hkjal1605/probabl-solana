@@ -48,6 +48,19 @@ if (
 )
   throw new Error("Unexpected Solana devnet deployment");
 
+// Both the API and the indexer run a live index over Yellowstone gRPC.
+const stream: Record<string, string> = {
+  YELLOWSTONE_GRPC_URL: source.DEVNET_YELLOWSTONE_GRPC_URL ?? "",
+  ...(source.DEVNET_YELLOWSTONE_X_TOKEN
+    ? { YELLOWSTONE_X_TOKEN: source.DEVNET_YELLOWSTONE_X_TOKEN }
+    : {}),
+};
+if (!/^https?:\/\//.test(stream.YELLOWSTONE_GRPC_URL!))
+  throw new Error("DEVNET_YELLOWSTONE_GRPC_URL is required (value withheld)");
+// Hosted endpoints (Alchemy, Triton, Helius...) authenticate with an X-Token.
+if (!["localhost", "127.0.0.1"].includes(new URL(stream.YELLOWSTONE_GRPC_URL!).hostname) && !stream.YELLOWSTONE_X_TOKEN)
+  throw new Error("DEVNET_YELLOWSTONE_X_TOKEN is required for a hosted gRPC endpoint (value withheld)");
+
 mkdirSync(target, { recursive: true, mode: 0o700 });
 chmodSync(target, 0o700);
 const files: Record<string, Record<string, string>> = {
@@ -62,6 +75,9 @@ for (const service of ["api", "indexer", "polymarket"]) {
   files[`${service}.env`] = values;
 }
 Object.assign(files["api.env"]!, {
+  // Trading reads come from the indexer's loopback relay: the API never
+  // opens its own (billed) Yellowstone stream nor holds its token.
+  INDEXER_RELAY_URL: "http://127.0.0.1:42070",
   API_HOST: "127.0.0.1",
   API_PORT: "3000",
   INDEXER_URL: "http://127.0.0.1:42069",
@@ -75,6 +91,8 @@ Object.assign(files["api.env"]!, {
   ...(source.JUPITER_PRICE_RPC_URL ? { JUPITER_PRICE_RPC_URL: source.JUPITER_PRICE_RPC_URL } : {}),
 });
 Object.assign(files["indexer.env"]!, {
+  ...stream,
+  INDEXER_RELAY_PORT: "42070",
   INDEXER_HOST: "127.0.0.1",
   INDEXER_PORT: "42069",
 });

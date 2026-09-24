@@ -1,7 +1,7 @@
 import { keccak_256 } from "@noble/hashes/sha3";
 import { bytesToHex } from "@noble/hashes/utils";
 import { type Hex, isHex32 } from "@conditional-stocks/market-data";
-import { address as solanaAddress, digest, hex, unsigned, U128_MAX } from "./protocol.ts";
+import { address as solanaAddress, digest, hex, MAX_BASES, unsigned, U128_MAX } from "./protocol.ts";
 
 export interface EvidenceDeployment {
   genesisHash: string;
@@ -47,8 +47,10 @@ export interface AttachmentReference {
 }
 
 export interface MarketConfigEvidence {
+  /** Order step in share units. */
   baseStep: string;
-  baseToken: string;
+  /** Whitelisted issuer tokens of the same asset, one base leg each (1..=3, in leg order). */
+  baseTokens: string[];
   maxMarketOpenNotional: string;
   maxOrderNotional: string;
   maxOrderQuantity: string;
@@ -62,6 +64,8 @@ export interface MarketConfigEvidence {
   priceTickRawX18: string;
   quoteToken: string;
   rulesHash: Hex;
+  /** Share-unit decimals; every base token must have at least this many decimals. */
+  shareDecimals: string;
   tradingCutoff: string;
   tradingOpen: string;
 }
@@ -86,7 +90,7 @@ export interface CreationEvidencePacket {
   };
   preparedAt: string;
   preparer: string;
-  schemaVersion: 3;
+  schemaVersion: 4;
   sourceUrls: string[];
 }
 
@@ -202,6 +206,17 @@ export const payoutVector = (input: unknown): PayoutVector => {
   return { denominator, no, yes } as PayoutVector;
 };
 
+/** Onchain limits: at most MAX_BASES distinct issuer legs; share decimals <= 18. */
+const MAX_SHARE_DECIMALS = 18n;
+const baseTokens = (input: unknown): string[] => {
+  if (!Array.isArray(input) || input.length === 0 || input.length > MAX_BASES)
+    throw new MarketDataError("INVALID_EVIDENCE", `baseTokens must list 1-${MAX_BASES} issuer tokens`);
+  const tokens = input.map((value) => solanaAddress(value));
+  if (new Set(tokens).size !== tokens.length)
+    throw new MarketDataError("INVALID_EVIDENCE", "baseTokens must be distinct");
+  return tokens;
+};
+
 const parseConfig = (
   input: unknown,
   metadata: NormalizedPolymarketMarket,
@@ -213,7 +228,7 @@ const parseConfig = (
   const no = noOutcome(metadata);
   const config: MarketConfigEvidence = {
     baseStep: decimalInteger(raw.baseStep, "config.baseStep"),
-    baseToken: solanaAddress(raw.baseToken),
+    baseTokens: baseTokens(raw.baseTokens),
     maxMarketOpenNotional: decimalInteger(
       raw.maxMarketOpenNotional,
       "config.maxMarketOpenNotional",
@@ -233,14 +248,18 @@ const parseConfig = (
     priceTickRawX18: decimalInteger(raw.priceTickRawX18, "config.priceTickRawX18"),
     quoteToken: solanaAddress(raw.quoteToken),
     rulesHash: hex(digest(rules)),
+    shareDecimals: decimalInteger(raw.shareDecimals, "config.shareDecimals", true),
     tradingCutoff: decimalInteger(raw.tradingCutoff, "config.tradingCutoff"),
     tradingOpen: decimalInteger(raw.tradingOpen, "config.tradingOpen", true),
   };
   if (BigInt(config.tradingCutoff) <= BigInt(config.tradingOpen)) {
     throw new MarketDataError("INVALID_EVIDENCE", "trading cutoff must follow opening");
   }
-  if (config.baseToken === config.quoteToken) {
+  if (config.baseTokens.includes(config.quoteToken)) {
     throw new MarketDataError("INVALID_EVIDENCE", "base and quote tokens must differ");
+  }
+  if (BigInt(config.shareDecimals) > MAX_SHARE_DECIMALS) {
+    throw new MarketDataError("INVALID_EVIDENCE", "shareDecimals exceeds the onchain limit");
   }
   for (const field of [
     "baseStep",
@@ -300,7 +319,7 @@ export const buildCreationEvidence = (input: {
     },
     preparedAt: isoTime(input.preparedAt, "preparedAt"),
     preparer: solanaAddress(input.preparer),
-    schemaVersion: 3,
+    schemaVersion: 4,
     sourceUrls: sourceUrls(input.sourceUrls),
   };
   return { packet, packetHash: hashCanonical(packet) };
@@ -396,7 +415,7 @@ export const assertEvidenceIntegrity = <
   envelope: EvidenceEnvelope<T>,
 ): void => {
   if (
-    (envelope.packet.kind === "market-creation" && envelope.packet.schemaVersion !== 3) ||
+    (envelope.packet.kind === "market-creation" && envelope.packet.schemaVersion !== 4) ||
     (envelope.packet.kind === "market-resolution" && envelope.packet.schemaVersion !== 2)
   ) {
     throw new MarketDataError(

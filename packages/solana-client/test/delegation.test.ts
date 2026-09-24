@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { marketAccount } from "./market-fixture";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import {
   SolanaClient,
@@ -28,10 +29,7 @@ function fixture() {
     config: config.toBase58(),
     genesisHash: "test",
   });
-  client.rememberMarket(market, {
-    config,
-    mints: [Keypair.generate().publicKey, Keypair.generate().publicKey],
-  });
+  client.rememberMarket(market, marketAccount({ config, market }));
   const order: OrderWire = {
     maker: owner.toBase58(),
     delegate: delegate.toBase58(),
@@ -46,6 +44,7 @@ function fixture() {
     branch: 0,
     side: 0,
     fundingKind: 0,
+    bases: 1,
     tif: 0,
   };
   const grant: TradingDelegateAccount = {
@@ -140,14 +139,14 @@ test("order wire keeps the beneficial owner distinct from the constrained signer
   expect(ix.keys[0]!.isSigner).toBe(true);
   expect(ix.keys[1]!.pubkey.equals(f.owner)).toBe(true);
   expect(ix.keys[1]!.isSigner).toBe(false);
-  expect(ix.keys[11]!.pubkey.equals(delegationAddress(f.config, f.owner, f.delegate))).toBe(true);
-  expect(ix.keys[11]!.isWritable).toBe(true);
+  expect(ix.keys[9]!.pubkey.equals(delegationAddress(f.config, f.owner, f.delegate))).toBe(true);
+  expect(ix.keys[9]!.isWritable).toBe(true);
   expect(computeUnits([ix], f.client.program)).toBe(129_000);
   const direct = { ...f.order };
   delete direct.delegate;
   const normal = f.client.placement(direct, plan);
-  expect(normal.keys[11]!.pubkey.equals(f.client.program)).toBe(true);
-  expect(normal.keys[11]!.isWritable).toBe(false);
+  expect(normal.keys[9]!.pubkey.equals(f.client.program)).toBe(true);
+  expect(normal.keys[9]!.isWritable).toBe(false);
 });
 test("indexed review checks grants without RPC; exhausted budgets do not hide existing maker liquidity", () => {
   const f = fixture();
@@ -178,7 +177,7 @@ test("delegated cancellation keeps owner refund accounts and never permits deleg
     f.market,
     f.owner,
     [address],
-    [1],
+    [0],
     f.delegate,
   );
   expect(ix.keys[0]!.pubkey.equals(f.delegate)).toBe(true);

@@ -12,8 +12,12 @@ export function MarketRules({ market }: { market: MarketView }) {
           ["Market", market.id],
           ["YES / NO index", `${market.mapping.yesIndex} / ${market.mapping.noIndex}`],
           ["Cutoff", market.cutoff],
-          ["Stock token", market.baseToken],
+          ...market.bases.map((leg) => [
+            `Issuer token ${leg.collateral} · ${leg.symbol}${leg.issuer ? ` (${leg.issuer})` : ""}`,
+            leg.mint,
+          ]),
           ["Quote token", market.quoteToken],
+          ["Share decimals", String(market.shareDecimals)],
         ].map(([label, value]) => (
           <div key={label}>
             <dt className="text-xs font-medium text-muted-foreground">{label}</dt>

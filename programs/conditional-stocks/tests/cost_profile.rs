@@ -53,6 +53,21 @@ fn pda(seeds: &[&[u8]]) -> (Pubkey, u8) {
     Pubkey::find_program_address(seeds, &ID)
 }
 
+/// The single listed base leg. Assets 0..LISTED cover the quote (0 underlying,
+/// 1/2 claims) and this leg (3 underlying, 4/5 claims); the rest stay unlisted.
+const BASE: usize = 1;
+const LISTED: usize = 6;
+/// Named `Place` accounts, including the optional delegation slot.
+const PLACE_NAMED: usize = 10;
+/// Quote claim mints and vaults at the head of `place`'s remaining accounts.
+const QUOTE_CLAIMS: usize = 4;
+
+fn funded(amount: u64) -> [u64; ASSETS] {
+    let mut balances = [0; ASSETS];
+    balances[..LISTED].fill(amount);
+    balances
+}
+
 struct Fixture {
     leg_quantity: u64,
     price: u128,
@@ -60,8 +75,8 @@ struct Fixture {
     config: Pubkey,
     market_key: Pubkey,
     market: Market,
-    mints: [Pubkey; 6],
-    vaults: [Pubkey; 6],
+    mints: Vec<Pubkey>,
+    vaults: Vec<Pubkey>,
     wallets: Vec<(Pubkey, Wallet, Pubkey, Trader)>,
     makers: Vec<(Pubkey, Order)>,
     grants: Vec<(Pubkey, TradingDelegate)>,
@@ -82,31 +97,51 @@ impl Fixture {
         let owner = Keypair::new_from_array([42; 32]);
         let (config, _) = pda(&[b"config", owner.pubkey().as_ref()]);
         let (market_key, bump) = pda(&[b"market", config.as_ref(), &[77; 32]]);
-        let mints = std::array::from_fn(|i| {
-            if i < 2 {
-                Pubkey::new_from_array([90 + i as u8; 32])
-            } else {
-                pda(&[b"claim", market_key.as_ref(), &[i as u8]]).0
-            }
-        });
-        let vaults = std::array::from_fn(|i| {
-            if i < 2 {
-                pool_vault(&pda(&[b"pool", config.as_ref(), mints[i].as_ref()]).0)
-            } else {
-                pda(&[b"vault", market_key.as_ref(), &[i as u8]]).0
-            }
-        });
+        // Base underlying [90; 32], quote underlying [91; 32], claims are PDAs.
+        let mints: Vec<Pubkey> = (0..ASSETS)
+            .map(|i| match i {
+                i if i >= LISTED => Pubkey::default(),
+                i if i == underlying(BASE) => Pubkey::new_from_array([90; 32]),
+                i if i == underlying(QUOTE) => Pubkey::new_from_array([91; 32]),
+                i => pda(&[b"claim", market_key.as_ref(), &[i as u8]]).0,
+            })
+            .collect();
+        let vaults = (0..LISTED)
+            .map(|i| {
+                if i % 3 == 0 {
+                    pool_vault(&pda(&[b"pool", config.as_ref(), mints[i].as_ref()]).0)
+                } else {
+                    pda(&[b"vault", market_key.as_ref(), &[i as u8]]).0
+                }
+            })
+            .collect();
         let zero = vec![0; 8 + Market::INIT_SPACE];
         let mut market = Market::try_deserialize_unchecked(&mut zero.as_slice()).unwrap();
+        market.ledgers();
         market.config = config;
         market.id = [77; 32];
         market.bump = bump;
-        market.mints = mints;
-        market.decimals = [6; 2];
-        market.vaults_initialized = 63;
+        for collateral in [QUOTE, BASE] {
+            market.pool_bumps[collateral] = pda(&[
+                b"pool",
+                config.as_ref(),
+                mints[underlying(collateral)].as_ref(),
+            ])
+            .1;
+        }
+        market.mints = mints.clone();
+        market.bases = 1;
+        market.legs[0] = BaseLeg {
+            scale: 1,
+            multiplier: protocol_core::UNIT_MULTIPLIER,
+            active: true,
+        };
+        market.decimals = [6; COLLATERALS];
+        market.vaults_initialized = (1 << LISTED) - 1;
         market.state = protocol_core::OPEN;
         market.sequence = [legs as u64, 0];
-        market.backing = [1_000_000_000; 2];
+        market.backing[QUOTE] = 1_000_000_000;
+        market.backing[BASE] = 1_000_000_000;
         market.terms = Terms {
             condition: [1; 32],
             yes_index: 1,
@@ -120,6 +155,7 @@ impl Fixture {
             },
             trading_open: 0,
             trading_cutoff: i64::MAX,
+            share_decimals: 6,
             tick: protocol_core::WAD,
             step: 1,
             min_notional: 1,
@@ -149,7 +185,7 @@ impl Fixture {
                 Wallet {
                     market: market_key,
                     owner: key,
-                    balances: [1_000_000; 6],
+                    balances: funded(1_000_000),
                     open_notional: 0,
                     bump: wallet_bump,
                 },
@@ -163,7 +199,7 @@ impl Fixture {
                 },
             ));
         }
-        market.credits = [participants as u128 * 1_000_000; 6];
+        market.credits[..LISTED].fill(participants as u128 * 1_000_000);
         let mut makers = Vec::new();
         for i in 0..legs {
             let idx = if distinct { i + 1 } else { 1 };
@@ -182,6 +218,7 @@ impl Fixture {
                 side: 1,
                 funding: maker_funding,
                 tif: 0,
+                bases: 1,
             };
             market.escrow[terms.asset()] += 100;
             market.open_notional += 200;
@@ -237,7 +274,7 @@ impl Fixture {
         self.side = side;
         self.market.sequence = [0; 2];
         self.market.sequence[branch as usize] = self.makers.len() as u64;
-        self.market.escrow = [0; 6];
+        self.market.escrow = vec![0; ASSETS];
         for (_, wallet, _, _) in &mut self.wallets {
             wallet.open_notional = 0;
         }
@@ -275,7 +312,7 @@ impl Fixture {
                     Wallet {
                         market: self.market_key,
                         owner,
-                        balances: [1_000_000; 6],
+                        balances: funded(1_000_000),
                         open_notional: 0,
                         bump,
                     },
@@ -295,14 +332,28 @@ impl Fixture {
                 }
             }
         }
-        self.market.credits = [self.wallets.len() as u128 * 1_000_000; 6];
+        self.market.credits[..LISTED].fill(self.wallets.len() as u128 * 1_000_000);
         self
     }
-    fn pool(&self, asset: usize) -> (Pubkey, u8) {
-        pda(&[b"pool", self.config.as_ref(), self.mints[asset].as_ref()])
+    /// Protocol-wide pool of a collateral's underlying mint.
+    fn pool(&self, collateral: usize) -> (Pubkey, u8) {
+        pda(&[
+            b"pool",
+            self.config.as_ref(),
+            self.mints[underlying(collateral)].as_ref(),
+        ])
     }
-    fn credit(&self, owner: &Pubkey, asset: usize) -> (Pubkey, u8) {
-        pda(&[b"asset-credit", self.pool(asset).0.as_ref(), owner.as_ref()])
+    fn credit(&self, owner: &Pubkey, collateral: usize) -> (Pubkey, u8) {
+        pda(&[
+            b"asset-credit",
+            self.pool(collateral).0.as_ref(),
+            owner.as_ref(),
+        ])
+    }
+    /// Base legs whose claims this placement may mint: the taker's own leg when
+    /// it sells, otherwise the leg of every maker ask it fills.
+    fn touched(&self) -> u8 {
+        u8::from(self.side == 1 || !self.makers.is_empty())
     }
     fn program(&self) -> ProgramTest {
         let mut program = ProgramTest::new("conditional_stocks", ID, None);
@@ -320,7 +371,7 @@ impl Fixture {
             state_account(&Config {
                 seed_authority: owner,
                 admin: owner,
-                quote_mint: self.mints[1],
+                quote_mint: self.mints[underlying(QUOTE)],
                 roles: Roles {
                     market_admin: owner,
                     guardian: owner,
@@ -336,52 +387,59 @@ impl Fixture {
         );
         let mut market =
             Market::try_deserialize(&mut state_account(&self.market).data.as_slice()).unwrap();
-        market.credits[0] = 0;
-        market.credits[1] = 0;
+        market.credits[underlying(QUOTE)] = 0;
+        market.credits[underlying(BASE)] = 0;
         program.add_account(self.market_key, state_account(&market));
-        for asset in 0..2 {
-            let (key, bump) = self.pool(asset);
+        for collateral in [QUOTE, BASE] {
+            let (key, bump) = self.pool(collateral);
             program.add_account(
                 key,
                 state_account(&AssetPool {
                     config: self.config,
-                    mint: self.mints[asset],
+                    mint: self.mints[underlying(collateral)],
                     token_program: token::ID,
                     decimals: 6,
-                    liability: self.market.liability(asset).unwrap() as u64,
+                    liability: self.market.liability(underlying(collateral)).unwrap() as u64,
                     bump,
+                    admitted: 0,
+                    vault_bump: pda(&[b"pool-vault", key.as_ref()]).1,
                 }),
             );
         }
         for (key, wallet, trader_key, trader) in &self.wallets {
-            for asset in 0..2 {
-                let (credit, bump) = self.credit(&wallet.owner, asset);
+            for collateral in [QUOTE, BASE] {
+                let (credit, bump) = self.credit(&wallet.owner, collateral);
                 program.add_account(
                     credit,
                     state_account(&AssetCredit {
-                        pool: self.pool(asset).0,
+                        pool: self.pool(collateral).0,
                         owner: wallet.owner,
-                        available: wallet.balances[asset],
+                        available: wallet.balances[underlying(collateral)],
                         bump,
                     }),
                 );
             }
             let mut wallet =
                 Wallet::try_deserialize(&mut state_account(wallet).data.as_slice()).unwrap();
-            wallet.balances[0] = 0;
-            wallet.balances[1] = 0;
+            wallet.balances[underlying(QUOTE)] = 0;
+            wallet.balances[underlying(BASE)] = 0;
             program.add_account(*key, state_account(&wallet));
             program.add_account(*trader_key, state_account(trader));
         }
         for (key, order) in &self.makers {
             program.add_account(*key, state_account(order));
         }
-        for i in 0..6 {
+        for i in 0..LISTED {
+            let custody = i % 3 == 0;
             program.add_account(
                 self.mints[i],
                 token_account(RawMint {
-                    mint_authority: COption::Some(if i < 2 { owner } else { self.market_key }),
-                    supply: if i < 2 { 10_000_000_000 } else { 1_000_000_000 },
+                    mint_authority: COption::Some(if custody { owner } else { self.market_key }),
+                    supply: if custody {
+                        10_000_000_000
+                    } else {
+                        1_000_000_000
+                    },
                     decimals: 6,
                     is_initialized: true,
                     freeze_authority: COption::None,
@@ -391,8 +449,8 @@ impl Fixture {
                 self.vaults[i],
                 token_account(RawAccount {
                     mint: self.mints[i],
-                    owner: if i < 2 {
-                        self.pool(i).0
+                    owner: if custody {
+                        self.pool(i / 3).0
                     } else {
                         self.market_key
                     },
@@ -406,7 +464,7 @@ impl Fixture {
             program.add_account(
                 self.sources[i],
                 token_account(RawAccount {
-                    mint: self.mints[0],
+                    mint: self.mints[underlying(BASE)],
                     owner,
                     amount: 1_000_000,
                     state: AccountState::Initialized,
@@ -428,15 +486,28 @@ impl Fixture {
             order: pda(&[b"order", self.market_key.as_ref(), owner.as_ref(), &salt]).0,
             token_program: token::ID,
             system_program: anchor_lang::system_program::ID,
-            base_vault: self.vaults[0],
-            quote_vault: self.vaults[1],
-            base_pool: self.pool(0).0,
-            quote_pool: self.pool(1).0,
+            quote_vault: self.vaults[underlying(QUOTE)],
+            quote_pool: self.pool(QUOTE).0,
         }
         .to_account_metas(None);
-        for i in 2..6 {
+        for i in [claim(QUOTE, 0), claim(QUOTE, 1)] {
             metas.push(AccountMeta::new(self.mints[i], false));
             metas.push(AccountMeta::new(self.vaults[i], false));
+        }
+        if self.touched() != 0 {
+            metas.push(AccountMeta::new_readonly(self.pool(BASE).0, false));
+            metas.push(AccountMeta::new_readonly(
+                self.vaults[underlying(BASE)],
+                false,
+            ));
+            metas.push(AccountMeta::new_readonly(
+                self.mints[underlying(BASE)],
+                false,
+            ));
+            for i in [claim(BASE, 0), claim(BASE, 1)] {
+                metas.push(AccountMeta::new(self.mints[i], false));
+                metas.push(AccountMeta::new(self.vaults[i], false));
+            }
         }
         for (key, _) in &self.makers {
             metas.push(AccountMeta::new(*key, false));
@@ -447,14 +518,17 @@ impl Fixture {
         }
         let mut credits = Vec::new();
         if self.taker_funding == 0 {
-            credits.push(self.credit(&owner, usize::from(self.side == 0)).0);
+            credits.push(
+                self.credit(&owner, if self.side == 0 { QUOTE } else { BASE })
+                    .0,
+            );
         }
         for (_, maker) in &self.makers {
             if maker.terms.funding == 0
                 && maker.terms.side == 0
                 && maker.terms.price % protocol_core::WAD != 0
             {
-                let credit = self.credit(&maker.owner, 1).0;
+                let credit = self.credit(&maker.owner, QUOTE).0;
                 if !credits.contains(&credit) {
                     credits.push(credit);
                 }
@@ -472,6 +546,7 @@ impl Fixture {
             data: instruction::Place {
                 delegations: self.grants.len() as u8,
                 participants: self.wallets.len() as u8,
+                touched: self.touched(),
                 terms: OrderTerms {
                     recipient: self.recipient,
                     salt,
@@ -484,10 +559,12 @@ impl Fixture {
                     side: self.side,
                     funding: self.taker_funding,
                     tif: u8::from(ioc),
+                    bases: 1,
                 },
                 plan: Plan {
                     deadline: i64::MAX - 2,
                     next_sequence: self.makers.len() as u64,
+                    min_fill: 0,
                     maker_bps: 10,
                     taker_bps: 20,
                     legs: self
@@ -495,7 +572,6 @@ impl Fixture {
                         .iter()
                         .map(|_| Leg {
                             quantity: self.leg_quantity,
-                            expected_remaining: self.leg_quantity,
                         })
                         .collect(),
                 },
@@ -507,18 +583,18 @@ impl Fixture {
         Instruction {
             program_id: ID,
             accounts: accounts::Positions {
-                system_program: anchor_lang::system_program::ID,
                 owner: self.owner.pubkey(),
                 market: self.market_key,
                 wallet: self.wallets[0].0,
-                yes_mint: self.mints[2],
-                no_mint: self.mints[3],
-                yes_vault: self.vaults[2],
-                no_vault: self.vaults[3],
+                yes_mint: self.mints[claim(BASE, 0)],
+                no_mint: self.mints[claim(BASE, 1)],
+                yes_vault: self.vaults[claim(BASE, 0)],
+                no_vault: self.vaults[claim(BASE, 1)],
                 token_program: token::ID,
-                underlying_vault: self.vaults[0],
-                pool: self.pool(0).0,
-                credit: self.credit(&self.owner.pubkey(), 0).0,
+                underlying_vault: self.vaults[underlying(BASE)],
+                underlying_mint: self.mints[underlying(BASE)],
+                pool: self.pool(BASE).0,
+                credit: self.credit(&self.owner.pubkey(), BASE).0,
             }
             .to_account_metas(None),
             data,
@@ -633,7 +709,9 @@ async fn profile(label: &str, fixture: Fixture, ix: Instruction) {
             + 8_000 * mint_cpis as u64
             + 8_000
                 * (instructions[1].accounts.len()
-                    - 20
+                    - PLACE_NAMED
+                    - QUOTE_CLAIMS
+                    - LEG_ACCOUNTS * fixture.touched().count_ones() as usize
                     - fixture.makers.len()
                     - 2 * fixture.wallets.len()
                     - fixture.grants.len()) as u64
@@ -648,7 +726,7 @@ async fn profile(label: &str, fixture: Fixture, ix: Instruction) {
         for (_, maker) in &fixture.makers {
             let account = context
                 .banks_client
-                .get_account(fixture.credit(&maker.owner, 1).0)
+                .get_account(fixture.credit(&maker.owner, QUOTE).0)
                 .await
                 .unwrap()
                 .unwrap();
@@ -661,7 +739,7 @@ async fn profile(label: &str, fixture: Fixture, ix: Instruction) {
         }
         let account = context
             .banks_client
-            .get_account(fixture.credit(&fixture.owner.pubkey(), 0).0)
+            .get_account(fixture.credit(&fixture.owner.pubkey(), BASE).0)
             .await
             .unwrap()
             .unwrap();
@@ -678,14 +756,17 @@ async fn profile(label: &str, fixture: Fixture, ix: Instruction) {
             .unwrap()
             .unwrap();
         let market = Market::try_deserialize(&mut account.data.as_slice()).unwrap();
-        assert_eq!(&market.credits[..2], &[0, 0]);
-        assert_eq!(market.escrow, [0; 6]);
+        assert_eq!(market.credits[underlying(QUOTE)], 0);
+        assert_eq!(market.credits[underlying(BASE)], 0);
+        assert_eq!(market.escrow, vec![0; ASSETS]);
         assert_eq!(market.open_notional, 0);
         assert_eq!(
             market.backing,
             [
-                fixture.market.backing[0] + 8 * 99,
-                fixture.market.backing[1] + 8 * 148
+                fixture.market.backing[QUOTE] + 8 * 148,
+                fixture.market.backing[BASE] + 8 * 99,
+                0,
+                0
             ]
         );
     }
@@ -723,16 +804,17 @@ async fn verify_settlement(
         .map(|(_, w, _, _)| (w.owner, w.balances))
         .collect();
     let qty = 100 * f.makers.len().max(1) as u64;
-    let collateral = if f.side == 0 { 1 } else { 0 };
+    let collateral = if f.side == 0 { QUOTE } else { BASE };
     let asset = if f.taker_funding == 0 {
-        collateral
+        underlying(collateral)
     } else {
-        2 + 2 * collateral + f.branch as usize
+        claim(collateral, f.branch as usize)
     };
     let reservation = qty * if f.side == 0 { 2 } else { 1 };
     balances.get_mut(&f.owner.pubkey()).unwrap()[asset] -= reservation;
-    let mut minted = [0u64; 4];
-    let mut fees = [0u64; 4];
+    // Indexed by claim asset.
+    let mut minted = [0u64; ASSETS];
+    let mut fees = vec![0u64; ASSETS];
     let mut taker_carry = 0;
     for (_, maker) in &f.makers {
         let buyer_is_taker = f.side == 0;
@@ -773,18 +855,33 @@ async fn verify_settlement(
                 taker_fee,
             )
         };
+        // Scale 1 at a unit multiplier: 100 share units deliver 100 raw base units.
         for (collateral, gross, funding, funder, recipient, fee) in [
-            (0, 100, seller_funding, seller, buyer_recipient, buyer_fee),
-            (1, 200, buyer_funding, buyer, seller_recipient, seller_fee),
+            (
+                BASE,
+                100,
+                seller_funding,
+                seller,
+                buyer_recipient,
+                buyer_fee,
+            ),
+            (
+                QUOTE,
+                200,
+                buyer_funding,
+                buyer,
+                seller_recipient,
+                seller_fee,
+            ),
         ] {
-            let active = 2 * collateral + f.branch as usize;
-            let inactive = 2 * collateral + 1 - f.branch as usize;
+            let active = claim(collateral, f.branch as usize);
+            let inactive = claim(collateral, 1 - f.branch as usize);
             if funding == 0 {
-                minted[2 * collateral] += gross;
-                minted[2 * collateral + 1] += gross;
-                balances.get_mut(&funder).unwrap()[inactive + 2] += gross;
+                minted[claim(collateral, 0)] += gross;
+                minted[claim(collateral, 1)] += gross;
+                balances.get_mut(&funder).unwrap()[inactive] += gross;
             }
-            balances.get_mut(&recipient).unwrap()[active + 2] += gross - fee;
+            balances.get_mut(&recipient).unwrap()[active] += gross - fee;
             fees[active] += fee;
         }
     }
@@ -800,17 +897,24 @@ async fn verify_settlement(
             .unwrap()
             .unwrap();
         let wallet = Wallet::try_deserialize(&mut account.data.as_slice()).unwrap();
-        assert_eq!(wallet.balances[2..], balances[&original.owner][2..]);
-        assert_eq!(wallet.balances[..2], [0, 0]);
-        for (asset, expected) in balances[&original.owner].iter().take(2).enumerate() {
-            let account = context
-                .banks_client
-                .get_account(f.credit(&original.owner, asset).0)
-                .await
-                .unwrap()
-                .unwrap();
-            let credit = AssetCredit::try_deserialize(&mut account.data.as_slice()).unwrap();
-            assert_eq!(credit.available, *expected);
+        let expected = balances[&original.owner];
+        for (asset, (actual, expected)) in wallet.balances.iter().zip(expected).enumerate() {
+            if is_claim(asset) {
+                assert_eq!(*actual, expected, "asset {asset}");
+                continue;
+            }
+            // Underlying credit never persists in a wallet image.
+            assert_eq!(*actual, 0);
+            if asset < LISTED {
+                let account = context
+                    .banks_client
+                    .get_account(f.credit(&original.owner, asset / 3).0)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let credit = AssetCredit::try_deserialize(&mut account.data.as_slice()).unwrap();
+                assert_eq!(credit.available, expected);
+            }
         }
         assert_eq!(
             wallet.open_notional,
@@ -836,17 +940,19 @@ async fn verify_settlement(
     assert_eq!(
         market.backing,
         [
-            f.market.backing[0] + minted[0],
-            f.market.backing[1] + minted[2]
+            f.market.backing[QUOTE] + minted[claim(QUOTE, 0)],
+            f.market.backing[BASE] + minted[claim(BASE, 0)],
+            0,
+            0
         ]
     );
-    for i in 0..6 {
+    for i in 0..ASSETS {
         assert_eq!(
             market.credits[i],
-            if i < 2 {
-                0
-            } else {
+            if is_claim(i) {
                 balances.values().map(|v| v[i] as u128).sum::<u128>()
+            } else {
+                0
             }
         );
         assert_eq!(
@@ -858,26 +964,26 @@ async fn verify_settlement(
             }
         );
     }
-    for (i, amount) in minted.iter().enumerate() {
+    for i in (0..LISTED).filter(|i| is_claim(*i)) {
         let mint = context
             .banks_client
-            .get_account(f.mints[i + 2])
+            .get_account(f.mints[i])
             .await
             .unwrap()
             .unwrap();
         let vault = context
             .banks_client
-            .get_account(f.vaults[i + 2])
+            .get_account(f.vaults[i])
             .await
             .unwrap()
             .unwrap();
         assert_eq!(
             RawMint::unpack(&mint.data).unwrap().supply,
-            1_000_000_000 + amount
+            1_000_000_000 + minted[i]
         );
         assert_eq!(
             RawAccount::unpack(&vault.data).unwrap().amount,
-            f.market.liability(i + 2).unwrap() as u64 + amount
+            f.market.liability(i).unwrap() as u64 + minted[i]
         );
     }
 }
@@ -945,7 +1051,7 @@ async fn compiled_cost_profile() {
         (
             "split",
             instruction::Split {
-                collateral: 0,
+                collateral: BASE as u8,
                 amount: 100,
             }
             .data(),
@@ -953,7 +1059,7 @@ async fn compiled_cost_profile() {
         (
             "merge",
             instruction::Merge {
-                collateral: 0,
+                collateral: BASE as u8,
                 amount: 100,
             }
             .data(),
@@ -961,7 +1067,7 @@ async fn compiled_cost_profile() {
         (
             "redeem_invalid",
             instruction::Redeem {
-                collateral: 0,
+                collateral: BASE as u8,
                 yes_amount: 100,
                 no_amount: 100,
             }
@@ -990,7 +1096,7 @@ async fn compiled_cost_profile() {
             }
             .to_account_metas(None);
             keys.push(AccountMeta::new(
-                f.credit(&f.wallets[1].1.owner, 0).0,
+                f.credit(&f.wallets[1].1.owner, BASE).0,
                 false,
             ));
             keys
@@ -1009,11 +1115,11 @@ async fn compiled_cost_profile() {
                 accounts: accounts::PoolTransfer {
                     system_program: anchor_lang::system_program::ID,
                     owner,
-                    pool: f.pool(0).0,
-                    credit: f.credit(&owner, 0).0,
-                    mint: f.mints[0],
+                    pool: f.pool(BASE).0,
+                    credit: f.credit(&owner, BASE).0,
+                    mint: f.mints[underlying(BASE)],
                     external: f.sources[1],
-                    vault: f.vaults[0],
+                    vault: f.vaults[underlying(BASE)],
                     token_program: token::ID,
                 }
                 .to_account_metas(None),
@@ -1029,11 +1135,11 @@ async fn compiled_cost_profile() {
                 accounts: accounts::PoolTransfer {
                     system_program: anchor_lang::system_program::ID,
                     owner,
-                    pool: f.pool(0).0,
-                    credit: f.credit(&owner, 0).0,
-                    mint: f.mints[0],
+                    pool: f.pool(BASE).0,
+                    credit: f.credit(&owner, BASE).0,
+                    mint: f.mints[underlying(BASE)],
                     external: f.sources[0],
-                    vault: f.vaults[0],
+                    vault: f.vaults[underlying(BASE)],
                     token_program: token::ID,
                 }
                 .to_account_metas(None),
@@ -1112,7 +1218,7 @@ async fn maintenance_is_atomic_refunds_rent_and_cannot_replay() {
             accounts[13] = accounts[6].clone();
         }
         let cancelling = case == 7;
-        accounts.push(AccountMeta::new(f.credit(&f.owner.pubkey(), 0).0, false));
+        accounts.push(AccountMeta::new(f.credit(&f.owner.pubkey(), BASE).0, false));
         if case == 8 {
             accounts[6].is_writable = false;
         }
@@ -1130,7 +1236,7 @@ async fn maintenance_is_atomic_refunds_rent_and_cannot_replay() {
             f.market_key,
             f.wallets[0].0,
             f.wallets[0].2,
-            f.credit(&f.owner.pubkey(), 0).0,
+            f.credit(&f.owner.pubkey(), BASE).0,
         ]
         .into_iter()
         .chain(f.makers.iter().map(|(key, _)| *key))
@@ -1217,10 +1323,10 @@ async fn maintenance_is_atomic_refunds_rent_and_cannot_replay() {
             .data;
         let wallet = Wallet::try_deserialize(&mut data.as_slice()).unwrap();
         assert_eq!(wallet.open_notional, 0);
-        assert_eq!(wallet.balances[0], 0);
+        assert_eq!(wallet.balances[underlying(BASE)], 0);
         let account = context
             .banks_client
-            .get_account(f.credit(&f.owner.pubkey(), 0).0)
+            .get_account(f.credit(&f.owner.pubkey(), BASE).0)
             .await
             .unwrap()
             .unwrap();
@@ -1239,29 +1345,33 @@ async fn maintenance_is_atomic_refunds_rent_and_cannot_replay() {
             .data;
         let market = Market::try_deserialize(&mut data.as_slice()).unwrap();
         assert_eq!(market.open_notional, 0);
-        assert_eq!(market.escrow, [0; 6]);
-        assert_eq!(market.credits[0], 0);
+        assert_eq!(market.escrow, vec![0; ASSETS]);
+        assert_eq!(market.credits[underlying(BASE)], 0);
         // After closure: old nonce rejects, and rebinding the same PDA's salt to
         // a newer nonce also rejects. Use fresh messages, not duplicate signatures.
         if case == 0 {
             for nonce in [0, 1] {
                 let mut terms = f.makers[0].1.terms.clone();
                 terms.nonce = nonce;
+                // A sell of the base leg: named, quote claims and that leg's accounts.
                 let mut ix = f.place(false);
-                ix.accounts.truncate(20);
+                ix.accounts
+                    .truncate(PLACE_NAMED + QUOTE_CLAIMS + LEG_ACCOUNTS);
                 ix.accounts[4].pubkey = f.makers[0].0;
                 ix.accounts.push(AccountMeta::new(f.wallets[0].0, false));
                 ix.accounts
                     .push(AccountMeta::new_readonly(f.wallets[0].2, false));
                 ix.accounts
-                    .push(AccountMeta::new(f.credit(&f.owner.pubkey(), 0).0, false));
+                    .push(AccountMeta::new(f.credit(&f.owner.pubkey(), BASE).0, false));
                 ix.data = instruction::Place {
                     delegations: 0,
                     participants: 1,
+                    touched: 1,
                     terms,
                     plan: Plan {
                         deadline: i64::MAX - 2,
                         next_sequence: 8,
+                        min_fill: 0,
                         maker_bps: 10,
                         taker_bps: 20,
                         legs: vec![],
@@ -1295,7 +1405,7 @@ async fn eight_refunded_makers_use_distinct_global_credits_without_heap_failure(
     f.leg_quantity = 99;
     f.price = 3 * protocol_core::WAD / 2;
     f.market.terms.tick = f.price;
-    f.market.escrow[1] = 8 * 149;
+    f.market.escrow[underlying(QUOTE)] = 8 * 149;
     f.market.open_notional = 8 * 149;
     for (_, maker) in &mut f.makers {
         maker.terms.price = f.price;
@@ -1337,7 +1447,7 @@ async fn compact_market_preserves_layout_future_resolution_space_and_donations()
         };
         let size = Market::allocation_size(
             f.market.terms.metadata_uri.len(),
-            resolved.then_some(f.market.evidence_uri.len()),
+            f.market.evidence_uri.len(),
         );
         let mut unauthorized = ix.clone();
         unauthorized.accounts[0].pubkey = context.payer.pubkey();
@@ -1430,7 +1540,7 @@ async fn eight_distinct_maker_delegations_fit_default_heap_and_budget() {
             f.leg_quantity = 99;
             f.price = 3 * protocol_core::WAD / 2;
             f.market.terms.tick = f.price;
-            f.market.escrow[1] = 8 * 149;
+            f.market.escrow[underlying(QUOTE)] = 8 * 149;
             f.market.open_notional = 8 * 149;
             for (_, maker) in &mut f.makers {
                 maker.terms.price = f.price;

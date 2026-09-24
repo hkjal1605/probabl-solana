@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "probabl-demo-ui",
+  "account_id": "d0b56668a3d06078d1ae87fc54671202",
+  "main": ".open-next/worker.js",
+  // Current UTC date supported by the pinned workerd runtime.
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "demo.probabl.trade",
+      "zone_id": "e8c8d1bced8467502e418a6d03f79085",
+      "custom_domain": true
+    }
+  ],
+  // This app has no backend: it needs no runtime vars, bindings or secrets.
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "probabl-demo-ui" }],
+  "observability": { "enabled": true },
+  "dev": { "ip": "127.0.0.1", "port": 8788 }
+}

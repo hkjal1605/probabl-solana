@@ -1,17 +1,19 @@
 "use client";
-import { useEffect, useState } from "react";
 import { isSolanaMint, SPOT_BATCH_SIZE } from "@conditional-stocks/shared/spot-prices";
-import type { MarketView } from "@/types/api";
+import { useEffect, useState } from "react";
 import { protocolConfig } from "@/config/protocol";
+import { fetchSpotPrices } from "@/modules/MarketDetailPageModule/utils/fetchSpotPrices";
 import { API_URL } from "@/services/constants";
 import { parseSpotPricesResponse, spotPricesUrl } from "@/services/spot-prices";
 import { subscribeSpot } from "@/services/spot-stream";
 import { spotPricesStore } from "@/stores/useSpotPricesStore";
-import { fetchSpotPrices } from "@/modules/MarketDetailPageModule/utils/fetchSpotPrices";
+import type { MarketView } from "@/types/api";
 import { useResource } from "./useResource";
 
 export function useSpotPrices(markets: MarketView[]) {
-  const mints = [...new Set(markets.flatMap((m) => [m.baseToken, m.quoteToken]))]
+  const mints = [
+    ...new Set(markets.flatMap((m) => [...m.bases.map((leg) => leg.mint), m.quoteToken])),
+  ]
     .filter(isSolanaMint)
     .sort();
   const key = mints.join(",");

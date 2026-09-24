@@ -2,13 +2,13 @@ import { SOLANA_API_ORIGIN } from "@conditional-stocks/shared/endpoints";
 import {
   expireSpotPrice,
   isSolanaMint,
-  spotMapping,
   SOLANA_MAINNET_GENESIS,
   SPOT_BATCH_SIZE,
   type SpotPrice,
   type SpotPricesResponse,
+  spotMapping,
 } from "@conditional-stocks/shared/spot-prices";
-import type { MarketView } from "../types/api";
+import type { MarketLegView, MarketView } from "../types/api";
 
 export function spotPricesUrl(mints: string[], base = SOLANA_API_ORIGIN): string {
   let url: URL;
@@ -156,13 +156,24 @@ export function withMarketSpotPrices(
         : expireSpotPrice(price, nowMs)
       : undefined;
   return markets.map((market) => {
-    const spotReference = current(prices ? prices.get(market.baseToken) : market.spotReference);
+    const bases: MarketLegView[] = market.bases.map((leg) => {
+      const spot = current(prices ? prices.get(leg.mint) : leg.spotReference);
+      const { spotReference: _leg, ...rest } = leg;
+      return spot ? { ...rest, spotReference: spot } : rest;
+    });
+    // The asset reference is the first leg with an available price (legs of one
+    // asset track one share price), else the first leg's status.
+    const spotReference = prices
+      ? (bases.find((leg) => leg.spotReference?.status === "available")?.spotReference ??
+        bases.find((leg) => leg.spotReference)?.spotReference)
+      : current(market.spotReference);
     const quoteSpotReference = current(
       prices ? prices.get(market.quoteToken) : market.quoteSpotReference,
     );
     const { spotReference: _base, quoteSpotReference: _quote, ...rest } = market;
     return {
       ...rest,
+      bases,
       ...(spotReference ? { spotReference } : {}),
       ...(quoteSpotReference ? { quoteSpotReference } : {}),
       // Never carry an unverified old numeric reference through as a live price.

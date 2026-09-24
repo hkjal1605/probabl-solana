@@ -63,9 +63,16 @@ Symmetric spreads preserve paired centers. Inventory skew affects **size** inste
 of independently shifting each center and breaking the requested constraint.
 Higher uncertainty widens spreads; exceeding the configured safe spread pauses
 quoting. Quotes never intentionally take another order. Atomic replacement,
-refresh thresholds and short expiries balance continuity, adverse selection,
-sequence races and account-creation costs. None can force other traders' book
-prices to follow the bot's centers or eliminate latency exposure.
+refresh thresholds and short expiries balance continuity, adverse selection
+and account-creation costs. Concurrent quotes from other makers do not reject
+the bot's placements: the program only rejects a resting quote that would cross
+an opposite order placed after the quote was planned, and the bot then replans
+against it (see `docs/multi-issuer-markets.md`, "Plans against a moving book").
+Quotes appear to takers at the confirmed commitment through the streamed
+indexer. Registering the bot's wallet in `SOLANA_LOOKUP_KEEPER_OWNERS` makes its
+accounts table-resident in every market before its first quote. None of this
+can force other traders' book prices to follow the bot's centers or eliminate
+latency exposure.
 
 ## What must be measured before a mainnet rollout
 

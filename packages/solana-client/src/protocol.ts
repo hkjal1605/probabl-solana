@@ -13,10 +13,97 @@ import idlJson from "./idl.json";
 export { BN, PublicKey, SystemProgram, TOKEN_PROGRAM_ID };
 export const PROGRAM_ID = new PublicKey("8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg");
 export const coder = new BorshCoder(idlJson as Idl);
+/** Account encoding with an adequately sized buffer. Anchor's
+ * `coder.accounts.encode` writes into a fixed 1000-byte buffer, smaller than a
+ * multi-issuer Market. Used by fixtures and replay tooling. */
+export function encodeAccount(name: string, value: unknown): Buffer {
+  const layouts = (coder.accounts as unknown as { accountLayouts: Map<string, { layout: { encode(v: unknown, b: Buffer): number } }> }).accountLayouts;
+  const entry = layouts.get(name);
+  if (!entry) throw new Error(`Unknown account: ${name}`);
+  const buffer = Buffer.alloc(16_384);
+  const length = entry.layout.encode(value, buffer);
+  return Buffer.concat([coder.accounts.accountDiscriminator(name), buffer.subarray(0, length)]);
+}
 export const U64_MAX = (1n << 64n) - 1n;
 export const U128_MAX = (1n << 128n) - 1n;
 export const WAD = 10n ** 18n;
 export const MAX_MAKERS = 8;
+
+/** Base (issuer) legs per market; collateral 0 is the quote, 1..=MAX_BASES are legs. */
+export const MAX_BASES = 3;
+export const COLLATERALS = 1 + MAX_BASES;
+/** Per collateral c: underlying 3c, YES claim 3c + 1, NO claim 3c + 2. */
+export const ASSETS = 3 * COLLATERALS;
+export const QUOTE = 0;
+/** Remaining accounts per touched base leg in `place`. */
+export const LEG_ACCOUNTS = 7;
+export const underlyingAsset = (collateral: number) => 3 * collateral;
+export const claimAsset = (collateral: number, branch: number) => 3 * collateral + 1 + branch;
+export const collateralOf = (asset: number) => Math.floor(asset / 3);
+export const isClaimAsset = (asset: number) =>
+  Number.isInteger(asset) && asset >= 0 && asset < ASSETS && asset % 3 !== 0;
+export const legBit = (collateral: number) => 1 << (collateral - 1);
+/** Every listed leg of a market with `bases` legs. */
+export const allLegs = (bases: number) => (1 << bases) - 1;
+/** The single leg a sell order delivers, or null when the mask is not exactly one listed leg. */
+export function singleBase(mask: number): number | null {
+  if (!Number.isInteger(mask) || mask <= 0 || mask >= 1 << MAX_BASES || (mask & (mask - 1)) !== 0) return null;
+  return 31 - Math.clz32(mask) + 1;
+}
+/** Collaterals of every leg in a mask, ascending. */
+export function legsOf(mask: number): number[] {
+  const result: number[] = [];
+  for (let c = 1; c <= MAX_BASES; c++) if (mask & legBit(c)) result.push(c);
+  return result;
+}
+
+/** `1.0f64` bits: the multiplier of every mint without ScaledUiAmount. */
+export const UNIT_MULTIPLIER = 0x3ff0_0000_0000_0000n;
+/** Exact decode of an issuer ScaledUiAmount multiplier (IEEE-754 bits) as
+ * mantissa / 2^shift. Mirrors protocol_core::multiplier_parts. */
+export function multiplierParts(bits: bigint): { mantissa: bigint; shift: bigint } {
+  if (bits < 0n || bits > U64_MAX) throw new Error("Invalid multiplier bits");
+  const exponent = (bits >> 52n) & 0x7ffn;
+  if (bits >> 63n !== 0n || exponent === 0n || exponent === 0x7ffn) throw new Error("Invalid issuer multiplier");
+  const mantissa = (bits & ((1n << 52n) - 1n)) | (1n << 52n);
+  const shift = 1075n - exponent;
+  if (shift < 0n || shift > 63n) throw new Error("Issuer multiplier is out of range");
+  return { mantissa, shift };
+}
+export function multiplierBits(value: number): bigint {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, value, true);
+  return view.getBigUint64(0, true);
+}
+export function multiplierValue(bits: bigint): number {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setBigUint64(0, bits, true);
+  return view.getFloat64(0, true);
+}
+/** Raw issuer units for `units` share units at `scale` and a live multiplier.
+ * Deliveries round down, reservations up. Mirrors protocol_core::base_raw. */
+export function baseRaw(units: bigint, scale: bigint, multiplier: bigint, up = false): bigint {
+  const { mantissa, shift } = multiplierParts(multiplier);
+  if (units < 0n || scale < 0n) throw new Error("Invalid share conversion");
+  const tokens = units * scale;
+  if (tokens > U64_MAX) throw new Error("Share conversion exceeds u64");
+  const numerator = tokens << shift;
+  const raw = numerator / mantissa + (up && numerator % mantissa !== 0n ? 1n : 0n);
+  if (raw > U64_MAX) throw new Error("Share conversion exceeds u64");
+  return raw;
+}
+/** Dividend band: 4/5 <= current / listing <= 5/4, exactly. Mirrors protocol_core::within_band. */
+export function withinBand(listing: bigint, current: bigint): boolean {
+  const l = multiplierParts(listing), c = multiplierParts(current);
+  const cur = c.mantissa * (1n << l.shift), lst = l.mantissa * (1n << c.shift);
+  return 4n * cur <= 5n * lst && 5n * cur >= 4n * lst;
+}
+/** Share units per whole economic share. */
+export const shareScale = (legDecimals: number, shareDecimals: number) => {
+  if (!Number.isInteger(legDecimals) || !Number.isInteger(shareDecimals) || legDecimals < shareDecimals || legDecimals - shareDecimals > 19)
+    throw new Error("Base leg decimals are incompatible with the market share unit");
+  return 10n ** BigInt(legDecimals - shareDecimals);
+};
 export const big = (value: BN | bigint | number | string): bigint => BigInt(value.toString());
 export const bn = (value: BN | bigint | number | string): BN => new BN(value.toString());
 export const key = (value: PublicKey | string): PublicKey => new PublicKey(value);
@@ -86,7 +173,7 @@ export const poolVaultAddress = (pool: PublicKey, program = PROGRAM_ID) =>
   pda([Buffer.from("pool-vault"), pool.toBuffer()], program);
 export const assetCreditAddress = (pool: PublicKey, owner: PublicKey, program = PROGRAM_ID) =>
   pda([Buffer.from("asset-credit"), pool.toBuffer(), owner.toBuffer()], program);
-export interface AssetPoolAccount { config: PublicKey; mint: PublicKey; token_program: PublicKey; liability: BN; decimals: number; bump: number }
+export interface AssetPoolAccount { config: PublicKey; mint: PublicKey; token_program: PublicKey; liability: BN; decimals: number; bump: number; admitted: number; vault_bump: number }
 export interface AssetCreditAccount { pool: PublicKey; owner: PublicKey; available: BN; bump: number }
 
 export interface Roles {
@@ -115,6 +202,7 @@ export interface MarketTerms {
   metadata_uri: string;
   trading_open: BN;
   trading_cutoff: BN;
+  share_decimals: number;
   tick: BN;
   step: BN;
   min_notional: BN;
@@ -123,15 +211,30 @@ export interface MarketTerms {
   max_wallet: BN;
   max_market: BN;
 }
+export interface BaseLegAccount {
+  /** 10^(leg decimals - share decimals). */
+  scale: BN;
+  /** Listing ScaledUiAmount multiplier (f64 bits; 1.0 when absent). */
+  multiplier: BN;
+  active: boolean;
+}
 export interface MarketAccount {
   config: PublicKey;
   id: number[];
   terms: MarketTerms;
+  bases: number;
+  legs: BaseLegAccount[];
+  /** ASSETS entries: underlying 3c, YES 3c+1, NO 3c+2. */
   mints: PublicKey[];
+  /** Per collateral (0 = quote). */
   decimals: number[];
+  pool_bumps: number[];
   vaults_initialized: number;
   state: number;
   sequence: BN[];
+  /** Last RECENT placements per branch (branch b, sequence s at
+   * b * RECENT + s % RECENT), limit prices in ticks; side 2 = did not rest. */
+  recent: PlacementAccount[];
   open_notional: BN;
   credits: BN[];
   escrow: BN[];
@@ -144,6 +247,15 @@ export interface MarketAccount {
   resolved_at: BN;
   bump: number;
 }
+export interface PlacementAccount {
+  ticks: BN;
+  side: number;
+}
+/** Placements retained per branch for on-chain race checks. */
+export const RECENT = 16;
+/** A new market's retained placements (none rested yet). */
+export const emptyRecent = (): PlacementAccount[] =>
+  Array.from({ length: 2 * RECENT }, () => ({ ticks: new BN(0), side: 2 }));
 export interface WalletAccount {
   market: PublicKey;
   owner: PublicKey;
@@ -170,6 +282,7 @@ export interface OrderTerms {
   side: number;
   funding: number;
   tif: number;
+  bases: number;
 }
 export interface OrderAccount {
   market: PublicKey;
@@ -201,6 +314,9 @@ export interface OrderWire {
   side: number;
   fundingKind: number;
   tif: number;
+  /** Base-leg bitmask (bit i = collateral i + 1). A buy accepts every leg in the
+   * mask; a sell delivers exactly one leg. */
+  bases: number;
 }
 
 export function unsigned(value: unknown, maximum = U64_MAX): bigint {
@@ -228,6 +344,13 @@ export function parseOrder(value: unknown): OrderWire {
   }
   for (const field of [o.branch, o.side, o.fundingKind, o.tif])
     if (field !== 0 && field !== 1) throw new Error("Invalid order enum");
+  if (
+    !Number.isInteger(o.bases) ||
+    o.bases <= 0 ||
+    o.bases >= 1 << MAX_BASES ||
+    (o.side === 1 && singleBase(o.bases) === null)
+  )
+    throw new Error("Invalid base-leg selection: buys accept one or more legs, sells deliver exactly one");
   if (!Number.isInteger(o.maxFeeBps) || o.maxFeeBps < 0 || o.maxFeeBps > 1_000)
     throw new Error("Invalid fee cap");
   return {
@@ -245,6 +368,7 @@ export function parseOrder(value: unknown): OrderWire {
     side: o.side,
     fundingKind: o.fundingKind,
     tif: o.tif,
+    bases: o.bases,
   };
 }
 export function orderTerms(order: OrderWire): OrderTerms {
@@ -261,6 +385,7 @@ export function orderTerms(order: OrderWire): OrderTerms {
     side: o.side,
     funding: o.fundingKind,
     tif: o.tif,
+    bases: o.bases,
   };
 }
 export function orderWire(order: OrderAccount): OrderWire {
@@ -280,12 +405,25 @@ export function orderWire(order: OrderAccount): OrderWire {
     side: t.side,
     fundingKind: t.funding,
     tif: t.tif,
+    bases: t.bases,
   };
 }
 export const orderId = (o: OrderWire, program = PROGRAM_ID) =>
   orderAddress(key(o.marketId), key(o.maker), bytes32(o.salt), program).toBase58();
-export const fundingAsset = (o: OrderWire): number =>
-  o.fundingKind === 0 ? (o.side === 0 ? 1 : 0) : 2 + (o.side === 0 ? 2 : 0) + o.branch;
+/** Collateral an order funds: the quote for buys, the delivered leg for sells. */
+export function orderCollateral(o: Pick<OrderWire, "side" | "bases">): number {
+  if (o.side === 0) return QUOTE;
+  const leg = singleBase(o.bases);
+  if (leg === null) throw new Error("Sell order must deliver exactly one base leg");
+  return leg;
+}
+export const fundingAsset = (o: Pick<OrderWire, "side" | "bases" | "fundingKind" | "branch">): number => {
+  const collateral = orderCollateral(o);
+  return o.fundingKind === 0 ? underlyingAsset(collateral) : claimAsset(collateral, o.branch);
+};
+/** Whether a bid accepts (or an ask delivers) the given leg. */
+export const acceptsLeg = (o: Pick<OrderWire, "bases">, collateral: number) =>
+  collateral >= 1 && collateral <= MAX_BASES && (o.bases & legBit(collateral)) !== 0;
 export function assertSignInChallenge(
   challenge: { challengeId: string; message: string },
   owner: string,

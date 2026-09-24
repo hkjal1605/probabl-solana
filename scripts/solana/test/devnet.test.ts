@@ -425,7 +425,7 @@ describe("private durable deployment state", () => {
 });
 
 describe("fixture construction and transaction journal", () => {
-  test("six exact mock allocations, one canonical native wrap, both token programs", async () => {
+  test("exact mock and issuer-replica allocations, one canonical native wrap, both token programs", async () => {
     const ctx = {
       deployer: owner,
       connection: { getMinimumBalanceForRentExemption: async () => 1000 },
@@ -434,7 +434,7 @@ describe("fixture construction and transaction journal", () => {
       const mint = spec.kind === "native" ? null : Keypair.generate();
       const built = await assetInstructions(ctx, spec, mint);
       expect(built.asset.initialRaw).toBe(rawAmount(spec.units, spec.decimals).toString());
-      const program = spec.kind === "token2022" ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+      const program = spec.kind === "issuer" ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
       expect(built.asset.program).toBe(program.toBase58());
       const ataInstruction = built.instructions.at(-2)!;
       if (mint) {
@@ -570,7 +570,7 @@ describe("fixture construction and transaction journal", () => {
       getBalance: async () => 200_000_015,
     } as unknown as Connection;
     const result = await fundingPlan(connection, plan());
-    expect(result.conservativeRequiredLamports).toBe("200000016");
+    expect(result.conservativeRequiredLamports).toBe("200000026");
     expect(result.sufficient).toBe(false);
   });
   test("resuming reuses owned buffer funding without consuming Program-account rent or fee reserves", async () => {
@@ -589,19 +589,19 @@ describe("fixture construction and transaction journal", () => {
           : space === prepared.artifactBytes + 37
             ? 1_000_000_000
             : 1,
-      getBalance: async () => 200_000_023,
+      getBalance: async () => 200_000_033,
     } as unknown as Connection;
     const initial = await fundingPlan(connection, prepared);
-    expect(initial.conservativeRequiredLamports).toBe("1200000023");
+    expect(initial.conservativeRequiredLamports).toBe("1200000033");
     expect(initial.sufficient).toBe(false);
     const resumed = await fundingPlan(connection, prepared, buffer);
     expect(resumed.prepaidBufferLamports).toBe("1000000000");
-    expect(resumed.conservativeRequiredLamports).toBe("200000023");
+    expect(resumed.conservativeRequiredLamports).toBe("200000033");
     expect(resumed.sufficient).toBe(true);
     connection.getAccountInfo = async (key) =>
       key.equals(buffer) ? account(data, { lamports: 9_000_000_000 }) : null;
     expect((await fundingPlan(connection, prepared, buffer)).conservativeRequiredLamports).toBe(
-      "200000015",
+      "200000025",
     );
     connection.getAccountInfo = async (key) =>
       key.equals(buffer) ? account(data, { owner: SystemProgram.programId }) : null;

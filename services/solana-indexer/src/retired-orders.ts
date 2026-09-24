@@ -8,25 +8,49 @@ export interface RetiredOrderImage {
   data: string;
 }
 
+/** Decodes and authenticates one archival (closed) order image. Returns
+ * undefined for another deployment's markets. */
+export function retiredOrder(snapshot: Pick<Snapshot, "markets" | "program">, image: RetiredOrderImage) {
+  const bytes = Buffer.from(image.data, "base64");
+  if (bytes.length !== ORDER_ACCOUNT_BYTES) throw new Error("Invalid retired order size");
+  const order = coder.accounts.decode("Order", bytes) as OrderAccount;
+  if (!snapshot.markets.has(order.market.toBase58())) return undefined;
+  if (
+    orderId(orderWire(order), snapshot.program) !== image.address ||
+    ![2, 3].includes(order.status) ||
+    !order.remaining.isZero() ||
+    !order.reserved.isZero() ||
+    !order.open_notional.isZero()
+  )
+    throw new Error("Invalid retired order image");
+  return order;
+}
+
 /** Historical images are not live chain accounts. Never merge them into the
  * RPC account image or accept an open/reserved order from archival events. */
 export function restoreRetiredOrders(snapshot: Snapshot, images: RetiredOrderImage[]) {
   for (const image of images) {
-    const bytes = Buffer.from(image.data, "base64");
-    if (bytes.length !== ORDER_ACCOUNT_BYTES) throw new Error("Invalid retired order size");
-    const order = coder.accounts.decode("Order", bytes) as OrderAccount;
-    if (!snapshot.markets.has(order.market.toBase58())) continue;
-    if (
-      orderId(orderWire(order), snapshot.program) !== image.address ||
-      ![2, 3].includes(order.status) ||
-      !order.remaining.isZero() ||
-      !order.reserved.isZero() ||
-      !order.open_notional.isZero()
-    )
-      throw new Error("Invalid retired order image");
+    const order = retiredOrder(snapshot, image);
+    if (!order) continue;
     if (snapshot.orders.has(image.address))
       throw new Error("Retired order address unexpectedly exists");
     snapshot.orders.set(image.address, order);
+  }
+}
+
+/** Closed (retired) orders kept beside the immutable live snapshots, so order
+ * history survives rent recovery without copying the live order map. */
+export class RetiredOrders {
+  private readonly orders = new Map<string, OrderAccount>();
+  add(snapshot: Pick<Snapshot, "markets" | "program">, images: RetiredOrderImage[]) {
+    for (const image of images) {
+      const order = retiredOrder(snapshot, image);
+      if (order) this.orders.set(image.address, order);
+    }
+  }
+  /** Retired orders not (or no longer) present as live accounts. */
+  *entries(live: ReadonlyMap<string, OrderAccount>): Iterable<[string, OrderAccount]> {
+    for (const entry of this.orders) if (!live.has(entry[0])) yield entry;
   }
 }
 

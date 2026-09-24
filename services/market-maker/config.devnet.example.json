@@ -2,35 +2,35 @@
   "markets": [
     {
       "market": "4WhQLaVbDA4U6UXaxnedZYD7rNtBeMtxjcT5tRwSu6TW",
-      "baseMint": "8gASFJiYjt7LCt9Ycs3DzhEWjVSsy44AzVaT33fjPmq3",
+      "baseMints": ["8gASFJiYjt7LCt9Ycs3DzhEWjVSsy44AzVaT33fjPmq3"],
       "quoteMint": "iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDD",
-      "baseInventory": "2",
+      "baseInventories": ["2"],
       "quoteInventory": "2000",
       "orderQuote": "250",
       "gapBps": 0,
-      "basePriceMultiplier": "1",
+      "basePriceMultipliers": ["1"],
       "quotePriceMultiplier": "1"
     },
     {
       "market": "GuQ1HadwNPjcc2svc6xN3GJVaZ72wfrEKT5zU2CTeXg4",
-      "baseMint": "DhC4rpPyVJRHJmNqhMXchqET2o87b6JV6ebfkqA5Ufv4",
+      "baseMints": ["DhC4rpPyVJRHJmNqhMXchqET2o87b6JV6ebfkqA5Ufv4"],
       "quoteMint": "iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDD",
-      "baseInventory": "0.02",
+      "baseInventories": ["0.02"],
       "quoteInventory": "2000",
       "orderQuote": "250",
       "gapBps": 0,
-      "basePriceMultiplier": "1",
+      "basePriceMultipliers": ["1"],
       "quotePriceMultiplier": "1"
     },
     {
       "market": "HkUYQf4XavKJ7BJHTMsMvn15LZL7etfhyCNCpvkuSeEE",
-      "baseMint": "H2RuZ1p2KBtKesz6kcnLvXhtVK74LAbTrWbH5phyeMkY",
+      "baseMints": ["H2RuZ1p2KBtKesz6kcnLvXhtVK74LAbTrWbH5phyeMkY"],
       "quoteMint": "iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDD",
-      "baseInventory": "0.5",
+      "baseInventories": ["0.5"],
       "quoteInventory": "2000",
       "orderQuote": "250",
       "gapBps": 0,
-      "basePriceMultiplier": "1",
+      "basePriceMultipliers": ["1"],
       "quotePriceMultiplier": "1"
     }
   ]

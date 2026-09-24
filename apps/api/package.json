@@ -21,6 +21,7 @@
     "@conditional-stocks/market-data": "workspace:*",
     "hono": "4.13.5",
     "@conditional-stocks/db": "workspace:*",
-    "@conditional-stocks/shared": "workspace:*"
+    "@conditional-stocks/shared": "workspace:*",
+    "@triton-one/yellowstone-grpc": "5.0.9"
   }
 }

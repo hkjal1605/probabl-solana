@@ -23,11 +23,11 @@ export function MarketAssetSwitcher({ market }: { market: MarketView }) {
         >
           <TokenIdentity
             symbol={asset.ticker}
-            metadata={asset.baseTokenMetadata}
+            metadata={asset.assetMetadata}
             showName={false}
             iconSize="sm"
           />
-          {assets.some((other) => other.id !== asset.id && other.baseToken === asset.baseToken) && (
+          {assets.some((other) => other.id !== asset.id && other.assetKey === asset.assetKey) && (
             <span className="text-xs text-muted-foreground">
               / {asset.quoteTokenMetadata?.symbol ?? asset.quoteToken.slice(0, 6)}
             </span>

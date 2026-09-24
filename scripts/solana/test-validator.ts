@@ -13,6 +13,8 @@ const child = Bun.spawn(
     "test",
     "packages/solana-client/test/local-validator.test.ts",
     "packages/solana-client/test/token2022-validator.test.ts",
+    "packages/solana-client/test/multi-issuer-validator.test.ts",
+    "packages/solana-client/test/capacity-validator.test.ts",
   ],
   {
     env: { ...process.env, SOLANA_TEST_RPC: rpc },

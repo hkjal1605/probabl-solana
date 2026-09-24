@@ -38,6 +38,10 @@ import { logger } from "../../common/logger.ts";
 import { PolymarketIngestorClient } from "../../integrations/polymarket/client.ts";
 import { CachedProbability, mountProbabilityStream } from "../market-data/probability-stream.ts";
 
+/** Reviewer confirmations for schema-4 creation evidence. "stock-and-quote"
+ * attests the USDC quote token and EVERY issuer base token (config.baseTokens,
+ * 1-3 whitelisted issuer tokens of the same stock, in leg order) plus
+ * config.shareDecimals. The key is shared with the admin UI and is unchanged. */
 const creationChecks = [
   "stock-and-quote",
   "condition-id",

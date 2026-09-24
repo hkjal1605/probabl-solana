@@ -1,5 +1,5 @@
 /** Read-only visual QA fixtures. Trading must be exercised against the actual local validator. */
-import { parsePriceRawX18,parseTokenAmount } from "@conditional-stocks/domain";
+import { parsePriceRawX18,parseShareAmount } from "@conditional-stocks/domain";
 import { fixtureMarkets,fixtureState } from "./protocol";
 if(process.env.PROBABL_UI_FIXTURE!=="1")throw new Error("Set PROBABL_UI_FIXTURE=1 for local visual QA.");
 const markets=fixtureMarkets.map(m=>({...m,cutoff:new Date(Date.now()+86_400_000).toISOString()}));
@@ -13,7 +13,8 @@ Bun.serve({hostname:"127.0.0.1",port:4305,fetch(request){
   const market=markets.find(m=>path.includes(m.id));
   if(path.startsWith("/orderbook/")&&market)return json({orders:[0,1].flatMap(branch=>[0,1].flatMap(side=>{
     const book=branch===0?market.yes:market.no;return(side===0?book.bids:book.asks).map(level=>({branch,side,
-      limitPriceRawX18:String(parsePriceRawX18(level.priceExact,market)),remaining:String(parseTokenAmount(String(level.quantity),market.baseTokenDecimals))}));})),truncated:false});
+      limitPriceRawX18:String(parsePriceRawX18(level.priceExact,market)),remaining:String(parseShareAmount(String(level.quantity),market)),
+      byBases:Object.fromEntries((level.byBases??[]).map(entry=>[String(entry.mask),entry.quantityRaw]))}));})),truncated:false});
   if(path.endsWith("/polymarket")&&market)return json({metadata:{normalized:{question:market.question,rules:market.description,asset:{symbol:market.ticker},canonicalUrl:"https://polymarket.com"}},probability:null});
   if(path==="/trades")return json({trades:fixtureState.trades});
   if(path==="/orders")return json({orders:fixtureState.orders});

@@ -11,6 +11,8 @@ export const api = {
         : "/trades?limit=1000",
       signal ? { signal } : {},
     ),
+  /** Keeper-maintained lookup tables: placements need them to carry every maker. */
+  lookupTables: async () => (await requestJson<{ tables: string[] }>("/v1/lookup-tables")).tables,
   prepare: <T>(path: string, body: unknown, token?: string) =>
     requestJson<T>(`/v1/${path}`, { body, ...(token ? { token } : {}) }),
   resolution: async (marketId: string, signal?: AbortSignal) => {

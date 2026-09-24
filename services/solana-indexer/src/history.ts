@@ -209,3 +209,57 @@ export async function replayHistory(
     });
   });
 }
+
+export interface StreamedTransaction {
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+  response: VersionedTransactionResponse;
+}
+
+/** Persists the events of streamed, now-finalized transactions and advances the
+ * scan cursor to `finalizedSlot`, in one locked transaction (the same commit
+ * protocol as `replayHistory`, whose RPC replay remains the backfill and gap
+ * recovery path). Event keys are idempotent, so replays overlap safely. */
+export async function persistStreamedHistory(
+  db: SolanaDatabase,
+  client: SolanaClient,
+  domain: string,
+  finalizedSlot: number,
+  deployment: Snapshot,
+  transactions: readonly StreamedTransaction[],
+  blockTime: (slot: number) => Promise<number | null> = (slot) => client.connection.getBlockTime(slot),
+) {
+  const rows: Parameters<SolanaDatabase["putEvent"]>[1][] = [];
+  for (const tx of [...transactions].sort((a, b) => a.slot - b.slot)) {
+    if (tx.response.meta?.err) continue;
+    const decoded = decodeHistory(client, tx.response);
+    const events = decoded.events.filter((event) => eventInDeployment(event, client, deployment));
+    if (!events.length) continue;
+    const time = tx.blockTime ?? (await blockTime(tx.slot));
+    if (time === null) throw new Error("Transaction timestamp unavailable: " + tx.signature);
+    for (const event of events)
+      rows.push({
+        signature: tx.signature,
+        event_index: event.index,
+        slot: tx.slot,
+        block_time: time,
+        name: event.name,
+        market: event.market,
+        data: event.data,
+      });
+  }
+  return db.locked("history:" + domain, async (locked) => {
+    const cursor = await locked.historyCursor(domain);
+    if (!cursor) throw new Error("History has not been backfilled");
+    if (BigInt(cursor.snapshot_slot) >= BigInt(finalizedSlot)) return 0; // Already scanned (replay overlap).
+    for (const row of rows) await locked.putEvent(domain, row);
+    const latest = rows.at(-1);
+    await locked.putHistoryCursor(domain, {
+      signature: latest?.signature ?? cursor.signature,
+      slot: latest ? String(latest.slot) : cursor.slot,
+      snapshot_slot: String(finalizedSlot),
+    });
+    return rows.length;
+  });
+}

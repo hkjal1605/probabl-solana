@@ -1,5 +1,6 @@
 import type { SolanaDatabase } from "@conditional-stocks/db/solana";
 import { SNAPSHOT_VERSION } from "@conditional-stocks/db/solana";
+import { claimAsset } from "@conditional-stocks/solana-client";
 import { indexedOrder, marketView, type Snapshot } from "./projection";
 import { reconcileLedger } from "./custody";
 
@@ -27,21 +28,29 @@ export async function persistSnapshot(
       owner: String(c.owner),
       available: String(c.available),
     })),
-    claims: [...s.wallets.values()].flatMap((w) =>
-      [2, 3, 4, 5].map((asset) => ({
-        market: String(w.market),
-        owner: String(w.owner),
-        mint: String(s.markets.get(String(w.market))!.mints[asset]),
-        asset,
-        available: String(w.balances[asset]),
-      })),
-    ),
+    // Claim credit of every listed collateral (quote and each issuer leg).
+    claims: [...s.wallets.values()].flatMap((w) => {
+      const market = s.markets.get(String(w.market))!;
+      return Array.from({ length: market.bases + 1 }, (_, c) =>
+        [0, 1].map((branch) => claimAsset(c, branch)),
+      )
+        .flat()
+        .map((asset) => ({
+          market: String(w.market),
+          owner: String(w.owner),
+          mint: String(market.mints[asset]),
+          asset,
+          available: String(w.balances[asset]),
+        }));
+    }),
     accounts: {
       version: SNAPSHOT_VERSION,
       healthy: true,
       rawAccounts: s.rawAccounts,
       retiredOrders,
-      markets: [...s.markets].map(([id, m]) => marketView(id, m, s.createdAt?.get(id))),
+      markets: [...s.markets].map(([id, m]) =>
+        marketView(id, m, s.createdAt?.get(id), s.legs?.get(id)),
+      ),
       orders: [...s.orders].map(([id, o]) => indexedOrder(id, o, s.slot)),
     },
   });

@@ -84,7 +84,7 @@ fn process_orders<'info>(
         count > 0
             && count <= MAX_MAKERS
             && ctx.remaining_accounts.len() >= count
-            && ctx.remaining_accounts.len() <= count + 2,
+            && ctx.remaining_accounts.len() <= count + COLLATERALS,
         ProtocolError::InvalidTerms
     );
     let (orders, credits) = ctx.remaining_accounts.split_at(count);
@@ -99,10 +99,7 @@ fn process_orders<'info>(
         frame.hydrate(&mut ctx.accounts.market, &mut ctx.accounts.wallet)?;
         frames.push(frame);
     }
-    let before = [
-        ctx.accounts.market.liability(0)?,
-        ctx.accounts.market.liability(1)?,
-    ];
+    let before = ctx.accounts.market.liabilities()?;
     let market_key = ctx.accounts.market.key();
     let owner_key = ctx.accounts.owner.key();
     let closed_market = permanently_closed(&ctx.accounts.market, Clock::get()?.unix_timestamp);
@@ -217,11 +214,7 @@ pub struct CompactMarket<'info> {
 /// only rent released by shrinking; unsolicited lamport donations stay put.
 pub fn compact_market(ctx: Context<CompactMarket>) -> Result<()> {
     let market = &ctx.accounts.market;
-    let resolved = [rules::REDEEMABLE, rules::ARCHIVED].contains(&market.state);
-    let size = Market::allocation_size(
-        market.terms.metadata_uri.len(),
-        resolved.then_some(market.evidence_uri.len()),
-    );
+    let size = Market::allocation_size(market.terms.metadata_uri.len(), market.evidence_uri.len());
     let info = market.to_account_info();
     require!(size <= info.data_len(), ProtocolError::InvalidAccount);
     let rent = Rent::get()?;

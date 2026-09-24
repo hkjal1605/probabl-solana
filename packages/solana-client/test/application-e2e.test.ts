@@ -8,15 +8,22 @@ import { snapshot } from "../../../services/solana-indexer/src/projection.ts";
 import { reconcileVaults } from "../../../services/solana-indexer/src/reconcile.ts";
 import { createSolanaDatabase } from "../../db/src/solana/connection";
 import {
+  allLegs,
   assertSignInChallenge,
+  baseRaw,
   big,
+  claimAsset,
+  coder,
   DELEGATE_TRADE,
   digest,
   type Envelope,
   envelope,
   hex,
   key,
+  liveLegs,
+  type OrderAccount,
   type OrderWire,
+  orderCollateral,
   orderId,
   orderSalt,
   SolanaClient,
@@ -80,7 +87,8 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
     const owner = bob.publicKey.toBase58(),
       marketId = deployment.markets[0],
       market = key(marketId),
-      before = await client.wallet(market, bob.publicKey);
+      before = await client.wallet(market, bob.publicKey),
+      listed = await client.market(market);
     const order: OrderWire = {
       maker: owner,
       recipient: owner,
@@ -95,6 +103,8 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
       side: 0,
       fundingKind: 0,
       tif: 1,
+      // Accept every listed issuer leg of the NVDA book.
+      bases: allLegs(listed.bases),
     };
     const prepared = await post("/v1/orders/prepare", { order }, token);
     expect(prepared.orderHash).toBe(orderId(order));
@@ -123,33 +133,61 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
     const reviewed = envelope([client.placement(order, prepared.plan)]),
       response = await post("/v1/orders/transaction", { order, plan: prepared.plan }, token);
     verifyEnvelope(reviewed, response);
+    const legs = await liveLegs(client.connection, listed, client.config, client.program);
+    // Each fill delivers the ask's own issuer claim, converted from share units
+    // to raw issuer units at that leg's live multiplier (rounded down).
+    const expected = new Map<number, bigint>();
+    for (const [i, maker] of prepared.plan.makers.entries()) {
+      const c = orderCollateral(maker),
+        leg = legs[c]!;
+      expect(leg.tradable).toBe(true);
+      expected.set(
+        c,
+        (expected.get(c) ?? 0n) +
+          baseRaw(BigInt(prepared.plan.quantities[i]), leg.scale, leg.multiplier, false),
+      );
+    }
+    expect(expected.size).toBeGreaterThan(0);
     const signature = await send(reviewed);
     expect(big((await client.order(key(orderId(order)))).filled)).toBe(1_000_000n);
-    expect(
-      big((await client.wallet(market, bob.publicKey))!.balances[2]!) - big(before!.balances[2]!),
-    ).toBe(1_000_000n);
-    const until = Date.now() + 45_000;
+    const filledWallet = (await client.wallet(market, bob.publicKey))!;
+    for (const [c, raw] of expected)
+      expect(
+        big(filledWallet.balances[claimAsset(c, 0)]!) - big(before?.balances[claimAsset(c, 0)] ?? 0),
+      ).toBe(raw);
+    const [claimLeg, claimRaw] = [...expected][0]!,
+      claim = claimAsset(claimLeg, 0),
+      half = claimRaw / 2n;
+    // The streamed index commits a slot when the cluster confirms it, the same
+    // moment RPC confirmation returns: the fill is visible without extra delay.
+    const confirmedAt = Date.now(),
+      until = confirmedAt + 45_000;
     let trades: any[] = [];
+    let visibleAfter = Number.POSITIVE_INFINITY;
     while (Date.now() < until) {
       const r = await fetch(indexer + "/trades?marketId=" + marketId);
       if (r.ok) {
         trades = (await r.json()).trades;
-        if (trades.some((t) => t.transactionHash === signature)) break;
+        if (trades.some((t) => t.transactionHash === signature)) {
+          visibleAfter = Date.now() - confirmedAt;
+          break;
+        }
       }
-      await Bun.sleep(500);
+      await Bun.sleep(20);
     }
+    expect(visibleAfter).toBeLessThan(1_000);
     expect(trades.filter((t) => t.transactionHash === signature)).toHaveLength(1);
     expect(trades.find((t) => t.transactionHash === signature).fillQuantity).toBe("1000000");
     const m = await client.market(market),
-      withdraw = envelope(client.withdraw(market, bob.publicKey, m.mints[2]!, 2, 500_000n));
+      withdraw = envelope(client.withdraw(market, bob.publicKey, m.mints[claim]!, claim, half));
     const withdrawal = await post(
       "/v1/payouts/withdraw/prepare",
       {
         scope: "market",
         marketId,
-        asset: m.mints[2]!.toBase58(),
-        tokenId: "2",
-        amount: "500000",
+        asset: m.mints[claim]!.toBase58(),
+        tokenId: String(claim),
+        amount: String(half),
         recipient: owner,
       },
       token,
@@ -157,16 +195,16 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
     verifyEnvelope(withdraw, withdrawal);
     await send(withdraw);
     const claimRedeposit = envelope([
-      client.deposit(market, bob.publicKey, m.mints[2]!, 2, 500_000n),
+      client.deposit(market, bob.publicKey, m.mints[claim]!, claim, half),
     ]);
     const claimDepositQuote = await post(
       "/v1/vault/deposit/prepare",
       {
         scope: "market",
         marketId,
-        asset: String(m.mints[2]),
-        tokenId: "2",
-        amount: "500000",
+        asset: String(m.mints[claim]),
+        tokenId: String(claim),
+        amount: String(half),
       },
       token,
     );
@@ -176,14 +214,14 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
       verifyEnvelope(
         envelope([
           client.initializeWallet(market, bob.publicKey),
-          client.deposit(market, bob.publicKey, m.mints[2]!, 2, 500_000n),
+          client.deposit(market, bob.publicKey, m.mints[claim]!, claim, half),
         ]),
         claimDepositQuote,
       );
     }
     await send(claimDepositQuote.transaction);
-    expect(big((await client.wallet(market, bob.publicKey))!.balances[2]!)).toBe(
-      big(before!.balances[2]!) + 1_000_000n,
+    expect(big((await client.wallet(market, bob.publicKey))!.balances[claim]!)).toBe(
+      big(before?.balances[claim] ?? 0) + claimRaw,
     );
     // Price improvement leaves whole quote credits. Exercise the same HTTP
     // withdrawal path on underlying Token-2022 as well as classic claim tokens.
@@ -192,14 +230,14 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
     );
     expect(quoteCredit).toBeGreaterThanOrEqual(1000n);
     const wholeWithdrawal = envelope(
-      await client.withdrawCredit(market, bob.publicKey, m.mints[1]!, 1, 1000n),
+      await client.withdrawCredit(market, bob.publicKey, m.mints[0]!, 0, 1000n),
     );
     const wholeResponse = await post(
       "/v1/payouts/withdraw/prepare",
       {
         scope: "global",
-        asset: m.mints[1]!.toBase58(),
-        tokenId: "1",
+        asset: m.mints[0]!.toBase58(),
+        tokenId: "0",
         amount: "1000",
         recipient: owner,
       },
@@ -211,41 +249,62 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
       big((await client.assetCredit(key(deployment.quoteMint), bob.publicKey))!.available),
     ).toBe(quoteCredit - 1000n);
     const balances = await fetch(
-      indexer + "/balances/" + owner + "?token=" + m.mints[1]!.toBase58(),
+      indexer + "/balances/" + owner + "?token=" + m.mints[0]!.toBase58(),
     );
     expect(balances.ok).toBe(true);
     const wholeBalance = await balances.json();
-    expect(wholeBalance.decimals).toBe(m.decimals[1]);
+    expect(wholeBalance.decimals).toBe(m.decimals[0]);
     expect(BigInt(wholeBalance.canonicalBalance)).toBeGreaterThan(0n);
     expect(wholeBalance.tokenProgram).toBe(
-      (await client.connection.getAccountInfo(m.mints[1]!))!.owner.toBase58(),
+      (await client.connection.getAccountInfo(m.mints[0]!))!.owner.toBase58(),
     );
     const deposit = await post(
       "/v1/vault/deposit/prepare",
       {
         scope: "global",
-        asset: String(m.mints[1]),
+        asset: String(m.mints[0]),
         amount: "1000000",
       },
       token,
     );
     await send(deposit.transaction);
-    const deposited = big((await client.assetCredit(m.mints[1]!, bob.publicKey))!.available);
+    const deposited = big((await client.assetCredit(m.mints[0]!, bob.publicKey))!.available);
     expect(deposited).toBe(quoteCredit - 1000n + BigInt(deposit.minimumReceived));
+    // Bootstrap liquidity may include resting quote-funded bids of this wallet;
+    // their reservations are part of the global reserved balance.
+    const orderDiscriminator = coder.accounts.accountDiscriminator("Order");
+    let baseReserved = 0n;
+    for (const { account } of await client.connection.getProgramAccounts(client.program, {
+      commitment: "confirmed",
+      filters: [{ memcmp: { offset: 40, bytes: owner } }],
+    })) {
+      if (!account.data.subarray(0, 8).equals(orderDiscriminator)) continue;
+      const resting = coder.accounts.decode("Order", account.data) as OrderAccount;
+      if (resting.status === 1 && resting.terms.side === 0 && resting.terms.funding === 0)
+        baseReserved += big(resting.reserved);
+    }
+    let lastBalance: unknown = null;
     const waitBalance = async (available: bigint, reserved: bigint) => {
       const deadline = Date.now() + 45000;
       while (Date.now() < deadline) {
-        const response = await fetch(indexer + "/balances/" + owner + "?token=" + m.mints[1]);
+        const response = await fetch(indexer + "/balances/" + owner + "?token=" + m.mints[0]);
         if (response.ok) {
           const value = await response.json();
-          if (value.vaultAvailable === String(available) && value.reserved === String(reserved)) {
+          lastBalance = value;
+          if (
+            value.vaultAvailable === String(available) &&
+            value.reserved === String(reserved + baseReserved)
+          ) {
             expect(value.creditBalances).toEqual({}); // No per-market copies of global cash.
             return value;
           }
         }
         await Bun.sleep(500);
       }
-      throw new Error("Global available/reserved balances were not indexed");
+      throw new Error(
+        "Global available/reserved balances were not indexed: " +
+          JSON.stringify({ available: String(available), reserved: String(reserved + baseReserved), lastBalance }),
+      );
     };
     await waitBalance(deposited, 0n);
     const permissionUrl = api + "/v1/trading/permission?owner=" + owner;
@@ -322,6 +381,7 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
       const next = {
         ...order,
         marketId: id,
+        bases: allLegs((await client.market(key(id))).bases),
         salt: hex(digest(crypto.randomUUID())),
         quantity: "100000",
         limitPriceRawX18: "1000000000000000000",
@@ -339,6 +399,7 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
     const wrongClaim = {
       ...order,
       marketId: deployment.markets[1],
+      bases: allLegs((await client.market(key(deployment.markets[1]))).bases),
       salt: hex(digest(crypto.randomUUID())),
       branch: 1,
       fundingKind: 1,
@@ -356,8 +417,9 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
         {
           scope: "market",
           marketId: deployment.markets[1],
-          asset: String(m.mints[5]),
-          tokenId: "5",
+          // Market 0's USDC-NO claim is not a claim of market 1.
+          asset: String(m.mints[claimAsset(0, 1)]),
+          tokenId: String(claimAsset(0, 1)),
           amount: "1",
         },
         token,
@@ -388,4 +450,85 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
     }
   },
   180_000,
+);
+
+test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
+  "the indexer's lookup keeper appends every market's accounts and resting makers' PDAs; the API serves them",
+  async () => {
+    const { marketLookupAddresses, participantLookupAddresses, key: toKey } = await import("../src/index.ts");
+    const { AddressLookupTableAccount } = await import("@solana/web3.js");
+    const deployment = await Bun.file(
+      resolve(process.env.SOLANA_FIXTURE_DIR ?? ".local", "deployment.json"),
+    ).json();
+    const client = new SolanaClient(deployment);
+    const api = process.env.API_URL ?? "http://127.0.0.1:3000",
+      indexer = process.env.INDEXER_URL ?? "http://127.0.0.1:42069";
+    const orders = (await (await fetch(indexer + "/orders")).json()) as {
+      orders?: { maker: string; marketId: string; status: string }[];
+    };
+    const resting = (orders.orders ?? []).filter((o) => o.status === "open");
+    expect(resting.length).toBeGreaterThan(0);
+    const expected = new Set<string>();
+    for (const marketId of new Set(resting.map((o) => o.marketId))) {
+      const market = await client.market(toKey(marketId));
+      for (const a of marketLookupAddresses(client.config, toKey(marketId), market, client.program)) expected.add(String(a));
+      for (const maker of new Set(resting.filter((o) => o.marketId === marketId).map((o) => o.maker)))
+        for (const a of participantLookupAddresses(client.config, toKey(marketId), market, toKey(maker), [], client.program))
+          expected.add(String(a));
+    }
+    // The keeper runs every 5s; entries are usable once finalized.
+    let kept = new Set<string>(),
+      tables: string[] = [];
+    for (let attempt = 0; attempt < 90 && [...expected].some((a) => !kept.has(a)); attempt++) {
+      await Bun.sleep(1000);
+      tables = ((await (await fetch(indexer + "/lookup-tables")).json()) as { tables: string[] }).tables;
+      const infos = await client.connection.getMultipleAccountsInfo(tables.map(toKey), "finalized");
+      kept = new Set(
+        infos.flatMap((info) => (info ? AddressLookupTableAccount.deserialize(info.data).addresses.map(String) : [])),
+      );
+    }
+    expect([...expected].filter((a) => !kept.has(a))).toEqual([]);
+    // The API compiles with the same tables within its refresh interval.
+    let served: string[] = [];
+    for (let attempt = 0; attempt < 20 && served.length < tables.length; attempt++) {
+      served = ((await (await fetch(api + "/v1/lookup-tables")).json()) as { tables: string[] }).tables;
+      if (served.length < tables.length) await Bun.sleep(1000);
+    }
+    expect(new Set(served)).toEqual(new Set(tables));
+  },
+  180_000,
+);
+
+test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
+  "the streamed index matches a direct RPC read of the same confirmed slot",
+  async () => {
+    const deployment = await Bun.file(
+      resolve(process.env.SOLANA_FIXTURE_DIR ?? ".local", "deployment.json"),
+    ).json();
+    const client = new SolanaClient(deployment);
+    const indexer = process.env.INDEXER_URL ?? "http://127.0.0.1:42069";
+    const chain = await snapshot(client, "confirmed");
+    // Wait until the stream has committed at least the RPC read's slot.
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const health = (await (await fetch(indexer + "/health")).json()) as { head: { confirmedBlock: string } };
+      if (Number(health.head.confirmedBlock) >= chain.slot) break;
+      await Bun.sleep(50);
+    }
+    const view = (await (await fetch(indexer + "/orders")).json()) as {
+      orders: { id: string; status: string; remaining: string; filled: string }[];
+    };
+    const streamed = new Map(
+      view.orders.filter((o) => o.status === "open").map((o) => [o.id, [o.remaining, o.filled]]),
+    );
+    const direct = new Map(
+      [...chain.orders]
+        .filter(([, o]) => o.status === 1)
+        .map(([id, o]) => [id, [o.remaining.toString(), o.filled.toString()]]),
+    );
+    expect(streamed.size).toBeGreaterThan(0);
+    expect(streamed).toEqual(direct);
+    const markets = (await (await fetch(indexer + "/markets")).json()) as { markets: { id: string }[] };
+    expect(new Set(markets.markets.map((m) => m.id))).toEqual(new Set(chain.markets.keys()));
+  },
+  60_000,
 );

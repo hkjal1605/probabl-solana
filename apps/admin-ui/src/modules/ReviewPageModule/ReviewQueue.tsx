@@ -156,7 +156,12 @@ export function PacketCard({
           </p>
           {packet.envelope.packet.kind === "market-creation" && (
             <p className="mt-2 break-all font-mono text-xs">
-              Base: {packet.envelope.packet.config.baseToken}
+              {packet.envelope.packet.config.baseTokens.map((token, index) => (
+                <span key={token} className="block">
+                  Issuer leg {index + 1}: {token}
+                </span>
+              ))}
+              Share decimals: {packet.envelope.packet.config.shareDecimals}
               <br />
               Quote: {packet.envelope.packet.config.quoteToken}
             </p>

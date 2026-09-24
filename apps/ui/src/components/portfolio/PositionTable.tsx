@@ -1,6 +1,6 @@
 "use client";
 
-import { formatTokenAmount } from "@conditional-stocks/domain";
+import { formatShareAmount, formatTokenAmount } from "@conditional-stocks/domain";
 import { useRouter } from "next/navigation";
 import { useUiStore } from "@/components/providers/UiStateProvider";
 import { useWallet } from "@/components/providers/WalletProvider";
@@ -17,9 +17,35 @@ import {
 } from "@/components/ui/table";
 import { useOrders, usePositions } from "@/hooks/useProtocolData";
 import { formatNumber, tokenAmount } from "@/lib/format/display";
+import { legStatus, sharesForRaw } from "@/lib/markets/legs";
 import { midpoint } from "@/lib/markets/presentation";
-import { conditionalPositionRows } from "@/lib/portfolio/positions";
+import { type ConditionalPositionRow, conditionalPositionRows } from "@/lib/portfolio/positions";
 import type { MarketView } from "@/types/api";
+
+/**
+ * Close intent for an issuer claim row: sell that issuer's claims. The ticket
+ * quantity is in share units; the reservation (live multiplier, rounded up) must
+ * fit the held raw claims.
+ */
+export function closePrefill(row: ConditionalPositionRow) {
+  const shares =
+    row.leg === null
+      ? 0n
+      : sharesForRaw(row.available, legStatus(row.leg), BigInt(row.market.baseStep));
+  return {
+    marketId: row.market.id,
+    branch: row.branch === 0 ? ("YES" as const) : ("NO" as const),
+    quantity: formatShareAmount(shares, row.market),
+    ...(row.leg ? { collateral: row.leg.collateral } : {}),
+    nonce: Date.now(),
+  };
+}
+
+/** Book midpoint per share, converted to one whole claim token at the leg's live multiplier. */
+const tokenMark = (row: ConditionalPositionRow) => {
+  const mid = midpoint(row.branch === 0 ? row.market.yes : row.market.no);
+  return mid === null ? null : mid * row.multiplier;
+};
 
 export function PositionTable({
   markets,
@@ -63,7 +89,7 @@ export function PositionTable({
       <ul className="flex list-none flex-col gap-2" aria-label="Open positions">
         {rows.map((row) => {
           const { market, branch, kind, symbol, decimals, available, reserved, total } = row;
-          const mark = kind === "stock" ? midpoint(branch === 0 ? market.yes : market.no) : null;
+          const mark = kind === "stock" ? tokenMark(row) : null;
           return (
             <li
               className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 rounded-xl bg-card px-4 py-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(7rem,.6fr)_minmax(6rem,.45fr)_auto]"
@@ -105,12 +131,7 @@ export function PositionTable({
                     !orders.isDataFresh
                   }
                   onClick={() => {
-                    setPrefill({
-                      marketId: market.id,
-                      branch: branch === 0 ? "YES" : "NO",
-                      quantity: formatTokenAmount(available, decimals),
-                      nonce: Date.now(),
-                    });
+                    setPrefill(closePrefill(row));
                     router.push(`/markets/${market.id}`);
                   }}
                 >
@@ -161,7 +182,7 @@ export function PositionTable({
               </TableCell>
               <TableCell className="tabular-nums text-foreground">
                 {kind === "stock" ? (
-                  formatNumber(midpoint(branch === 0 ? market.yes : market.no))
+                  formatNumber(tokenMark(row))
                 ) : (
                   <InfoTooltip content="No direct quote-claim mark is available from the stock orderbook.">
                     <span>—</span>
@@ -190,12 +211,7 @@ export function PositionTable({
                       !orders.isDataFresh
                     }
                     onClick={() => {
-                      setPrefill({
-                        marketId: market.id,
-                        branch: branch === 0 ? "YES" : "NO",
-                        quantity: formatTokenAmount(available, decimals),
-                        nonce: Date.now(),
-                      });
+                      setPrefill(closePrefill(row));
                       if (inline)
                         document
                           .getElementById("trade-ticket")

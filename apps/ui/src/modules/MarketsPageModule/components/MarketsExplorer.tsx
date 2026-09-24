@@ -34,6 +34,7 @@ import {
   impactPercent,
   MARKET_CATEGORIES,
   type MarketCategory,
+  marketAssetKey,
   marketCategory,
   marketCategoryFromPathname,
   marketCategoryPath,
@@ -90,8 +91,9 @@ export function MarketsExplorer({
     ),
     filters.sort,
   );
-  // Mint identity, not a potentially shared display symbol, determines matrix columns.
-  const tokens = [...new Map(markets.map((m) => [m.baseToken, m])).values()].sort((a, b) =>
+  // Asset identity (all issuer legs of one stock), not a single mint or a
+  // potentially shared display symbol, determines matrix columns.
+  const tokens = [...new Map(markets.map((m) => [marketAssetKey(m), m])).values()].sort((a, b) =>
     a.ticker.localeCompare(b.ticker),
   );
   const showSkeleton = query.isPending && markets.length === 0;
@@ -197,10 +199,10 @@ export function MarketsExplorer({
                   <TableRow className="border-b-0 hover:bg-transparent [&_th]:py-3">
                     <TableHead>Event</TableHead>
                     {tokens.map((token) => (
-                      <TableHead key={token.baseToken} className="text-foreground">
+                      <TableHead key={marketAssetKey(token)} className="text-foreground">
                         <TokenIdentity
                           symbol={token.ticker}
-                          metadata={token.baseTokenMetadata}
+                          metadata={token.assetMetadata}
                           showName={false}
                           iconSize="sm"
                         />
@@ -226,10 +228,12 @@ export function MarketsExplorer({
                           </p>
                         </TableCell>
                         {tokens.map((token) => {
-                          const asset = assets.find((m) => m.baseToken === token.baseToken);
+                          const asset = assets.find(
+                            (m) => marketAssetKey(m) === marketAssetKey(token),
+                          );
                           const impact = asset ? impactPercent(asset) : null;
                           return (
-                            <TableCell key={token.baseToken}>
+                            <TableCell key={marketAssetKey(token)}>
                               {asset ? (
                                 <Link
                                   href={`/markets/${asset.id}`}

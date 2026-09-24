@@ -55,7 +55,7 @@ async fn send_instruction(
 async fn lifecycle_cutoff_commitment_and_separated_roles() {
     use conditional_stocks::{
         governance::resolution_hash,
-        state::{Market, Terms},
+        state::{BaseLeg, Market, Terms, ASSETS, COLLATERALS},
     };
     let admin = Keypair::new();
     let operator = Keypair::new();
@@ -115,6 +115,7 @@ async fn lifecycle_cutoff_commitment_and_separated_roles() {
         metadata_uri: "ipfs://mock".into(),
         trading_open: 100,
         trading_cutoff: 200,
+        share_decimals: 6,
         tick: protocol_core::WAD,
         step: 1,
         min_notional: 1,
@@ -123,21 +124,38 @@ async fn lifecycle_cutoff_commitment_and_separated_roles() {
         max_wallet: 200,
         max_market: 400,
     };
+    let metadata_len = terms.metadata_uri.len();
     let mut market_data = Vec::new();
     Market {
         config,
         id,
         terms,
-        mints: [Pubkey::default(); 6],
-        decimals: [6, 6],
+        // One listed, active base leg; quote and leg claims fully initialized.
+        bases: 1,
+        legs: [
+            BaseLeg {
+                scale: 1,
+                multiplier: protocol_core::UNIT_MULTIPLIER,
+                active: true,
+            },
+            BaseLeg::default(),
+            BaseLeg::default(),
+        ],
+        mints: vec![Pubkey::default(); ASSETS],
+        decimals: [6; COLLATERALS],
+        pool_bumps: [0; COLLATERALS],
         vaults_initialized: 63,
         state: protocol_core::SCHEDULED,
         sequence: [0; 2],
+        recent: vec![
+            conditional_stocks::state::Placement::default();
+            conditional_stocks::state::RECENT_SLOTS
+        ],
         open_notional: 0,
-        credits: [0; 6],
-        escrow: [0; 6],
-        backing: [0; 2],
-        fees: [0; 4],
+        credits: vec![0; ASSETS],
+        escrow: vec![0; ASSETS],
+        backing: [0; COLLATERALS],
+        fees: vec![0; ASSETS],
         resolution_commitment: [0; 32],
         payouts: [0; 2],
         evidence: [0; 32],
@@ -147,8 +165,8 @@ async fn lifecycle_cutoff_commitment_and_separated_roles() {
     }
     .try_serialize(&mut market_data)
     .unwrap();
-    // Account capacity must match init allocation when evidence URI grows.
-    market_data.resize(8 + <Market as anchor_lang::Space>::INIT_SPACE, 0);
+    // Exactly the creation allocation: no evidence URI bytes until resolution.
+    market_data.resize(Market::allocation_size(metadata_len, 0), 0);
     program.add_account(
         market,
         Account {
@@ -254,10 +272,11 @@ async fn lifecycle_cutoff_commitment_and_separated_roles() {
     .await;
     let resolve = |actor: Pubkey, yes: u8, no: u8, evidence: [u8; 32], uri: String| Instruction {
         program_id: ID,
-        accounts: accounts::Lifecycle {
+        accounts: accounts::Resolve {
             actor,
             config,
             market,
+            system_program: anchor_lang::system_program::ID,
         }
         .to_account_metas(None),
         data: instruction::Resolve {
@@ -303,6 +322,7 @@ async fn lifecycle_cutoff_commitment_and_separated_roles() {
             pending
         );
     }
+    assert_eq!(pending.len(), Market::allocation_size(metadata_len, 0));
     send_instruction(
         &mut context,
         &resolver,
@@ -310,6 +330,21 @@ async fn lifecycle_cutoff_commitment_and_separated_roles() {
         true,
     )
     .await;
+    // Resolution grows the market by exactly its evidence URI, paid by the resolver.
+    let resolved = context
+        .banks_client
+        .get_account(market)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        resolved.data.len(),
+        Market::allocation_size(metadata_len, uri.len())
+    );
+    let rent = context.banks_client.get_rent().await.unwrap();
+    assert!(resolved.lamports >= rent.minimum_balance(resolved.data.len()));
+    let stored = Market::try_deserialize(&mut resolved.data.as_slice()).unwrap();
+    assert_eq!(stored.evidence_uri, uri);
     send_instruction(
         &mut context,
         &resolver,

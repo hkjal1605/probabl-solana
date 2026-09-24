@@ -1,13 +1,14 @@
 import {
   formatPriceRawX18,
-  formatTokenAmount,
+  formatShareAmount,
   MAX_ORDER_UINT128,
   parsePriceRawX18,
   parseTokenAmount,
 } from "@conditional-stocks/domain";
+import { bestLevelFor } from "@/lib/markets/legs";
 import type { MarketView } from "@/types/api";
 
-/** Round down to an onchain base step; never exceed the entered quote budget. */
+/** Round down to an onchain share step; never exceed the entered quote budget. */
 export function quantityForSpend(spend: string, price: string, market: MarketView): string {
   const budget = parseTokenAmount(spend, market.quoteTokenDecimals);
   const rawPrice = parsePriceRawX18(price, market);
@@ -17,7 +18,21 @@ export function quantityForSpend(spend: string, price: string, market: MarketVie
   const raw = ((budget * 10n ** 18n) / rawPrice / step) * step;
   if (raw <= 0n || raw >= 1n << 64n)
     throw new Error("Budget is outside the supported quantity range");
-  return formatTokenAmount(raw, market.baseTokenDecimals);
+  return formatShareAmount(raw, market);
+}
+
+/**
+ * Best executable price for the selected issuer set: a buy accepting `mask`
+ * takes asks of those issuers; a sell of one issuer hits bids that accept it.
+ * `mask = null` considers the whole book.
+ */
+export function bestPriceFor(
+  market: MarketView,
+  branch: "YES" | "NO",
+  side: "buy" | "sell",
+  mask: number | null = null,
+): string | null {
+  return bestLevelFor(branch === "YES" ? market.yes : market.no, side, mask)?.priceExact ?? null;
 }
 
 /** A market order is IOC with a signed, bounded worst price, never an unbounded order. */
@@ -26,11 +41,17 @@ export function marketPriceBound(
   branch: "YES" | "NO",
   side: "buy" | "sell",
   slippageBps = 100,
+  mask: number | null = null,
 ): string {
   if (market.bookQuality && market.bookQuality !== "available")
     throw new Error("Wait for a fresh order book before setting a market-order bound");
   const book = branch === "YES" ? market.yes : market.no;
-  const price = side === "buy" ? book.bestAskExact : book.bestBidExact;
+  const price =
+    mask === null
+      ? side === "buy"
+        ? book.bestAskExact
+        : book.bestBidExact
+      : bestPriceFor(market, branch, side, mask);
   if (!price || !Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10000)
     throw new Error("No executable price bound");
   const raw = parsePriceRawX18(price, market);

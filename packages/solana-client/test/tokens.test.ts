@@ -29,11 +29,18 @@ const tlv = (type: number, length = 0) => {
   return data;
 };
 test("mint policy explicitly classifies every extension and fails closed on unknown TLV", () => {
+  // Generic extensions always; issuer controls only when admitted (all by default).
+  const issuer = new Map([[12, 1], [26, 2], [6, 4], [25, 8], [14, 16], [4, 32]]);
   for (let id = 0; id < 100; id++) {
-    if ([1, 18, 19, 20, 21, 22, 23].includes(id))
+    if ([1, 18, 19, 20, 21, 22, 23].includes(id)) {
       expect(mintExtensions(tlv(id))).toEqual([id]);
-    else if (id === 0) expect(mintExtensions(tlv(id))).toEqual([]);
-    else expect(() => mintExtensions(tlv(id))).toThrow("Unsupported");
+      expect(mintExtensions(tlv(id), 0)).toEqual([id]);
+    } else if (id === 0) expect(mintExtensions(tlv(id))).toEqual([]);
+    else if (issuer.has(id)) {
+      expect(mintExtensions(tlv(id))).toEqual([id]);
+      expect(mintExtensions(tlv(id), issuer.get(id)!)).toEqual([id]);
+      expect(() => mintExtensions(tlv(id), 63 & ~issuer.get(id)!)).toThrow("Unsupported");
+    } else expect(() => mintExtensions(tlv(id))).toThrow("Unsupported");
   }
   expect(
     mintExtensions(Buffer.concat([tlv(18, 64), tlv(22, 64), Buffer.alloc(7)])),
@@ -209,7 +216,7 @@ test("Token-2022 builders bind program, program-specific ATA and signed minimum"
     [0, 100n, 0n],
     [0, 100n, 101n],
     [-1, 100n, 97n],
-    [6, 100n, 97n],
+    [12, 100n, 97n],
     [0.5, 100n, 97n],
   ] as const) {
     expect(() =>

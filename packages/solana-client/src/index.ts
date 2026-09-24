@@ -5,3 +5,5 @@ export * from "./tokens.ts";
 export * from "./claims.ts";
 export * from "./resources.ts";
 export * from "./delegation.ts";
+export * from "./legs.ts";
+export * from "./lookup.ts";

@@ -17,6 +17,20 @@ export function solanaQueries(db: Pick<Pool | PoolClient, "query">) {
         ).rows[0]!.count,
       );
     },
+    /** Keeper lookup tables, oldest first (clients reference only what they use). */
+    async lookupTables(domain: string): Promise<string[]> {
+      const result = await db.query(
+        "SELECT address FROM solana_lookup_tables WHERE domain=$1 ORDER BY created_at, address",
+        [domain],
+      );
+      return result.rows.map((row: { address: string }) => row.address);
+    },
+    async putLookupTable(domain: string, address: string, authority: string, slot: number) {
+      await db.query(
+        "INSERT INTO solana_lookup_tables(domain,address,authority,created_slot) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING",
+        [domain, address, authority, slot],
+      );
+    },
     async historyCursor(domain: string) {
       return (
         await db.query<HistoryCursor>("SELECT * FROM solana_history_cursors WHERE domain=$1", [
@@ -71,6 +85,18 @@ export function solanaQueries(db: Pick<Pool | PoolClient, "query">) {
           [domain, market, slot],
         )
       ).rows[0];
+    },
+    /** Base-leg listing (Change kind 15, amount = scale) and active toggles
+     * (kind 16, amount 0/1), oldest first. `asset` is the leg's collateral. */
+    async legEvents(domain: string, market: string, slot: number) {
+      return (
+        await db.query<StoredEvent>(
+          `SELECT signature,event_index,slot,block_time,name,market,data FROM solana_events
+        WHERE domain=$1 AND market=$2 AND name='Change' AND data->>'kind' IN ('15','16') AND slot <= $3
+        ORDER BY slot,signature,event_index LIMIT 1000`,
+          [domain, market, slot],
+        )
+      ).rows;
     },
     async trades(domain: string, markets: string[], slot: number, limit: number) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 1000)

@@ -23,6 +23,7 @@ import {
   createInitializeTransferFeeConfigInstruction,
   createInitializeMintInstruction,
   createInitializePermanentDelegateInstruction,
+  createInitializeMintCloseAuthorityInstruction,
   freezeAccount,
   thawAccount,
   createTransferInstruction,
@@ -46,10 +47,18 @@ import {
   orderId,
   orderSalt,
   resolutionHash,
+  legBit,
+  allLegs,
+  underlyingAsset,
+  claimAsset,
+  COLLATERALS,
+  baseRaw,
   type OrderWire,
   type AssetPoolAccount,
+  type MarketAccount,
 } from "../src/index";
 import { initializeMarketVaults } from "../src/admin";
+import { mockIssuerInstructions } from "../../../scripts/solana/mock-issuers.ts";
 
 const rpc = process.env.SOLANA_POOL_TEST_RPC;
 describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => {
@@ -58,8 +67,18 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
     bob = Keypair.generate(),
     carol = Keypair.generate(),
     attacker = Keypair.generate();
-  let client: SolanaClient, base: PublicKey, quote: PublicKey;
+  let client: SolanaClient, base: PublicKey, quote: PublicKey, issuer: PublicKey;
+  // Market A lists [base]; market B lists [issuer, base]: one base pool backs
+  // leg 1 of A and leg 2 of B.
   const markets: PublicKey[] = [];
+  const LEGS = [1, 2];
+  /** Collateral of `mint` in market `m` (0 = quote). */
+  const collateral = (market: MarketAccount, mint: PublicKey) => {
+    for (let c = 0; c < COLLATERALS; c++)
+      if (market.mints[underlyingAsset(c)]!.equals(mint)) return c;
+    return -1;
+  };
+  const programOf = (mint: PublicKey) => (mint.equals(base) ? TOKEN_PROGRAM_ID : T22);
   let nonce = 0;
   const connection = () => client.connection;
   async function send(
@@ -108,25 +127,35 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
         m,
         walletAddress(m, alice.publicKey),
         walletAddress(m, bob.publicKey),
-        ...[2, 3, 4, 5].flatMap((a) => [claimAddress(m, a), vaultAddress(m, a)]),
+        ...[1, 2, 4, 5, 7, 8].flatMap((a) => [claimAddress(m, a), vaultAddress(m, a)]),
       ]),
     ];
     return (await connection().getMultipleAccountsInfo(keys)).map(
       (a) => a?.data.toString("base64") ?? null,
     );
   }
+  /** Per mint: pool liability == Σ available credit + Σ over markets (escrow +
+   * backing) of whichever collateral that mint is in each market. */
   async function invariant() {
-    for (const [asset, mint] of [base, quote].entries()) {
+    for (const mint of [base, quote, issuer]) {
       let liabilities = 0n;
       for (const owner of [alice, bob, carol])
         liabilities += await available(mint, owner.publicKey);
       for (const m of markets) {
         const market = await client.market(m);
-        expect(big(market.credits[asset]!)).toBe(0n);
-        liabilities += big(market.escrow[asset]!) + big(market.backing[asset]!);
-        const yes = await getMint(connection(), market.mints[2 + asset * 2]!);
-        const no = await getMint(connection(), market.mints[3 + asset * 2]!);
-        const backing = big(market.backing[asset]!);
+        for (let c = 0; c < COLLATERALS; c++)
+          expect(big(market.credits[underlyingAsset(c)]!)).toBe(0n);
+        for (const owner of [alice, bob]) {
+          const w = await client.wallet(m, owner.publicKey);
+          for (let c = 0; c < COLLATERALS; c++)
+            expect(big(w!.balances[underlyingAsset(c)]!)).toBe(0n);
+        }
+        const c = collateral(market, mint);
+        if (c < 0) continue;
+        liabilities += big(market.escrow[underlyingAsset(c)]!) + big(market.backing[c]!);
+        const yes = await getMint(connection(), market.mints[claimAsset(c, 0)]!);
+        const no = await getMint(connection(), market.mints[claimAsset(c, 1)]!);
+        const backing = big(market.backing[c]!);
         const required =
           market.state >= 6
             ? (yes.supply * BigInt(market.payouts[0]!) +
@@ -138,16 +167,11 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
               ? yes.supply
               : no.supply;
         expect(backing >= required).toBe(true);
-        for (const owner of [alice, bob])
-          expect((await client.wallet(m, owner.publicKey))!.balances.slice(0, 2).map(big)).toEqual([
-            0n,
-            0n,
-          ]);
       }
       expect(big((await poolState(mint)).liability)).toBe(liabilities);
       expect(
-        (await getAccount(connection(), vault(mint), "confirmed", asset ? T22 : TOKEN_PROGRAM_ID))
-          .amount >= liabilities,
+        (await getAccount(connection(), vault(mint), "confirmed", programOf(mint))).amount >=
+          liabilities,
       ).toBe(true);
     }
   }
@@ -158,6 +182,7 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
     quantity = 10n,
     price = 2n * 10n ** 18n,
     fundingKind = 0,
+    bases?: number,
   ): OrderWire {
     return {
       maker: owner.publicKey.toBase58(),
@@ -173,6 +198,12 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
       tif: 0,
       fundingKind,
       maxFeeBps: 1000,
+      // Sells deliver the shared base leg; bids accept every listed leg.
+      bases:
+        bases ??
+        (side === 1
+          ? legBit(LEGS[markets.indexOf(market)]!)
+          : allLegs(markets.indexOf(market) + 1)),
     };
   }
   async function place(o: OrderWire, payer: Keypair, makers: OrderWire[] = []) {
@@ -196,6 +227,7 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
       nextSequence: big(m.sequence[o.branch]!),
       makerFeeBps: 10,
       takerFeeBps: 20,
+      program: client.program,
     });
     await send([client.placement(o, plan, m)], payer);
   }
@@ -262,6 +294,15 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
         },
       ),
     ]);
+    const xstock = await mockIssuerInstructions({
+      connection: connection(),
+      payer: admin.publicKey,
+      authority: admin.publicKey,
+      profile: "xstocks",
+      ticker: "NVDA",
+    });
+    issuer = xstock.mint.publicKey;
+    await send(xstock.instructions, admin, [xstock.mint]);
     await send([
       client.ix(
         "configure",
@@ -277,10 +318,9 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
         { admin: admin.publicKey, config: client.config },
       ),
     ]);
-    await send([
-      client.initializePool(base, admin.publicKey),
-      client.initializePool(quote, admin.publicKey, T22),
-    ]);
+    // Only the quote pool is created directly; base pools are created (with
+    // exact issuer admission) by the admin listing flow.
+    await send([client.initializePool(quote, admin.publicKey, T22)]);
     for (let i = 0; i < 2; i++) {
       const id = digest(`pool-market-${i}-${admin.publicKey}`),
         m = marketAddress(client.config, id),
@@ -299,8 +339,10 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
               metadata_uri: uri,
               trading_open: bn(0),
               trading_cutoff: bn(Math.floor(Date.now() / 1000) + 3600),
+              share_decimals: 6,
               tick: bn(10n ** 18n),
-              step: bn(1),
+              // One step delivers >= 2 raw units of every leg (add_base rule).
+              step: bn(2),
               min_notional: bn(1),
               max_quantity: bn(1_000_000),
               max_order: bn(10_000_000),
@@ -311,8 +353,9 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
           {
             admin: admin.publicKey,
             config: client.config,
-            base_mint: base,
             quote_mint: quote,
+            quote_pool: pool(quote),
+            quote_vault: vault(quote),
             market: m,
             system_program: SystemProgram.programId,
           },
@@ -322,6 +365,7 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
         client,
         m.toBase58(),
         admin.publicKey.toBase58(),
+        (i === 0 ? [base] : [issuer, base]).map(String),
       ))
         await send(unwrap(tx));
       await send([
@@ -337,7 +381,7 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
     }
     for (const owner of [alice, bob])
       for (const [i, mint] of [base, quote].entries()) {
-        const program = i ? T22 : TOKEN_PROGRAM_ID;
+        const program = programOf(mint);
         const ata = await getOrCreateAssociatedTokenAccount(
           connection(),
           admin,
@@ -366,30 +410,57 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
       }
   }, 120_000);
 
-  test("unsupported Token-2022 authority extensions cannot enter protocol custody", async () => {
-    const mint = Keypair.generate(),
-      space = getMintLen([ExtensionType.PermanentDelegate]);
-    await send(
-      [
-        SystemProgram.createAccount({
-          fromPubkey: admin.publicKey,
-          newAccountPubkey: mint.publicKey,
-          space,
-          lamports: await connection().getMinimumBalanceForRentExemption(space),
-          programId: T22,
-        }),
-        createInitializePermanentDelegateInstruction(mint.publicKey, admin.publicKey, T22),
-        createInitializeMintInstruction(mint.publicKey, 6, admin.publicKey, null, T22),
-      ],
-      admin,
-      [mint],
-    );
+  test("issuer controls enter custody only with exact admission; other authority extensions stay rejected", async () => {
+    async function mint(kind: "delegate" | "close") {
+      const mint = Keypair.generate(),
+        space = getMintLen([
+          kind === "delegate" ? ExtensionType.PermanentDelegate : ExtensionType.MintCloseAuthority,
+        ]);
+      await send(
+        [
+          SystemProgram.createAccount({
+            fromPubkey: admin.publicKey,
+            newAccountPubkey: mint.publicKey,
+            space,
+            lamports: await connection().getMinimumBalanceForRentExemption(space),
+            programId: T22,
+          }),
+          kind === "delegate"
+            ? createInitializePermanentDelegateInstruction(mint.publicKey, admin.publicKey, T22)
+            : createInitializeMintCloseAuthorityInstruction(mint.publicKey, admin.publicKey, T22),
+          createInitializeMintInstruction(mint.publicKey, 6, admin.publicKey, null, T22),
+        ],
+        admin,
+        [mint],
+      );
+      return mint.publicKey;
+    }
+    const delegated = await mint("delegate");
+    // Not admitted, and a grant wider than the mint's controls, both fail closed.
+    for (const admitted of [0, 3, 63])
+      await expect(
+        send([client.initializePool(delegated, admin.publicKey, T22, admitted)]),
+      ).rejects.toThrow();
+    expect(await connection().getAccountInfo(pool(delegated))).toBeNull();
+    expect(await connection().getAccountInfo(vault(delegated))).toBeNull();
+    // Exactly PermanentDelegate (bit 1): an explicit issuer trust decision.
+    await send([client.initializePool(delegated, admin.publicKey, T22, 1)]);
+    expect((await poolState(delegated)).admitted).toBe(1);
+    // Non-issuer-control authority extensions remain rejected at any admission.
+    const closable = await mint("close");
+    for (const admitted of [0, 63])
+      await expect(
+        send([client.initializePool(closable, admin.publicKey, T22, admitted)]),
+      ).rejects.toThrow();
+    expect(await connection().getAccountInfo(pool(closable))).toBeNull();
+    // Only the market administrator admits issuer controls.
+    const other = await mint("delegate");
     await expect(
-      send([client.initializePool(mint.publicKey, admin.publicKey, T22)]),
+      send([client.initializePool(other, attacker.publicKey, T22, 1)], attacker),
     ).rejects.toThrow();
-    expect(await connection().getAccountInfo(pool(mint.publicKey))).toBeNull();
-    expect(await connection().getAccountInfo(vault(mint.publicKey))).toBeNull();
-  }, 30_000);
+    // The listed xStocks replica pool admits exactly its six controls.
+    expect((await poolState(issuer)).admitted).toBe(63);
+  }, 60_000);
   test("one deposit is shared across markets; pool/credit initialization cannot reset or steal balances", async () => {
     expect(await available(base)).toBe(2000n);
     expect(await available(quote)).toBe(1975n);
@@ -398,24 +469,27 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
     await expect(
       send([client.initializePool(base, attacker.publicKey)], attacker),
     ).rejects.toThrow();
+    // No per-market underlying vaults exist in the protocol-wide layout.
     for (const m of markets)
-      expect(await connection().getAccountInfo(vaultAddress(m, 0))).toBeNull();
+      for (let c = 0; c < COLLATERALS; c++)
+        expect(await connection().getAccountInfo(vaultAddress(m, underlyingAsset(c)))).toBeNull();
     await invariant();
   }, 30_000);
   test("split in two markets cannot reuse committed collateral; merging makes it globally available", async () => {
-    for (const m of markets) {
+    // The base mint is leg 1 of market A and leg 2 of market B.
+    for (const [i, m] of markets.entries()) {
       await client.market(m);
-      await send([client.position("split", m, alice.publicKey, 0, 800n)], alice);
+      await send([client.position("split", m, alice.publicKey, LEGS[i]!, 800n)], alice);
     }
     expect(await available(base)).toBe(400n);
     const before = await state();
     await expect(
-      send([client.position("split", markets[1]!, alice.publicKey, 0, 401n)], alice),
+      send([client.position("split", markets[1]!, alice.publicKey, 2, 401n)], alice),
     ).rejects.toThrow();
     expect(await state()).toEqual(before);
-    await send([client.position("merge", markets[0]!, alice.publicKey, 0, 300n)], alice);
+    await send([client.position("merge", markets[0]!, alice.publicKey, 1, 300n)], alice);
     expect(await available(base)).toBe(700n);
-    await send([client.position("split", markets[1]!, alice.publicKey, 0, 500n)], alice);
+    await send([client.position("split", markets[1]!, alice.publicKey, 2, 500n)], alice);
     expect(await available(base)).toBe(200n);
     await invariant();
   }, 30_000);
@@ -468,7 +542,7 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
           markets[0]!,
           alice.publicKey,
           [new PublicKey(orderId(a)), new PublicKey(orderId(b))],
-          [0, 1],
+          [underlyingAsset(1), underlyingAsset(0)],
         ),
       ],
       alice,
@@ -485,15 +559,15 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
   }, 30_000);
   test("unauthorized withdrawals, wrong pool/credit and missing refund accounts roll back", async () => {
     const before = await state();
-    const ix = client.withdraw(markets[0]!, alice.publicKey, base, 0, 1n).at(-1)!;
+    const ix = client.withdraw(markets[0]!, alice.publicKey, base, 3, 1n).at(-1)!;
     ix.keys[0]!.pubkey = attacker.publicKey;
     await expect(send([ix], attacker)).rejects.toThrow();
-    const split = client.position("split", markets[0]!, alice.publicKey, 0, 1n);
+    const split = client.position("split", markets[0]!, alice.publicKey, 1, 2n);
     const creditIndex = split.keys.findIndex((k) => k.pubkey.equals(credit(base)));
     split.keys[creditIndex]!.pubkey = credit(base, bob.publicKey);
     await expect(send([split], alice)).rejects.toThrow();
     expect(await state()).toEqual(before);
-    const o = order(markets[0]!, alice, 1, 1n);
+    const o = order(markets[0]!, alice, 1, 2n);
     await place(o, alice);
     const cancel = await client.cancel(new PublicKey(orderId(o)), alice.publicKey);
     cancel.keys.pop();
@@ -507,13 +581,13 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
     const before = await state();
     await expect(
       send(
-        client.withdraw(markets[1]!, alice.publicKey, base, 0, (await available(base)) + 1n),
+        client.withdraw(markets[1]!, alice.publicKey, base, 3, (await available(base)) + 1n),
         alice,
       ),
     ).rejects.toThrow();
     await expect(
       send(
-        client.withdraw(markets[1]!, alice.publicKey, quote, 1, 100n, alice.publicKey, T22, 100n),
+        client.withdraw(markets[1]!, alice.publicKey, quote, 0, 100n, alice.publicKey, T22, 100n),
         alice,
       ),
     ).rejects.toThrow();
@@ -522,7 +596,7 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
     const frozen = await state();
     await expect(
       send(
-        client.withdraw(markets[1]!, alice.publicKey, quote, 1, 100n, alice.publicKey, T22, 98n),
+        client.withdraw(markets[1]!, alice.publicKey, quote, 0, 100n, alice.publicKey, T22, 98n),
         alice,
       ),
     ).rejects.toThrow();
@@ -530,7 +604,7 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
     await thawAccount(connection(), admin, vault(quote), quote, admin, [], undefined, T22);
     const balance = await available(quote);
     await send(
-      client.withdraw(markets[1]!, alice.publicKey, quote, 1, 100n, alice.publicKey, T22, 98n),
+      client.withdraw(markets[1]!, alice.publicKey, quote, 0, 100n, alice.publicKey, T22, 98n),
       alice,
     );
     expect(await available(quote)).toBe(balance - 100n);
@@ -545,7 +619,7 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
     expect(await available(base)).toBe(free);
     const before = await state();
     await expect(
-      send([client.deposit(markets[0]!, alice.publicKey, quote, 1, 100n, T22, 100n)], alice),
+      send([client.deposit(markets[0]!, alice.publicKey, quote, 0, 100n, T22, 100n)], alice),
     ).rejects.toThrow();
     expect(await state()).toEqual(before);
     await invariant();
@@ -554,7 +628,8 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
     const m = markets[1]!;
     expect(await client.assetCredit(base, carol.publicKey)).toBeNull();
     await send([client.initializeWallet(m, carol.publicKey, admin.publicKey)]);
-    for (const asset of [2, 3])
+    // Base claims of market B are collateral 2 (assets 7, 8).
+    for (const asset of [claimAsset(2, 0), claimAsset(2, 1)])
       await send(
         [
           client.ix(
@@ -570,16 +645,19 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
         ],
         alice,
       );
-    await send([client.position("merge", m, carol.publicKey, 0, 10n)], carol);
+    // Position instructions need the credit account; the idempotent initializer
+    // is prepended exactly as the SDK transaction builders do.
+    await send(
+      [
+        client.positionCredit(m, carol.publicKey, 2),
+        client.position("merge", m, carol.publicKey, 2, 10n),
+      ],
+      carol,
+    );
     expect(await available(base, carol.publicKey)).toBe(10n);
-    expect((await client.wallet(m, carol.publicKey))!.balances.map(big)).toEqual([
-      0n,
-      0n,
-      0n,
-      0n,
-      0n,
-      0n,
-    ]);
+    expect((await client.wallet(m, carol.publicKey))!.balances.map(big)).toEqual(
+      Array(12).fill(0n),
+    );
     await invariant();
   }, 30_000);
   test("zero amounts, invalid minima, duplicate and readonly global credits reject atomically", async () => {
@@ -589,20 +667,21 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
       [10, 0],
       [10, 11],
     ] as const) {
-      const ix = client.deposit(markets[0]!, alice.publicKey, base, 0, 1n);
+      const ix = client.deposit(markets[0]!, alice.publicKey, base, 3, 1n);
       ix.data = coder.instruction.encode("deposit_pool", {
         amount: bn(amount),
         minimum_credit: bn(minimum),
       });
       await expect(send([ix], alice)).rejects.toThrow();
     }
-    const o = order(markets[1]!, alice, 0, 1n),
+    const o = order(markets[1]!, alice, 0, 2n),
       m = await client.market(markets[1]!);
     const plan = planOrder({
       order: o,
       candidates: [],
       now: BigInt(Math.floor(Date.now() / 1000)),
-      step: 1n,
+      step: 2n,
+      program: client.program,
       nextSequence: big(m.sequence[0]!),
       makerFeeBps: 10,
       takerFeeBps: 20,
@@ -617,6 +696,53 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
     expect(await state()).toEqual(before);
     await invariant();
   }, 30_000);
+  test("one base pool backs leg 1 of market A and leg 2 of market B; an issuer pool is isolated per mint", async () => {
+    const ata = await getOrCreateAssociatedTokenAccount(
+      connection(),
+      admin,
+      issuer,
+      alice.publicKey,
+      false,
+      "confirmed",
+      undefined,
+      T22,
+    );
+    await mintTo(connection(), admin, issuer, ata.address, admin, 10n ** 10n, [], undefined, T22);
+    await send([client.depositPool(alice.publicKey, issuer, 10n ** 9n, T22)], alice);
+    const bobBase = await available(base, bob.publicKey),
+      aliceIssuer = await available(issuer);
+    // One deposit funds asks on the base mint in both markets, at different leg positions.
+    const askA = order(markets[0]!, bob, 1, 10n),
+      askB = order(markets[1]!, bob, 1, 10n);
+    expect([askA.bases, askB.bases]).toEqual([legBit(1), legBit(2)]);
+    await place(askA, bob);
+    await place(askB, bob);
+    expect(await available(base, bob.publicKey)).toBe(bobBase - 20n);
+    const [a, b] = await Promise.all(markets.map((m) => client.market(m)));
+    expect(big(a!.escrow[underlyingAsset(1)]!)).toBeGreaterThanOrEqual(10n);
+    expect(big(b!.escrow[underlyingAsset(2)]!)).toBeGreaterThanOrEqual(10n);
+    // The issuer leg of B (8 decimals, live ScaledUiAmount multiplier) converts
+    // share units to raw issuer units; splits and reservations use its own pool.
+    await send([client.position("split", markets[1]!, alice.publicKey, 1, 5000n)], alice);
+    const leg = b!.legs[0]!;
+    const askIssuer = order(markets[1]!, alice, 1, 2n, 2n * 10n ** 18n, 0, legBit(1));
+    await place(askIssuer, alice);
+    const reserved = big((await client.order(new PublicKey(orderId(askIssuer)))).reserved);
+    expect(reserved).toBe(baseRaw(2n, big(leg.scale), big(leg.multiplier), true));
+    expect(await available(issuer)).toBe(aliceIssuer - 5000n - reserved);
+    expect(big((await poolState(issuer)).liability)).toBe(10n ** 9n);
+    await invariant();
+    for (const [o, owner] of [
+      [askA, bob],
+      [askB, bob],
+      [askIssuer, alice],
+    ] as const)
+      await send([await client.cancel(new PublicKey(orderId(o)), owner.publicKey)], owner);
+    await send([client.position("merge", markets[1]!, alice.publicKey, 1, 5000n)], alice);
+    expect(await available(base, bob.publicKey)).toBe(bobBase);
+    expect(await available(issuer)).toBe(aliceIssuer);
+    await invariant();
+  }, 60_000);
   test("resolution pays into global credit, which can fund a different still-open market", async () => {
     const m = markets[0]!,
       uri = "ipfs://resolution",
@@ -634,13 +760,13 @@ describe.skipIf(!rpc)("protocol-wide custody on compiled Solana program", () => 
       client.ix(
         "resolve",
         { yes: 1, no: 0, evidence: [...evidence], uri },
-        { actor: admin.publicKey, config: client.config, market: m },
+        { actor: admin.publicKey, config: client.config, market: m, system_program: SystemProgram.programId },
       ),
     ]);
     const before = await available(base);
-    await send([client.redeem(m, alice.publicKey, 0, 100n, 0n)], alice);
+    await send([client.redeem(m, alice.publicKey, 1, 100n, 0n)], alice);
     expect(await available(base)).toBe(before + 100n);
-    await send([client.position("split", markets[1]!, alice.publicKey, 0, 100n)], alice);
+    await send([client.position("split", markets[1]!, alice.publicKey, 2, 100n)], alice);
     expect(await available(base)).toBe(before);
     await invariant();
   }, 30_000);

@@ -20,7 +20,10 @@ pub fn read_claim(
     mint_info: &AccountInfo,
     vault_info: &AccountInfo,
 ) -> Result<ClaimSnapshot> {
-    require!((2..6).contains(&asset), ProtocolError::InvalidAsset);
+    require!(
+        asset < ASSETS && is_claim(asset),
+        ProtocolError::InvalidAsset
+    );
     let (expected_vault, _) =
         Pubkey::find_program_address(&[b"vault", market_key.as_ref(), &[asset as u8]], &crate::ID);
     require_keys_eq!(
@@ -40,7 +43,10 @@ pub(crate) fn read_claim_with_validated_vault(
     mint_info: &AccountInfo,
     vault_info: &AccountInfo,
 ) -> Result<ClaimSnapshot> {
-    require!((2..6).contains(&asset), ProtocolError::InvalidAsset);
+    require!(
+        asset < ASSETS && is_claim(asset),
+        ProtocolError::InvalidAsset
+    );
     require_keys_eq!(*mint_info.owner, token::ID, ProtocolError::InvalidAccount);
     require_keys_eq!(*vault_info.owner, token::ID, ProtocolError::InvalidAccount);
     // initialize_claim registers only the canonical mint; Market is a validated
@@ -56,7 +62,7 @@ pub(crate) fn read_claim_with_validated_vault(
         mint.is_initialized
             && mint.mint_authority == COption::Some(*market_key)
             && mint.freeze_authority.is_none()
-            && mint.decimals == market.decimals[(asset - 2) / 2],
+            && mint.decimals == market.decimals[collateral_of(asset)],
         ProtocolError::InvalidAccount
     );
     require_keys_eq!(vault.mint, *mint_info.key, ProtocolError::InvalidAsset);
@@ -96,7 +102,7 @@ pub fn check_collateral(
     underlying_balance: u64,
     claims: [ClaimSnapshot; 2],
 ) -> Result<()> {
-    require!(collateral < 2, ProtocolError::InvalidAsset);
+    require!(collateral < COLLATERALS, ProtocolError::InvalidAsset);
     let payouts = match market.state {
         rules::REDEEMABLE | rules::ARCHIVED => Some((market.payouts[0], market.payouts[1])),
         rules::SCHEDULED | rules::OPEN | rules::FROZEN | rules::AWAITING => None,
@@ -112,13 +118,16 @@ pub fn check_collateral(
         ProtocolError::ClaimBacking
     );
     require!(
-        underlying_balance as u128 >= market.liability(collateral)?,
+        underlying_balance as u128 >= market.liability(underlying(collateral))?,
         ProtocolError::Insolvent
     );
-    for (branch, claim) in claims.iter().enumerate() {
-        require!(claim.supply >= claim.balance, ProtocolError::ClaimBacking);
+    for (branch, snapshot) in claims.iter().enumerate() {
         require!(
-            claim.balance as u128 >= market.liability(2 + 2 * collateral + branch)?,
+            snapshot.supply >= snapshot.balance,
+            ProtocolError::ClaimBacking
+        );
+        require!(
+            snapshot.balance as u128 >= market.liability(claim(collateral, branch))?,
             ProtocolError::Insolvent
         );
     }

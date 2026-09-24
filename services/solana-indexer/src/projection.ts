@@ -1,18 +1,19 @@
 import { PublicKey } from "@solana/web3.js";
+import { ProgramView } from "./live/decode.ts";
 import {
   SolanaClient,
-  coder,
   big,
   hex,
   orderWire,
-  orderId,
   walletAddress,
-  marketAddress,
-  traderAddress,
   delegationAddress,
   activeDelegation,
-  poolAddress,
-  assetCreditAddress,
+  claimAsset,
+  legBit,
+  orderCollateral,
+  singleBase,
+  underlyingAsset,
+  type LiveLeg,
   type AssetPoolAccount,
   type AssetCreditAccount,
   type TradingDelegateAccount,
@@ -38,6 +39,9 @@ export interface Snapshot {
   pools: Map<string, AssetPoolAccount>;
   credits: Map<string, AssetCreditAccount>;
   delegations?: Map<string, TradingDelegateAccount>;
+  /** Live issuer state of every listed base leg, by market then collateral.
+   * Read separately from the program image (issuer mints and pool vaults). */
+  legs?: Map<string, Record<number, LiveLeg>>;
 }
 export async function snapshot(
   client: SolanaClient,
@@ -57,113 +61,52 @@ export async function snapshot(
   );
 }
 
-/** Decode the same committed account image for API planning; never fetch RPC here. */
+/** Decodes one committed program account image (one-shot reads and tooling;
+ * the live index applies the same decoder incrementally). */
 export function decodeSnapshot(
   client: Pick<SolanaClient, "program" | "config">,
   slot: number,
   rawAccounts: { address: string; data: string }[],
 ): Snapshot {
-  const response = {
-    context: { slot },
-    value: rawAccounts.map((a) => ({
-      pubkey: new PublicKey(a.address),
-      account: { data: Buffer.from(a.data, "base64") },
-    })),
-  };
-  const byKey = new Map(response.value.map((a) => [a.pubkey.toBase58(), a.account]));
-  const configInfo = byKey.get(client.config.toBase58());
-  if (!configInfo) throw new Error("Deployment config is missing");
-  const config = coder.accounts.decode("Config", configInfo.data) as ConfigAccount;
-  const result: Snapshot = {
-    rawAccounts,
-    program: client.program,
-    slot: response.context.slot,
-    observedAt: Date.now(),
-    config,
-    markets: new Map(),
-    orders: new Map(),
-    wallets: new Map(),
-    traders: new Map(),
-    pools: new Map(),
-    credits: new Map(),
-    delegations: new Map(),
-  };
-  const decoded = response.value.map(({ pubkey, account }) => ({
-    id: pubkey.toBase58(),
-    data: coder.accounts.decodeAny(account.data),
-  }));
-  for (const { id, data } of decoded) {
-    if (data && "liability" in data && "token_program" in data) {
-      const pool = data as AssetPoolAccount;
-      if (pool.config.equals(client.config)) {
-        if (poolAddress(client.config, pool.mint, client.program).toBase58() !== id)
-          throw new Error("Invalid asset pool PDA");
-        result.pools.set(id, pool);
-      }
-    }
-    if (data && "remaining_quote" in data && "delegate" in data) {
-      const grant = data as TradingDelegateAccount;
-      if (grant.config.equals(client.config)) {
-        if (
-          delegationAddress(
-            client.config,
-            grant.owner,
-            grant.delegate,
-            client.program,
-          ).toBase58() !== id
-        )
-          throw new Error("Invalid delegation PDA");
-        result.delegations!.set(id, grant);
-      }
-    }
-    if (data && "minimum_nonce" in data && "config" in data) {
-      const t = data as TraderAccount;
-      if (t.config.equals(client.config)) {
-        if (traderAddress(client.config, t.owner, client.program).toBase58() !== id)
-          throw new Error("Invalid trader PDA");
-        result.traders.set(t.owner.toBase58(), t);
-      }
-    }
-    if (data && "terms" in data && "mints" in data) {
-      const m = data as MarketAccount;
-      if (!m.config.equals(client.config)) continue;
-      if (marketAddress(client.config, Uint8Array.from(m.id), client.program).toBase58() !== id)
-        throw new Error("Invalid market PDA");
-      result.markets.set(id, m);
-    }
-  }
-  for (const { id, data } of decoded) {
-    if (data && "available" in data && "pool" in data) {
-      const credit = data as AssetCreditAccount;
-      if (result.pools.has(credit.pool.toBase58())) {
-        if (assetCreditAddress(credit.pool, credit.owner, client.program).toBase58() !== id)
-          throw new Error("Invalid asset credit PDA");
-        result.credits.set(id, credit);
-      }
-      continue;
-    }
-    if (!data || !("market" in data) || !result.markets.has((data.market as PublicKey).toBase58()))
-      continue;
-    if ("terms" in data) {
-      const o = data as OrderAccount;
-      if (orderId(orderWire(o), client.program) !== id) throw new Error("Invalid order PDA");
-      result.orders.set(id, o);
-    } else if ("balances" in data) {
-      const w = data as WalletAccount;
-      if (walletAddress(w.market, w.owner, client.program).toBase58() !== id)
-        throw new Error("Invalid wallet PDA");
-      result.wallets.set(id, w);
-    }
-  }
-  return result;
+  const s = new ProgramView(client).rebuild(
+    slot,
+    rawAccounts.map((a) => [a.address, Buffer.from(a.data, "base64")] as [string, Buffer]),
+  );
+  return { ...s, rawAccounts };
 }
-export function marketView(id: string, m: MarketAccount, createdAt?: string) {
+/** Every listed collateral's underlying + YES + NO custody is initialized. */
+export const collateralReady = (m: MarketAccount, collateral: number) => {
+  const bits = 0b111 << underlyingAsset(collateral);
+  return collateral <= m.bases && (m.vaults_initialized & bits) === bits;
+};
+/** Both claim mints of a listed collateral exist (positions/claims are readable). */
+export const claimsReady = (m: MarketAccount, collateral: number) => {
+  const bits = (1 << claimAsset(collateral, 0)) | (1 << claimAsset(collateral, 1));
+  return collateral <= m.bases && (m.vaults_initialized & bits) === bits;
+};
+/** JSON form of a live leg (`bases[].live`). */
+export function liveLegView(leg: LiveLeg) {
+  return {
+    multiplier: leg.multiplier.toString(),
+    multiplierValue: leg.multiplierValue,
+    paused: leg.paused,
+    vaultFrozen: leg.vaultFrozen,
+    tradable: leg.tradable,
+    halt: leg.halt,
+  };
+}
+/** Indexed JSON contract, protocolVersion 3 (docs/multi-issuer-markets.md). */
+export function marketView(
+  id: string,
+  m: MarketAccount,
+  createdAt?: string,
+  live?: Record<number, LiveLeg>,
+) {
   const t = m.terms;
+  const mint = (asset: number) => m.mints[asset]!.toBase58();
   return {
     id,
     createdAt: createdAt ?? null,
-    baseToken: m.mints[0]!.toBase58(),
-    quoteToken: m.mints[1]!.toBase58(),
     conditionId: id,
     polymarketConditionId: hex(t.condition),
     polymarketYesIndex: String(t.yes_index),
@@ -181,18 +124,43 @@ export function marketView(id: string, m: MarketAccount, createdAt?: string) {
     maxOrderNotional: t.max_order.toString(),
     maxWalletOpenNotional: t.max_wallet.toString(),
     maxMarketOpenNotional: t.max_market.toString(),
-    baseTokenDecimals: m.decimals[0],
-    quoteTokenDecimals: m.decimals[1],
-    protocolVersion: 2,
-    priceFormat: "raw-unit-ratio-x18",
-    claimMints: m.mints.slice(2).map((k) => k.toBase58()),
+    quoteToken: mint(underlyingAsset(0)),
+    quoteTokenDecimals: m.decimals[0]!,
+    shareDecimals: t.share_decimals,
+    quoteClaimMints: { yes: mint(claimAsset(0, 0)), no: mint(claimAsset(0, 1)) },
+    bases: Array.from({ length: m.bases }, (_, i) => {
+      const collateral = i + 1,
+        leg = m.legs[i]!,
+        state = live?.[collateral];
+      return {
+        collateral,
+        bit: legBit(collateral),
+        mint: mint(underlyingAsset(collateral)),
+        decimals: m.decimals[collateral]!,
+        scale: leg.scale.toString(),
+        listingMultiplier: leg.multiplier.toString(),
+        active: leg.active,
+        ready: collateralReady(m, collateral),
+        claimMints: {
+          yes: mint(claimAsset(collateral, 0)),
+          no: mint(claimAsset(collateral, 1)),
+        },
+        ...(state ? { live: liveLegView(state) } : {}),
+      };
+    }),
+    claimMints: m.mints.map((k) => k.toBase58()),
+    protocolVersion: 3,
+    priceFormat: "share-unit-ratio-x18",
   };
 }
+export type MarketView = ReturnType<typeof marketView>;
 export function indexedOrder(id: string, o: OrderAccount, slot: number) {
   const wire = orderWire(o);
   return {
     ...wire,
     id,
+    /** Delivered issuer leg of a sell; null for bids (see `bases`). */
+    baseCollateral: wire.side === 1 ? orderCollateral(wire) : null,
     remaining: o.remaining.toString(),
     reserved: o.reserved.toString(),
     filled: o.filled.toString(),
@@ -217,6 +185,13 @@ export function liveOrder(
       delegationAddress(m.config, o.owner, o.delegate, s.program).toBase58(),
     );
     if (!grant || !activeDelegation(grant, big(trader.delegation_epoch), o.market, now))
+      return false;
+  }
+  // An ask of a delisted (or unlisted) leg can never fill; it is publicly
+  // releasable, not resting liquidity.
+  if (m && o.terms.side === 1) {
+    const collateral = singleBase(o.terms.bases);
+    if (collateral === null || collateral > m.bases || !m.legs[collateral - 1]?.active)
       return false;
   }
   return Boolean(

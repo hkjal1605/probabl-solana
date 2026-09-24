@@ -1,9 +1,8 @@
 "use client";
 
-import { canonicalStringify } from "@conditional-stocks/market-data";
 import { formatTokenAmount } from "@conditional-stocks/domain";
 import { key, SolanaClient } from "@conditional-stocks/solana-client";
-import { FileSearch, LoaderCircle, ShieldCheck } from "lucide-react";
+import { FileSearch, LoaderCircle, Plus, ShieldCheck, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -21,6 +20,13 @@ import { adminRequest, type EvidenceView, fetchMarketMetadata } from "@/lib/admi
 import { dateTimeInputToUnixSeconds, unixSecondsToDateTimeInput } from "@/lib/date-time";
 import { short } from "@/lib/format";
 import {
+  defaultShareDecimals,
+  issuerLegNotes,
+  type MintCheck,
+  type MintInfo,
+  parseShareDecimals,
+} from "@/lib/issuer-mints";
+import {
   assertBatchPacket,
   type BatchPlan,
   type BatchResult,
@@ -29,31 +35,53 @@ import {
   loadBatchMints,
   MAX_BATCH_MARKETS,
   type MarketCaps,
-  type MarketRow,
   type MarketSource,
-  parseBaseMints,
+  mintIdentity,
+  parseAssetRows,
   prepareMarketBatch,
   recoverBatchResults,
+  resolveRows,
   type SharedMarketFields,
+  type VerifiedMints,
 } from "@/lib/market-batch";
+import { MarketSetupPanel } from "../MarketControlsPageModule/MarketSetupPanel";
 import { PacketCard } from "../ReviewPageModule/ReviewQueue";
 
-type VerifiedMints = Awaited<ReturnType<typeof loadBatchMints>>;
+const WAD = 10n ** 18n;
+interface AssetInput {
+  id: number;
+  mints: string;
+}
+interface AssetRow {
+  mints: string[];
+  shareDecimals: string;
+  caps: MarketCaps;
+}
 const label = (value: string) =>
   value.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
 const amount = (value: string, decimals: number) => {
   if (!/^[0-9]{1,39}$/.test(value)) return "Enter a raw integer";
   const result = formatTokenAmount(BigInt(value), decimals);
-  return result.length > 55 ? "Check this mint's precision carefully" : result;
+  return result.length > 55 ? "Check this precision carefully" : result;
 };
+const quantityField = (name: keyof MarketCaps) =>
+  name === "baseStep" || name === "maxOrderQuantity";
+const tickText = (tick: string, shareDecimals: number, quoteDecimals: number) => {
+  if (!/^[0-9]{1,39}$/.test(tick)) return "Enter a raw integer";
+  const perShare = (BigInt(tick) * 10n ** BigInt(shareDecimals)) / WAD;
+  return `≈ ${formatTokenAmount(perShare, quoteDecimals)} quote per share. Quote raw per share unit × 10¹⁸; a price increment, not an initial price.`;
+};
+const legName = (mint: MintInfo) => mint.symbol ?? short(mint.address);
+const marketTitle = (legs: MintInfo[]) => legs.map(legName).join(" · ");
 
 export function CreateMarketForm() {
   const admin = useAdmin();
   const [marketSlug, setMarketSlug] = useState("");
   const [source, setSource] = useState<MarketSource | null>(null);
-  const [mintInputs, setMintInputs] = useState("");
+  const [assets, setAssets] = useState<AssetInput[]>([{ id: 0, mints: "" }]);
+  const nextId = useRef(1);
   const [verified, setVerified] = useState<VerifiedMints | null>(null);
-  const [rows, setRows] = useState<MarketRow[]>([]);
+  const [rows, setRows] = useState<AssetRow[]>([]);
   const [timing, setTiming] = useState({
     tradingOpen: "",
     tradingCutoff: "",
@@ -68,8 +96,15 @@ export function CreateMarketForm() {
   const [results, setResults] = useState<BatchResult[]>([]);
   const lock = useRef(false);
   const started = plans.length > 0;
+  const resolved = verified ? resolveRows(verified, rows) : null;
+  const blocked = !resolved || resolved.problems.some((list) => list.length > 0);
   const updateResult = (index: number, result: BatchResult) =>
     setResults((current) => current.map((value, i) => (i === index ? result : value)));
+  const resetVerification = () => {
+    setVerified(null);
+    setRows([]);
+    setConfirmed(false);
+  };
   const run = async (action: (check: () => void) => Promise<void>) => {
     if (lock.current) return;
     lock.current = true;
@@ -104,17 +139,24 @@ export function CreateMarketForm() {
     });
   const verifyMints = () =>
     run(async (check) => {
-      setVerified(null);
-      setRows([]);
-      setConfirmed(false);
-      const info = await loadBatchMints(new SolanaClient(adminConfig), parseBaseMints(mintInputs));
+      resetVerification();
+      const parsed = parseAssetRows(assets.map((asset) => asset.mints));
+      const info = await loadBatchMints(new SolanaClient(adminConfig), parsed);
       check();
       setVerified(info);
       setRows(
-        info.bases.map((mint) => ({
-          mint,
-          caps: defaultMarketCaps(mint.decimals, info.quote.decimals),
-        })),
+        parsed.map((mints) => {
+          const legs = mints
+            .map((address) => info.checks[address])
+            .filter((c): c is Extract<MintCheck, { ok: true }> => Boolean(c?.ok))
+            .map((c) => c.mint);
+          const shareDecimals = legs.length ? defaultShareDecimals(legs) : 6;
+          return {
+            mints,
+            shareDecimals: String(shareDecimals),
+            caps: defaultMarketCaps(shareDecimals, info.quote.decimals),
+          };
+        }),
       );
     });
   const recover = async (batch: BatchPlan[], prior: BatchResult[], check: () => void) => {
@@ -158,19 +200,26 @@ export function CreateMarketForm() {
       const client = new SolanaClient(adminConfig);
       const fresh = await loadBatchMints(
         client,
-        rows.map((row) => row.mint.address),
+        rows.map((row) => row.mints),
       );
       check();
-      if (canonicalStringify(fresh) !== canonicalStringify(verified))
+      if (mintIdentity(fresh) !== mintIdentity(verified))
         throw new Error(
-          "Protocol roles, quote token or mint precision changed. Reload the mints and review again.",
+          "Protocol roles, quote token, mint precision or issuer controls changed. Reload the tokens and review again.",
         );
+      const live = resolveRows(fresh, rows);
+      const problem = live.problems.findIndex((list) => list.length > 0);
+      if (problem !== -1) {
+        setVerified(fresh);
+        setConfirmed(false);
+        throw new Error(`Market ${problem + 1}: ${live.problems[problem]![0]}`);
+      }
       const batch = buildBatchPlans({
-        rows,
-        quote: verified.quote,
+        rows: live.rows,
+        quote: fresh.quote,
         source,
         shared: sharedWithTiming,
-        deployment: verified.deployment,
+        deployment: fresh.deployment,
         owner: admin.account,
       });
       const accounts = await client.connection.getMultipleAccountsInfo(
@@ -183,7 +232,7 @@ export function CreateMarketForm() {
         throw new Error(
           "Market " +
             batch[existing]!.expectedMarketId +
-            " already exists. Remove that base mint and manage its existing market instead.",
+            " already exists. Remove that asset market and manage the existing one instead.",
         );
       const pending: BatchResult[] = batch.map(() => ({ phase: "pending" }));
       setPlans(batch);
@@ -197,6 +246,10 @@ export function CreateMarketForm() {
       assertBatchPacket(plans[index]!, packet);
       updateResult(index, { phase: "prepared", packet });
     });
+  const updateRow = (index: number, change: (row: AssetRow) => AssetRow) => {
+    setRows((current) => current.map((row, i) => (i === index ? change(row) : row)));
+    setConfirmed(false);
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -229,7 +282,7 @@ export function CreateMarketForm() {
             </div>
             <p id="creation-slug-help" className="mt-2 text-xs text-muted-foreground">
               Paste the individual market slug, not a full URL. Fetch once and reuse its immutable
-              metadata for every pair below.
+              metadata for every asset market below.
             </p>
             {source && (
               <div className="mt-4 rounded-xl bg-secondary p-4">
@@ -259,37 +312,83 @@ export function CreateMarketForm() {
           <>
             <Card className="ring-0">
               <CardHeader>
-                <CardTitle>2. Add base tokens</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Label htmlFor="base-mints">
-                  Base mint addresses · one per line · maximum {MAX_BATCH_MARKETS}
-                </Label>
-                <Textarea
-                  id="base-mints"
-                  className="mt-2 font-mono"
-                  rows={5}
-                  spellCheck={false}
-                  autoCapitalize="none"
-                  placeholder={"TSLA mint address\nNVDA mint address\nBTC mint address"}
-                  value={mintInputs}
-                  onChange={(event) => {
-                    setMintInputs(event.target.value);
-                    setVerified(null);
-                    setRows([]);
-                    setConfirmed(false);
-                  }}
-                />
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Use Solana mint addresses, not symbols or wallet addresses. Native SOL uses its
-                  wrapped-SOL mint. SPL Token and supported Token-2022 mints are checked against the
-                  deployed program's token policy.
+                <CardTitle>2. Add asset markets and their issuer tokens</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Each market is one order book for one asset (for example NVDA) that lists 1 to 3
+                  whitelisted issuer tokens of that same stock, such as xStocks NVDAx, Ondo NVDAon
+                  and Remora NVDAr, against the shared quote. Add another market for another asset
+                  of this event (for example TSLA). Maximum {MAX_BATCH_MARKETS} markets.
                 </p>
-                <Button className="mt-3" onClick={verifyMints} disabled={!mintInputs.trim()}>
-                  Load and verify tokens
-                </Button>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                {assets.map((asset, index) => (
+                  <div key={asset.id} className="rounded-xl bg-secondary p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <Label htmlFor={`asset-mints-${asset.id}`}>
+                        Market {index + 1} · issuer token mints · one per line · leg order
+                      </Label>
+                      {assets.length > 1 && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`Remove market ${index + 1}`}
+                          onClick={() => {
+                            setAssets((current) => current.filter((item) => item.id !== asset.id));
+                            resetVerification();
+                          }}
+                        >
+                          <Trash2 />
+                        </Button>
+                      )}
+                    </div>
+                    <Textarea
+                      id={`asset-mints-${asset.id}`}
+                      className="mt-2 font-mono"
+                      rows={3}
+                      spellCheck={false}
+                      autoCapitalize="none"
+                      placeholder={"NVDAx mint address\nNVDAon mint address\nNVDAr mint address"}
+                      value={asset.mints}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setAssets((current) =>
+                          current.map((item) =>
+                            item.id === asset.id ? { ...item, mints: value } : item,
+                          ),
+                        );
+                        resetVerification();
+                      }}
+                    />
+                  </div>
+                ))}
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    variant="outline"
+                    disabled={assets.length >= MAX_BATCH_MARKETS}
+                    onClick={() => {
+                      setAssets((current) => [...current, { id: nextId.current++, mints: "" }]);
+                      resetVerification();
+                    }}
+                  >
+                    <Plus />
+                    Add another asset market
+                  </Button>
+                  <Button
+                    onClick={verifyMints}
+                    disabled={assets.some((asset) => !asset.mints.trim())}
+                  >
+                    Load and verify tokens
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Use Solana mint addresses, not symbols or wallet addresses. Every token is checked
+                  against the deployed program's token policy, including its issuer controls
+                  (permanent delegate, pausable, default account state, scaled UI amount, transfer
+                  hook, confidential transfers). Paused tokens, tokens with a configured transfer
+                  hook and default-frozen tokens whose pool vault is not thawed are rejected.
+                </p>
                 {verified && (
-                  <div className="mt-4 rounded-xl bg-secondary p-4">
+                  <div className="rounded-xl bg-secondary p-4">
                     <Label htmlFor="batch-quote">
                       Shared quote mint · fixed by the deployed protocol
                     </Label>
@@ -300,6 +399,7 @@ export function CreateMarketForm() {
                       value={verified.quote.address}
                     />
                     <p className="mt-2 text-xs text-muted-foreground">
+                      {verified.quote.symbol ? `${verified.quote.symbol} · ` : ""}
                       {verified.quote.standard} · {verified.quote.decimals} decimals. This
                       deployment uses one quote mint. Other quote tokens cannot be enabled by an
                       admin-UI change.
@@ -308,14 +408,15 @@ export function CreateMarketForm() {
                 )}
               </CardContent>
             </Card>
-            {verified && rows.length > 0 && (
+            {verified && rows.length > 0 && resolved && (
               <Card className="ring-0">
                 <CardHeader>
-                  <CardTitle>3. Define caps per pair and shared timing</CardTitle>
+                  <CardTitle>3. Review issuer legs, share units, caps and shared timing</CardTitle>
                   <p className="text-sm text-muted-foreground">
-                    {rows.length} separate markets will share this Polymarket condition. Raw
-                    defaults are scaled using each mint's verified decimals. Review every pair; caps
-                    are per market, not per event.
+                    {rows.length} {rows.length === 1 ? "market" : "separate markets"} will share
+                    this Polymarket condition. Quantities (step, maximum quantity) are in share
+                    units of 10^-share-decimals of one share; every leg needs at least that many
+                    decimals. Notional caps are quote raw units. Review every market.
                   </p>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-5">
@@ -362,55 +463,22 @@ export function CreateMarketForm() {
                     </div>
                   </div>
                   {rows.map((row, index) => (
-                    <div key={row.mint.address} className="rounded-xl bg-secondary p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <h3 className="font-semibold">
-                          Pair {index + 1}: {short(row.mint.address)} /{" "}
-                          {short(verified.quote.address)}
-                        </h3>
-                        <Badge variant="outline">
-                          {row.mint.standard} · base decimals {row.mint.decimals}
-                        </Badge>
-                      </div>
-                      <p className="mt-2 break-all font-mono text-xs">
-                        Base mint: {row.mint.address}
-                      </p>
-                      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                        {(Object.keys(row.caps) as (keyof MarketCaps)[]).map((name) => (
-                          <div key={name}>
-                            <Label htmlFor={"pair-" + index + "-" + name}>{label(name)}</Label>
-                            <Input
-                              id={"pair-" + index + "-" + name}
-                              className="mt-2 font-mono"
-                              value={row.caps[name]}
-                              onChange={(event) => {
-                                setRows((current) =>
-                                  current.map((r, i) =>
-                                    i === index
-                                      ? { ...r, caps: { ...r.caps, [name]: event.target.value } }
-                                      : r,
-                                  ),
-                                );
-                                setConfirmed(false);
-                              }}
-                            />
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {name === "priceTickRawX18"
-                                ? "Raw quote/raw base ratio × 10¹⁸; a price increment, not an initial price."
-                                : amount(
-                                    row.caps[name],
-                                    name === "baseStep" || name === "maxOrderQuantity"
-                                      ? row.mint.decimals
-                                      : verified.quote.decimals,
-                                  ) +
-                                  (name === "baseStep" || name === "maxOrderQuantity"
-                                    ? " base units"
-                                    : " quote units")}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                    <AssetMarketReview
+                      key={row.mints.join(",")}
+                      index={index}
+                      row={row}
+                      checks={row.mints.map(
+                        (address): MintCheck =>
+                          verified.checks[address] ?? {
+                            ok: false,
+                            address,
+                            error: "Token not verified",
+                          },
+                      )}
+                      quote={verified.quote}
+                      problems={resolved.problems[index] ?? []}
+                      onChange={(change) => updateRow(index, change)}
+                    />
                   ))}
                   <div>
                     <Label htmlFor="sourceUrls">Evidence source URLs · one per line</Label>
@@ -432,15 +500,18 @@ export function CreateMarketForm() {
                       id="immutable-field-confirmation"
                       className="mt-1"
                       checked={confirmed}
+                      disabled={blocked}
                       onCheckedChange={setConfirmed}
                     />
                     <span className="text-sm leading-6">
                       <strong className="block">
-                        Immutable-field confirmation for all {rows.length} pairs
+                        Immutable-field confirmation for all {rows.length}{" "}
+                        {rows.length === 1 ? "market" : "markets"}
                       </strong>
-                      I checked every base/quote mint, its decimals, YES/NO orientation, rules,
-                      timing, step, tick and caps. Preparing evidence does not approve or sign
-                      transactions.
+                      I checked every issuer token (same underlying asset, leg order, issuer
+                      controls, decimals, multiplier), the quote mint, share decimals, YES/NO
+                      orientation, rules, timing, step, tick and caps. Preparing evidence does not
+                      approve or sign transactions.
                     </span>
                   </label>
                   <Button
@@ -448,7 +519,7 @@ export function CreateMarketForm() {
                     size="lg"
                     variant="default"
                     onClick={prepare}
-                    disabled={!confirmed}
+                    disabled={!confirmed || blocked}
                   >
                     {busy ? <LoaderCircle className="animate-spin" /> : <ShieldCheck />}Prepare{" "}
                     {rows.length} market {rows.length === 1 ? "packet" : "packets"}
@@ -462,19 +533,20 @@ export function CreateMarketForm() {
       {started && verified && (
         <>
           <Alert>
-            <AlertTitle>4. Review and create each market</AlertTitle>
+            <AlertTitle>4. Review, create, list issuers and open each market</AlertTitle>
             <AlertDescription>
               {results.filter((result) => result.phase === "prepared").length} of {plans.length}{" "}
-              evidence packets ready. Each pair has its own on-chain market, vaults, caps and
-              settlement. Approval and wallet signatures remain explicit below. This is a sequence
-              of independent operations, not one atomic transaction.
+              evidence packets ready. Each asset market has its own on-chain order book, caps and
+              settlement; its issuer claims stay segregated per issuer. Approval and wallet
+              signatures remain explicit below. This is a sequence of independent operations, not
+              one atomic transaction.
               <span className="mt-2 block">
-                After creation, use{" "}
+                After create market confirms, sign the listed issuer (pool and add_base) and claim
+                mint transactions in order, then open the market. The same steps are available in{" "}
                 <Link className="underline" href="/markets">
                   Market controls
-                </Link>{" "}
-                to initialize vaults and open each market. Prepared packets also remain available in
-                the{" "}
+                </Link>
+                . Prepared packets also remain available in the{" "}
                 <Link className="underline" href="/review">
                   review queue
                 </Link>{" "}
@@ -492,7 +564,7 @@ export function CreateMarketForm() {
             </Button>
             {results.some((result) => result.phase === "pending") && (
               <Button disabled={busy} onClick={() => run((check) => submit(plans, results, check))}>
-                Prepare remaining unattempted pairs
+                Prepare remaining unattempted markets
               </Button>
             )}
           </div>
@@ -504,10 +576,14 @@ export function CreateMarketForm() {
                 className="flex flex-col gap-3 rounded-xl bg-secondary p-4"
               >
                 <h3 className="font-semibold">
-                  Pair {index + 1}: {short(plan.base.address)} / {short(plan.quote.address)}
+                  Market {index + 1}: {marketTitle(plan.legs)} / {legName(plan.quote)}
                 </h3>
                 <p className="break-all font-mono text-xs">
                   Expected market: {plan.expectedMarketId}
+                </p>
+                <p className="text-xs">
+                  {plan.legs.length} issuer {plan.legs.length === 1 ? "leg" : "legs"} · share
+                  decimals {plan.shareDecimals}
                 </p>
                 <p role="status" className="text-sm">
                   {result?.phase}
@@ -522,7 +598,7 @@ export function CreateMarketForm() {
                   </Alert>
                 )}
                 {result?.phase === "prepared" && (
-                  <fieldset disabled={busy}>
+                  <fieldset disabled={busy} className="flex flex-col gap-3">
                     <PacketCard
                       packet={result.packet}
                       deployment={verified.deployment}
@@ -530,6 +606,15 @@ export function CreateMarketForm() {
                         void refreshPacket(index, result.packet.envelope.packetHash);
                       }}
                     />
+                    {result.packet.status === "approved" && (
+                      <MarketSetupPanel
+                        marketId={plan.expectedMarketId}
+                        baseTokens={plan.baseTokens}
+                        names={Object.fromEntries(
+                          plan.legs.map((leg) => [leg.address, legName(leg)]),
+                        )}
+                      />
+                    )}
                   </fieldset>
                 )}
               </section>
@@ -538,5 +623,169 @@ export function CreateMarketForm() {
         </>
       )}
     </div>
+  );
+}
+
+function AssetMarketReview({
+  index,
+  row,
+  checks,
+  quote,
+  problems,
+  onChange,
+}: {
+  index: number;
+  row: AssetRow;
+  checks: MintCheck[];
+  quote: MintInfo;
+  problems: string[];
+  onChange: (change: (row: AssetRow) => AssetRow) => void;
+}) {
+  let shareDecimals: number | null = null;
+  try {
+    shareDecimals = parseShareDecimals(row.shareDecimals);
+  } catch {
+    shareDecimals = null;
+  }
+  const verifiedLegs = checks.flatMap((check) => (check.ok ? [check.mint] : []));
+  return (
+    <div className="rounded-xl bg-secondary p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-semibold">
+          Market {index + 1}: {verifiedLegs.length ? marketTitle(verifiedLegs) : "unverified"} /{" "}
+          {legName(quote)}
+        </h3>
+        <Badge variant={problems.length ? "destructive" : "positive"}>
+          {problems.length ? `${problems.length} to fix` : `${checks.length} issuer legs ready`}
+        </Badge>
+      </div>
+      <ol className="mt-3 flex flex-col gap-2">
+        {checks.map((check, leg) => (
+          <li
+            key={check.ok ? check.mint.address : check.address}
+            className="rounded-lg bg-background/60 p-3 text-xs leading-5"
+          >
+            {check.ok ? (
+              <IssuerLegSummary leg={leg + 1} mint={check.mint} shareDecimals={shareDecimals} />
+            ) : (
+              <>
+                <p className="font-semibold">Leg {leg + 1} · not listable</p>
+                <p className="break-all font-mono">{check.address}</p>
+                <p className="text-destructive">{check.error}</p>
+              </>
+            )}
+          </li>
+        ))}
+      </ol>
+      {problems.length > 0 && (
+        <Alert variant="destructive" className="mt-3">
+          <AlertTitle>Fix before preparing</AlertTitle>
+          <AlertDescription>
+            <ul className="list-disc pl-4">
+              {problems.map((problem) => (
+                <li key={problem}>{problem}</li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <Label htmlFor={`market-${index}-shareDecimals`}>Share decimals</Label>
+          <Input
+            id={`market-${index}-shareDecimals`}
+            className="mt-2 font-mono sm:max-w-40"
+            inputMode="numeric"
+            value={row.shareDecimals}
+            onChange={(event) => {
+              const value = event.target.value;
+              onChange((current) => {
+                let caps = current.caps;
+                try {
+                  caps = defaultMarketCaps(parseShareDecimals(value), quote.decimals);
+                } catch {
+                  // Keep the caps until the precision is valid.
+                }
+                return { ...current, shareDecimals: value, caps };
+              });
+            }}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Default 6 (Backpack precision); must not exceed any leg's decimals. Changing it resets
+            this market's caps to share-unit defaults.
+          </p>
+        </div>
+        {(Object.keys(row.caps) as (keyof MarketCaps)[]).map((name) => (
+          <div key={name}>
+            <Label htmlFor={`market-${index}-${name}`}>{label(name)}</Label>
+            <Input
+              id={`market-${index}-${name}`}
+              className="mt-2 font-mono"
+              value={row.caps[name]}
+              onChange={(event) => {
+                const value = event.target.value;
+                onChange((current) => ({ ...current, caps: { ...current.caps, [name]: value } }));
+              }}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {shareDecimals === null
+                ? "Set valid share decimals first"
+                : name === "priceTickRawX18"
+                  ? tickText(row.caps[name], shareDecimals, quote.decimals)
+                  : quantityField(name)
+                    ? `${amount(row.caps[name], shareDecimals)} shares`
+                    : `${amount(row.caps[name], quote.decimals)} quote units`}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function IssuerLegSummary({
+  leg,
+  mint,
+  shareDecimals,
+}: {
+  leg: number;
+  mint: MintInfo;
+  shareDecimals: number | null;
+}) {
+  const notes = issuerLegNotes(mint);
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="font-semibold">
+          Leg {leg} · {mint.symbol ?? "No symbol"}
+          {mint.name ? ` · ${mint.name}` : ""}
+        </p>
+        <Badge variant="outline">
+          {mint.standard} · {mint.decimals} decimals
+        </Badge>
+        {shareDecimals !== null && mint.decimals >= shareDecimals && (
+          <Badge variant="outline">scale 10^{mint.decimals - shareDecimals}</Badge>
+        )}
+        {mint.issuer.paused && <Badge variant="destructive">paused</Badge>}
+        {mint.issuer.defaultFrozen && <Badge variant="warning">default frozen</Badge>}
+        {mint.issuer.transferHookExtension && <Badge variant="secondary">hook unset</Badge>}
+      </div>
+      <p className="mt-1 break-all font-mono">{mint.address}</p>
+      <p className="mt-1">
+        Issuer controls ({mint.issuer.controls}):{" "}
+        {mint.issuer.controlNames.length ? mint.issuer.controlNames.join(", ") : "none"}
+      </p>
+      <p>
+        Live multiplier {mint.issuer.multiplierValue} · protocol pool{" "}
+        {mint.pool?.admitted === null || !mint.pool
+          ? "will be created"
+          : `exists (admits ${mint.pool.admitted})`}
+      </p>
+      {notes.map((note) => (
+        <p key={note} className="text-muted-foreground">
+          {note}
+        </p>
+      ))}
+    </>
   );
 }

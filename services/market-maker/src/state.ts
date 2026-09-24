@@ -24,6 +24,8 @@ export interface MarketState {
   movement?: string;
   movementAt?: number;
   cooldownUntil?: number;
+  /** Unit of `spot`: quote raw per share unit x 1e18. Absent on legacy checkpoints. */
+  priceUnit?: "share";
 }
 export interface State {
   version: 1;
@@ -73,6 +75,8 @@ export function validateState(value: unknown, scope: string): State {
       if (v !== undefined && !integer(v)) throw new Error("Invalid risk checkpoint");
     for (const v of [m.halted, m.fundStarted, m.fundComplete])
       if (v !== undefined && typeof v !== "boolean") throw new Error("Invalid safety latch");
+    if (m.priceUnit !== undefined && m.priceUnit !== "share")
+      throw new Error("Invalid price unit checkpoint");
     for (const v of [m.observedAt, m.cooldownUntil, m.movementAt])
       if (v !== undefined && (!Number.isSafeInteger(v) || v < 0))
         throw new Error("Invalid risk time");

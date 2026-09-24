@@ -8,25 +8,42 @@ use anchor_spl::token::{
 };
 use conditional_stocks::{
     invariants::{check_collateral, check_delta, read_claim, ClaimSnapshot},
-    state::Market,
+    state::{claim, underlying, BaseLeg, Market, ASSETS, COLLATERALS, QUOTE},
     ID,
 };
+
+/// Collateral 1 is the single listed base leg (6 decimals); the quote has 9.
+const BASE: usize = 1;
 
 fn market() -> Market {
     let data = vec![0; 8 + Market::INIT_SPACE];
     let mut market = Market::try_deserialize_unchecked(&mut data.as_slice()).unwrap();
+    market.ledgers();
     market.state = protocol_core::OPEN;
-    market.decimals = [6, 9];
-    market.backing = [100, 100];
-    market.credits = [10, 10, 20, 20, 20, 20];
-    market.escrow = [20, 20, 20, 20, 20, 20];
-    market.fees = [1; 4];
+    market.bases = 1;
+    market.legs[0] = BaseLeg {
+        scale: 1,
+        multiplier: protocol_core::UNIT_MULTIPLIER,
+        active: true,
+    };
+    market.decimals[QUOTE] = 9;
+    market.decimals[BASE] = 6;
+    for collateral in [QUOTE, BASE] {
+        market.backing[collateral] = 100;
+        market.credits[underlying(collateral)] = 10;
+        market.escrow[underlying(collateral)] = 20;
+        for branch in 0..2 {
+            market.credits[claim(collateral, branch)] = 20;
+            market.escrow[claim(collateral, branch)] = 20;
+            market.fees[claim(collateral, branch)] = 1;
+        }
+    }
     market
 }
 
 #[test]
 fn global_supply_checks_do_not_confuse_external_claims_with_vault_balances() {
-    for collateral in 0..2 {
+    for collateral in [QUOTE, BASE] {
         let mut m = market();
         let claims = [ClaimSnapshot {
             supply: 100,
@@ -91,7 +108,7 @@ fn global_supply_checks_do_not_confuse_external_claims_with_vault_balances() {
         }
         m.state = 5;
         assert!(check_collateral(&m, collateral, 130, claims).is_err());
-        assert!(check_collateral(&m, 2, 130, claims).is_err());
+        assert!(check_collateral(&m, COLLATERALS, 130, claims).is_err());
     }
 }
 
@@ -153,11 +170,12 @@ fn claim_snapshots_validate_identity_authority_and_reload_actual_data() {
     for case in 0..17 {
         let mut m = market();
         let market_key = Pubkey::new_unique();
+        let yes = claim(BASE, 0);
         let mut mint_key =
-            Pubkey::find_program_address(&[b"claim", market_key.as_ref(), &[2]], &ID).0;
+            Pubkey::find_program_address(&[b"claim", market_key.as_ref(), &[yes as u8]], &ID).0;
         let mut vault_key =
-            Pubkey::find_program_address(&[b"vault", market_key.as_ref(), &[2]], &ID).0;
-        m.mints[2] = mint_key;
+            Pubkey::find_program_address(&[b"vault", market_key.as_ref(), &[yes as u8]], &ID).0;
+        m.mints[yes] = mint_key;
         let mut mint_owner = token::ID;
         let mut vault_owner = token::ID;
         let mut mint = RawMint {
@@ -179,7 +197,7 @@ fn claim_snapshots_validate_identity_authority_and_reload_actual_data() {
             2 => vault_owner = Pubkey::new_unique(),
             3 => mint_key = Pubkey::new_unique(),
             4 => vault_key = Pubkey::new_unique(),
-            5 => m.mints[2] = Pubkey::new_unique(),
+            5 => m.mints[yes] = Pubkey::new_unique(),
             6 => mint.mint_authority = COption::Some(Pubkey::new_unique()),
             7 => mint.freeze_authority = COption::Some(market_key),
             8 => mint.decimals = 9,
@@ -217,7 +235,7 @@ fn claim_snapshots_validate_identity_authority_and_reload_actual_data() {
             &vault_owner,
             false,
         );
-        let actual = read_claim(&m, &market_key, 2, &mint_info, &vault_info);
+        let actual = read_claim(&m, &market_key, yes, &mint_info, &vault_info);
         assert_eq!(actual.is_ok(), case == 0, "case {case}: {actual:?}");
         if case == 0 {
             assert_eq!(
@@ -227,9 +245,12 @@ fn claim_snapshots_validate_identity_authority_and_reload_actual_data() {
                     balance: 60
                 }
             );
-            assert!(read_claim(&m, &market_key, 6, &mint_info, &vault_info).is_err());
+            // Underlying and out-of-range assets are never claims.
+            for asset in [underlying(BASE), ASSETS] {
+                assert!(read_claim(&m, &market_key, asset, &mint_info, &vault_info).is_err());
+            }
             let borrow = mint_info.try_borrow_mut_data().unwrap();
-            assert!(read_claim(&m, &market_key, 2, &mint_info, &vault_info).is_err());
+            assert!(read_claim(&m, &market_key, yes, &mint_info, &vault_info).is_err());
             drop(borrow);
             // Equivalent to a CPI changing supply/balance after an Anchor load.
             mint.supply = 101;
@@ -237,7 +258,7 @@ fn claim_snapshots_validate_identity_authority_and_reload_actual_data() {
             RawMint::pack(mint, &mut mint_info.try_borrow_mut_data().unwrap()).unwrap();
             RawAccount::pack(vault, &mut vault_info.try_borrow_mut_data().unwrap()).unwrap();
             assert_eq!(
-                read_claim(&m, &market_key, 2, &mint_info, &vault_info).unwrap(),
+                read_claim(&m, &market_key, yes, &mint_info, &vault_info).unwrap(),
                 ClaimSnapshot {
                     supply: 101,
                     balance: 61

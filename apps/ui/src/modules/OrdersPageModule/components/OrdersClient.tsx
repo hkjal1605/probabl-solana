@@ -20,7 +20,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useOrderRecovery } from "@/hooks/useOrderRecovery";
-import { displayPrice, formatNumber, shortAddress, tokenAmount } from "@/lib/format/display";
+import {
+  displayPrice,
+  formatNumber,
+  shareAmount,
+  shortAddress,
+  tokenAmount,
+} from "@/lib/format/display";
+import { legByCollateral, maskLabel, orderLeg } from "@/lib/markets/legs";
 import { cn } from "@/lib/utils";
 import type { MarketView } from "@/types/api";
 
@@ -113,6 +120,11 @@ export function OrdersClient({
             {orders.map((order) => {
               const market = markets.find((m) => m.id === order.marketId),
                 partial = BigInt(order.filled) > 0n && BigInt(order.remaining) > 0n;
+              // Sells reserve raw units of the delivered issuer token; buys reserve quote.
+              const soldLeg = (() => {
+                const leg = orderLeg(order);
+                return market && leg !== null ? legByCollateral(market, leg) : undefined;
+              })();
               const expired = BigInt(order.expiry) <= BigInt(Math.floor(Date.now() / 1000));
               const closed = Boolean(
                 market &&
@@ -148,6 +160,9 @@ export function OrdersClient({
                     </span>
                     <p className="mt-1 text-muted-foreground">
                       {order.side === 0 ? "Buy" : "Sell"}
+                      {market && order.bases
+                        ? ` · ${order.side === 0 ? "accepts " : ""}${maskLabel(market, order.bases)}`
+                        : ""}
                     </p>
                   </TableCell>
                   <TableCell className="tabular-nums">
@@ -155,7 +170,7 @@ export function OrdersClient({
                   </TableCell>
                   <TableCell className="tabular-nums">
                     {market
-                      ? `${formatNumber(tokenAmount(order.filled, market.baseTokenDecimals), 3)} / ${formatNumber(tokenAmount(order.quantity, market.baseTokenDecimals), 3)}`
+                      ? `${formatNumber(shareAmount(order.filled, market), 3)} / ${formatNumber(shareAmount(order.quantity, market), 3)}`
                       : "—"}
                     <Progress
                       className="mt-2"
@@ -180,7 +195,11 @@ export function OrdersClient({
                   </TableCell>
                   <TableCell className="tabular-nums">
                     {market
-                      ? `${formatNumber(tokenAmount(order.reserved, order.side === 0 ? market.quoteTokenDecimals : market.baseTokenDecimals), 4)} ${order.side === 0 ? "USDC" : market.ticker}`
+                      ? order.side === 0
+                        ? `${formatNumber(tokenAmount(order.reserved, market.quoteTokenDecimals), 4)} USDC`
+                        : soldLeg
+                          ? `${formatNumber(tokenAmount(order.reserved, soldLeg.decimals), 4)} ${soldLeg.symbol}`
+                          : "—"
                       : "—"}
                     {order.fundingKind === 1 && `-${order.branch === 0 ? "YES" : "NO"}`}
                   </TableCell>

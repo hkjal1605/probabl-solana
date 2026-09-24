@@ -52,7 +52,7 @@ pub mod conditional_stocks {
         governance::lifecycle(ctx, action, commitment)
     }
     pub fn resolve(
-        ctx: Context<Lifecycle>,
+        ctx: Context<Resolve>,
         yes: u8,
         no: u8,
         evidence: [u8; 32],
@@ -60,11 +60,14 @@ pub mod conditional_stocks {
     ) -> Result<()> {
         governance::resolve(ctx, yes, no, evidence, uri)
     }
-    pub fn initialize_asset(ctx: Context<InitializeAsset>, asset: u8) -> Result<()> {
-        custody::initialize_asset(ctx, asset)
+    pub fn add_base(ctx: Context<AddBase>) -> Result<()> {
+        governance::add_base(ctx)
     }
-    pub fn initialize_pool(ctx: Context<InitializePool>) -> Result<()> {
-        pool::initialize_pool(ctx)
+    pub fn set_base(ctx: Context<SetBase>, collateral: u8, active: bool) -> Result<()> {
+        governance::set_base(ctx, collateral, active)
+    }
+    pub fn initialize_pool(ctx: Context<InitializePool>, admitted: u16) -> Result<()> {
+        pool::initialize_pool(ctx, admitted)
     }
     pub fn initialize_credit(ctx: Context<InitializeCredit>) -> Result<()> {
         pool::initialize_credit(ctx)
@@ -83,8 +86,8 @@ pub mod conditional_stocks {
     ) -> Result<()> {
         pool::withdraw_pool(ctx, amount, minimum_received)
     }
-    pub fn initialize_claim(ctx: Context<InitializeClaim>, asset: u8) -> Result<()> {
-        custody::initialize_claim(ctx, asset)
+    pub fn initialize_claims(ctx: Context<InitializeClaims>, collateral: u8) -> Result<()> {
+        custody::initialize_claims(ctx, collateral)
     }
     pub fn initialize_wallet(ctx: Context<InitializeWallet>) -> Result<()> {
         custody::initialize_wallet(ctx)
@@ -167,7 +170,8 @@ pub mod conditional_stocks {
         plan: Plan,
         participants: u8,
         delegations: u8,
+        touched: u8,
     ) -> Result<()> {
-        exchange::place(ctx, terms, plan, participants, delegations)
+        exchange::place(ctx, terms, plan, participants, delegations, touched)
     }
 }

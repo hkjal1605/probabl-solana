@@ -10,6 +10,7 @@ export interface SnapshotWrite {
     liability: string;
   }[];
   credits: { address: string; pool: string; owner: string; available: string }[];
+  /** Market-wallet claim credits; `asset` is a claim asset (3c + 1 + branch, 1..=11). */
   claims: { market: string; owner: string; mint: string; asset: number; available: string }[];
 }
 export interface HistoryCursor {

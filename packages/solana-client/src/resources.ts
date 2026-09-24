@@ -6,10 +6,16 @@ import {
   type AddressLookupTableAccount,
   type TransactionInstruction,
 } from "@solana/web3.js";
-import { coder } from "./protocol.ts";
+import { coder, LEG_ACCOUNTS, legsOf, MAX_BASES } from "./protocol.ts";
 
 export const PACKET_LIMIT = 1232;
 export const COMPUTE_LIMIT = 1_400_000;
+/** `place` named accounts: authority, owner, config, market, order, token and
+ * system programs, quote pool, quote vault, optional delegation. */
+export const PLACE_NAMED_ACCOUNTS = 10;
+/** SBF-measured `place` allowances (see programs/conditional-stocks/tests/cost_profile.rs). */
+export const PLACE_BASE_UNITS = 100_000;
+export const PLACE_LEG_UNITS = 35_000;
 
 /** Conservative SBF-tested profiles, not API-supplied budgets. Unknown operations
  * keep the runtime's 200k default. No priority fee or extra simulation is needed. */
@@ -20,12 +26,18 @@ export function computeUnits(instructions: TransactionInstruction[], program: Pu
       throw new Error("Unexpected compute budget instruction");
     const decoded = ix.programId.equals(program) ? coder.instruction.decode(ix.data) : null;
     if (decoded?.name === "place") {
-      const legs = (decoded.data as { plan: { legs: unknown[] } }).plan.legs;
+      const data = decoded.data as { plan: { legs: unknown[] }; participants: number; delegations: number; touched: number };
+      const legs = data.plan.legs;
       if (!Array.isArray(legs) || legs.length > 8)
         throw new Error("Invalid placement compute plan");
-      const participants = (decoded.data as { participants: number }).participants;
-      const grants = (decoded.data as { delegations: number }).delegations;
-      const credits = ix.keys.length - 20 - legs.length - 2 * participants - grants;
+      const participants = data.participants, grants = data.delegations, touched = data.touched;
+      if (!Number.isInteger(touched) || touched < 0 || touched >= 1 << MAX_BASES)
+        throw new Error("Invalid placement legs");
+      const bases = legsOf(touched).length;
+      // Named accounts (10, delegation slot included), 4 quote claim accounts,
+      // then LEG_ACCOUNTS per touched base leg.
+      const prefix = PLACE_NAMED_ACCOUNTS + 4 + LEG_ACCOUNTS * bases;
+      const credits = ix.keys.length - prefix - legs.length - 2 * participants - grants;
       if (
         !Number.isInteger(participants) ||
         participants < 1 ||
@@ -33,10 +45,16 @@ export function computeUnits(instructions: TransactionInstruction[], program: Pu
         !Number.isInteger(grants) || grants < 0 || grants > legs.length
       )
         throw new Error("Invalid placement participants");
-      const writableMints = [12, 14, 16, 18].filter((i) => ix.keys[i]?.isWritable).length;
+      const claimMints = [PLACE_NAMED_ACCOUNTS, PLACE_NAMED_ACCOUNTS + 2];
+      for (let leg = 0; leg < bases; leg++) {
+        const start = PLACE_NAMED_ACCOUNTS + 4 + LEG_ACCOUNTS * leg;
+        claimMints.push(start + 3, start + 5);
+      }
+      const writableMints = claimMints.filter((i) => ix.keys[i]?.isWritable).length;
       units +=
-        100_000 + 8_000 * credits + 7_000 * grants +
-        (ix.keys[11]?.pubkey.equals(program) ? 0 : 15_000) +
+        PLACE_BASE_UNITS + PLACE_LEG_UNITS * bases +
+        8_000 * credits + 7_000 * grants +
+        (ix.keys[PLACE_NAMED_ACCOUNTS - 1]?.pubkey.equals(program) ? 0 : 15_000) +
         11_000 * legs.length +
         6_000 * participants +
         (legs.length ? 8_000 * writableMints : 0);

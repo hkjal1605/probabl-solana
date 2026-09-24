@@ -1,26 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import {
   DEVNET_ASSET_MINTS as D,
-  MAINNET_REFERENCE_MINTS as M,
   SOLANA_DEVNET_GENESIS as DEV,
-  SOLANA_MAINNET_GENESIS as MAIN,
   expireSpotPrice,
-  spotMapping,
-  spotUsdValue,
+  MAINNET_REFERENCE_MINTS as M,
+  SOLANA_MAINNET_GENESIS as MAIN,
   type SpotPrice,
   type SpotPricesResponse,
+  spotMapping,
+  spotUsdValue,
 } from "@conditional-stocks/shared/spot-prices";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { formatSpotUsd, SpotReference } from "../src/components/market/SpotReference";
+import { assetsForMarkets } from "../src/hooks/useWalletAssets";
+import { previewOrder } from "../src/lib/trading/order";
 import {
   fetchSpotPrices,
   parseSpotPricesResponse,
   spotPricesUrl,
   withMarketSpotPrices,
 } from "../src/services/spot-prices";
-import { formatSpotUsd, SpotReference } from "../src/components/market/SpotReference";
-import { previewOrder } from "../src/lib/trading/order";
-import { assetsForMarkets } from "../src/hooks/useWalletAssets";
 import { fixtureMarkets } from "./fixtures/protocol";
 
 const NOW = Date.now(),
@@ -171,7 +171,12 @@ describe("display price validation", () => {
 });
 
 describe("UI and trading separation", () => {
-  const market = { ...fixtureMarkets[0]!, baseToken: D.SOL, quoteToken: D.USDC };
+  const fixture = fixtureMarkets[0]!;
+  const market = {
+    ...fixture,
+    bases: [{ ...fixture.bases[0]!, mint: D.SOL }],
+    quoteToken: D.USDC,
+  };
   test("refresh modifies only display fields; books, precision and order arithmetic are unchanged", () => {
     const before = previewOrder("1", "123.45", market);
     const [updated] = withMarketSpotPrices(
@@ -201,6 +206,28 @@ describe("UI and trading separation", () => {
     expect(assets.find((a) => a.token === D.SOL)!.reference).toBe(123.45);
     const [stale] = withMarketSpotPrices([updated!], undefined, NOW + 121_000);
     expect(assetsForMarkets([stale!]).every((a) => a.reference === null)).toBe(true);
+  });
+  test("every issuer leg is its own wallet asset; the asset reference is the first priced leg", () => {
+    const multi = {
+      ...fixture,
+      bases: [
+        { ...fixture.bases[0]!, mint: D.SOL },
+        { ...fixture.bases[1]!, mint: D.NVDA },
+      ],
+      quoteToken: D.USDC,
+    };
+    const [updated] = withMarketSpotPrices(
+      [multi],
+      response([price(D.NVDA), price(D.USDC, { priceUsd: 1 })]),
+      NOW,
+    );
+    expect(updated!.bases[0]!.spotReference).toBeUndefined();
+    expect(updated!.bases[1]!.spotReference?.mint).toBe(D.NVDA);
+    expect(updated!.spotReference?.mint).toBe(D.NVDA);
+    const assets = assetsForMarkets([updated!]);
+    expect(assets.map((a) => a.token)).toEqual([D.USDC, D.SOL, D.NVDA]);
+    expect(assets.map((a) => a.decimals)).toEqual([6, 8, 9]);
+    expect(assets.find((a) => a.token === D.SOL)!.symbol).toBe("NVDAx");
   });
   test("UI stays minimal and unbranded while warning about stale or unknown prices", () => {
     const render = (p?: SpotPrice) =>

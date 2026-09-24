@@ -1,12 +1,13 @@
 import { Buffer } from "buffer";
 import {
+  AddressLookupTableAccount,
+  AddressLookupTableProgram,
   Connection,
   PublicKey,
   SystemProgram,
   TransactionInstruction,
   VersionedTransaction,
   type AccountMeta,
-  type AddressLookupTableAccount,
 } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
@@ -25,6 +26,7 @@ import {
   currentTransferFee,
   transferGross,
   transferNet,
+  assertTransferable,
   tokenProgram as canonicalTokenProgram,
 } from "./tokens.ts";
 import {
@@ -46,10 +48,21 @@ import {
   orderId,
   parseOrder,
   fundingAsset,
+  orderCollateral,
   quote,
   big,
   bn,
   coder,
+  ASSETS,
+  COLLATERALS,
+  QUOTE,
+  underlyingAsset,
+  claimAsset,
+  collateralOf,
+  isClaimAsset,
+  legBit,
+  legsOf,
+  baseRaw,
   type ConfigAccount,
   type MarketAccount,
   type OrderAccount,
@@ -71,7 +84,7 @@ function custodyBounds(
   if (
     !Number.isInteger(asset) ||
     asset < 0 ||
-    asset > 5 ||
+    asset >= ASSETS ||
     typeof amount !== "bigint" ||
     typeof minimum !== "bigint" ||
     amount <= 0n ||
@@ -195,12 +208,23 @@ export class SolanaClient {
   }
   private mintFor(market: PublicKey, asset: number) {
     const mint = this.knownMarkets.get(market.toBase58())?.mints[asset];
-    if (!mint) throw new Error("Indexed market mint context is required for protocol-wide custody");
+    if (!mint || mint.equals(PublicKey.default))
+      throw new Error(
+        "Indexed market mint context is required for protocol-wide custody; refetch the market (client.market) after its issuer legs are listed",
+      );
     return mint;
   }
-  initializePool(mint: PublicKey, payer: PublicKey, tokenProgram = TOKEN_PROGRAM_ID) {
+  /** Canonical pool of a market collateral (0 = quote, 1.. = base legs). */
+  collateralPool(market: PublicKey, collateral: number) {
+    if (!Number.isInteger(collateral) || collateral < 0 || collateral >= COLLATERALS)
+      throw new Error("Invalid collateral");
+    return poolAddress(this.config, this.mintFor(market, underlyingAsset(collateral)), this.program);
+  }
+  /** Market-admin listing of a custody pool. `admitted` must equal the mint's
+   * issuer-control categories exactly (see tokens.ts ISSUER_CONTROLS). */
+  initializePool(mint: PublicKey, payer: PublicKey, tokenProgram = TOKEN_PROGRAM_ID, admitted = 0) {
     const pool = poolAddress(this.config, mint, this.program);
-    return this.ix("initialize_pool", {}, {payer, config: this.config, mint, pool,
+    return this.ix("initialize_pool", { admitted }, {payer, config: this.config, mint, pool,
       vault: poolVaultAddress(pool, this.program), token_program: tokenProgram, system_program: SystemProgram.programId});
   }
   initializeCredit(mint: PublicKey, owner: PublicKey, payer = owner) {
@@ -236,7 +260,63 @@ export class SolanaClient {
     )
       throw new Error("RPC genesis hash differs from this deployment");
   }
+  private keptTables: string[] = [];
+  /** Keeper-maintained append-only tables (market + participant PDAs), e.g. from
+   * the API. Unlike deployment tables they are not frozen: they are re-read at
+   * `finalized` on every use, so only rooted entries are referenced. Entries of
+   * a lookup table never change once written, and compilation resolves indexes
+   * by address, so a table can only add usable entries or, if deactivated, make
+   * a transaction fail; it can never redirect an account. */
+  useLookupTables(addresses: readonly string[]) {
+    const unique = [...new Set(addresses)];
+    if (unique.length > 64) throw new Error("Too many keeper lookup tables");
+    for (const address of unique) key(address);
+    if (unique.join() !== this.keptTables.join()) this.keptRead = undefined;
+    this.keptTables = unique;
+  }
+  /** How long keeper table contents are reused between placements. Tables are
+   * append-only and never deactivated by the keeper, so a cached copy can only
+   * miss the newest entries (a slightly larger transaction), never be invalid. */
+  keeperTableTtlMs = 2_000;
+  private keptRead: { at: number; tables: Promise<AddressLookupTableAccount[]> } | undefined;
+  /** Keeper table addresses this client compiles with (share with browsers). */
+  keeperLookupTableAddresses(): string[] {
+    return [...this.keptTables];
+  }
   async lookupTables(): Promise<AddressLookupTableAccount[]> {
+    const [frozen, kept] = await Promise.all([this.frozenLookupTables(), this.keeperLookupTables()]);
+    const seen = new Set(frozen.map((t) => t.key.toBase58()));
+    return [...frozen, ...kept.filter((t) => !seen.has(t.key.toBase58()))];
+  }
+  private keeperLookupTables(): Promise<AddressLookupTableAccount[]> {
+    if (!this.keptTables.length) return Promise.resolve([]);
+    const cached = this.keptRead;
+    if (cached && Date.now() - cached.at < this.keeperTableTtlMs) return cached.tables;
+    const read: { at: number; tables: Promise<AddressLookupTableAccount[]> } = {
+      at: Date.now(),
+      tables: this.readKeeperLookupTables().catch((error) => {
+        if (this.keptRead === read) this.keptRead = undefined;
+        throw error;
+      }),
+    };
+    this.keptRead = read;
+    return read.tables;
+  }
+  private async readKeeperLookupTables(): Promise<AddressLookupTableAccount[]> {
+    const infos = await this.connection.getMultipleAccountsInfo(this.keptTables.map(key), "finalized");
+    const tables: AddressLookupTableAccount[] = [];
+    for (const [index, info] of infos.entries()) {
+      if (!info || !info.owner.equals(AddressLookupTableProgram.programId)) continue;
+      const table = new AddressLookupTableAccount({
+        key: key(this.keptTables[index]!),
+        state: AddressLookupTableAccount.deserialize(info.data),
+      });
+      // A deactivating table may be closed before execution; never reference it.
+      if (table.isActive()) tables.push(table);
+    }
+    return tables;
+  }
+  private async frozenLookupTables(): Promise<AddressLookupTableAccount[]> {
     if (!this.tablesPromise) {
       const addresses = this.deployment.addressLookupTables ?? [];
       if (addresses.length > 8 || new Set(addresses).size !== addresses.length)
@@ -345,7 +425,7 @@ export class SolanaClient {
     minimumCredit = amount,
   ) {
     custodyBounds(asset, amount, minimumCredit, tokenProgram);
-    if (asset < 2) {
+    if (!isClaimAsset(asset)) {
       return this.depositPool(owner, mint, amount, tokenProgram, minimumCredit);
     }
     return this.ix(
@@ -379,7 +459,7 @@ export class SolanaClient {
       true,
       tokenProgram,
     );
-    if (asset < 2) {
+    if (!isClaimAsset(asset)) {
       return this.withdrawPool(owner, mint, amount, recipient, tokenProgram, minimumReceived);
     }
     return [
@@ -414,6 +494,7 @@ export class SolanaClient {
   ) {
     const metadata = await supportedMint(this.connection, mint),
       fee = await currentTransferFee(this.connection, metadata);
+    assertTransferable(metadata);
     const gross = transferGross(credit, fee);
     return {
       gross,
@@ -432,6 +513,7 @@ export class SolanaClient {
   async withdrawalQuote(mint: PublicKey, amount: bigint) {
     const metadata = await supportedMint(this.connection, mint),
       fee = await currentTransferFee(this.connection, metadata);
+    assertTransferable(metadata);
     const received = transferNet(amount, fee);
     if (received <= 0n)
       throw new Error("Issuer transfer fee consumes the entire withdrawal");
@@ -465,12 +547,13 @@ export class SolanaClient {
     amount: bigint,
     branch = 0,
   ) {
-    if (collateral !== 0 && collateral !== 1)
+    if (!Number.isInteger(collateral) || collateral < 0 || collateral >= COLLATERALS)
       throw new Error("Invalid collateral");
     if (![0, 1].includes(branch)) throw new Error("Invalid claim branch");
-    const yes = 2 + collateral * 2,
+    const yes = claimAsset(collateral, 0),
       no = yes + 1;
-    const pool = poolAddress(this.config, this.mintFor(market, collateral), this.program);
+    const underlyingMint = this.mintFor(market, underlyingAsset(collateral));
+    const pool = poolAddress(this.config, underlyingMint, this.program);
     return this.ix(
       kind,
       kind === "redeem"
@@ -490,10 +573,15 @@ export class SolanaClient {
         no_vault: vaultAddress(market, no, this.program),
         token_program: TOKEN_PROGRAM_ID,
         underlying_vault: poolVaultAddress(pool, this.program),
-        system_program: SystemProgram.programId,
+        underlying_mint: underlyingMint,
         pool, credit: assetCreditAddress(pool, owner, this.program),
       },
     );
+  }
+  /** Position instructions require the owner's pool credit account; this
+   * idempotent initializer is safe to prepend unconditionally. */
+  positionCredit(market: PublicKey, owner: PublicKey, collateral: number) {
+    return this.initializeCredit(this.mintFor(market, underlyingAsset(collateral)), owner);
   }
   /** Raw combined redemption; the contract rejects fractional INVALID burns. */
   redeem(
@@ -504,7 +592,7 @@ export class SolanaClient {
     no: bigint,
   ) {
     if (
-      ![0, 1].includes(collateral) ||
+      !Number.isInteger(collateral) || collateral < 0 || collateral >= COLLATERALS ||
       yes < 0n ||
       no < 0n ||
       yes > U64_MAX ||
@@ -531,20 +619,24 @@ export class SolanaClient {
     yes: bigint,
     no: bigint,
   ) {
-    if (![0, 1].includes(collateral)) throw new Error("Invalid collateral");
+    if (!Number.isInteger(collateral) || collateral < 0 || collateral >= COLLATERALS)
+      throw new Error("Invalid collateral");
     const market = await this.market(marketKey);
     if (![6, 7].includes(market.state))
       throw new Error("Market is not redeemable");
+    if (collateral > market.bases) throw new Error("Collateral is not listed in this market");
     const recovery = planRedemption(yes, no, market.payouts);
     const wallet = await this.wallet(marketKey, owner);
     const instructions: TransactionInstruction[] = [];
     if (recovery.burnYes + recovery.burnNo > 0n && !wallet)
       instructions.push(this.initializeWallet(marketKey, owner));
+    if (recovery.merge + recovery.redeemYes + recovery.redeemNo > 0n)
+      instructions.push(this.positionCredit(marketKey, owner, collateral));
     for (const [branch, needed] of [
       recovery.burnYes,
       recovery.burnNo,
     ].entries()) {
-      const asset = 2 + 2 * collateral + branch;
+      const asset = claimAsset(collateral, branch);
       const available = wallet ? big(wallet.balances[asset]!) : 0n;
       if (available < needed) {
         const deposit = await this.depositForCredit(
@@ -595,7 +687,7 @@ export class SolanaClient {
         trader: traderAddress(this.config, order.owner, this.program),
         ...(order.delegate.equals(PublicKey.default) ? {} : {delegation: delegationAddress(this.config, order.owner, order.delegate, this.program)}),
       },
-      order.terms.funding === 0 ? [{pubkey: assetCreditAddress(poolAddress(this.config, this.mintFor(order.market, order.terms.side === 0 ? 1 : 0), this.program), order.owner, this.program), isSigner: false, isWritable: true}] : [],
+      order.terms.funding === 0 ? [{pubkey: assetCreditAddress(this.collateralPool(order.market, orderCollateral({side: order.terms.side, bases: order.terms.bases})), order.owner, this.program), isSigner: false, isWritable: true}] : [],
     );
   }
   /** Bounded owner-only batch, using indexed addresses rather than per-order RPC. */
@@ -603,9 +695,10 @@ export class SolanaClient {
     if (delegate && (kind !== "cancel_orders" || delegate.equals(owner))) throw new Error("Invalid delegated maintenance");
     if (orders.length < 1 || orders.length > 8 || new Set(orders.map(String)).size !== orders.length)
       throw new Error("Order batch must contain 1–8 unique addresses");
-    if (refundAssets.some(asset => asset !== 0 && asset !== 1) || new Set(refundAssets).size !== refundAssets.length)
+    // Refund assets are underlying asset indexes (3c): one credit frame per collateral pool.
+    if (refundAssets.some(asset => !Number.isInteger(asset) || asset < 0 || asset >= ASSETS || isClaimAsset(asset)) || new Set(refundAssets).size !== refundAssets.length)
       throw new Error("Invalid refund assets");
-    const credits = refundAssets.map(asset => assetCreditAddress(poolAddress(this.config, this.mintFor(market, asset), this.program), owner, this.program));
+    const credits = refundAssets.map(asset => assetCreditAddress(this.collateralPool(market, collateralOf(asset)), owner, this.program));
     return this.ix(kind, { order_count: orders.length }, {
       owner, market, actor: delegate ?? owner,
       ...(delegate ? {delegation: delegationAddress(this.config, owner, delegate, this.program)} : {}),
@@ -652,22 +745,43 @@ export class SolanaClient {
       market = key(o.marketId),
       owner = key(o.maker);
     if (marketContext) this.rememberMarket(market, marketContext);
-    const pools = [0, 1].map(asset => poolAddress(this.config, this.mintFor(market, asset), this.program));
     const writable = (pubkey: PublicKey): AccountMeta => ({
       pubkey,
       isWritable: true,
       isSigner: false,
     });
-    const tail: AccountMeta[] = [];
-    for (let asset = 2; asset < 6; asset++) {
-      const collateral = Math.floor((asset - 2) / 2);
-      const mints = p.makers.length > 0 && (
-        (o.fundingKind === 0 && (o.side === 0 ? 1 : 0) === collateral) ||
-        p.makers.some((m) => m.fundingKind === 0 && (m.side === 0 ? 1 : 0) === collateral)
-      );
+    const readonly = (pubkey: PublicKey): AccountMeta => ({
+      pubkey,
+      isWritable: false,
+      isSigner: false,
+    });
+    const filled = p.makers.length > 0;
+    const buyers = o.side === 0 ? [o] : p.makers;
+    const sellers = o.side === 1 ? [o] : p.makers;
+    // Exactly the legs of every ask involved: the taker's own leg when it
+    // sells (even resting), otherwise the leg of each filled maker ask.
+    let touched = 0;
+    for (const ask of sellers) touched |= legBit(orderCollateral(ask));
+    const claims = (collateral: number, minting: boolean): AccountMeta[] =>
+      [0, 1].flatMap((branch) => {
+        const asset = claimAsset(collateral, branch);
+        return [
+          { pubkey: claimAddress(market, asset, this.program), isWritable: minting, isSigner: false },
+          { pubkey: vaultAddress(market, asset, this.program), isWritable: minting, isSigner: false },
+        ];
+      });
+    // Claims are minted only for underlying-funded (fundingKind 0) sides that fill.
+    const tail: AccountMeta[] = claims(QUOTE, filled && buyers.some((b) => b.fundingKind === 0));
+    for (const collateral of legsOf(touched)) {
+      const pool = this.collateralPool(market, collateral);
       tail.push(
-        { pubkey: claimAddress(market, asset, this.program), isWritable: mints, isSigner: false },
-        { pubkey: vaultAddress(market, asset, this.program), isWritable: mints, isSigner: false },
+        readonly(pool),
+        readonly(poolVaultAddress(pool, this.program)),
+        readonly(this.mintFor(market, underlyingAsset(collateral))),
+        ...claims(
+          collateral,
+          filled && sellers.some((a) => a.fundingKind === 0 && orderCollateral(a) === collateral),
+        ),
       );
     }
     for (const maker of p.makers)
@@ -680,22 +794,27 @@ export class SolanaClient {
     for (const participant of [...owners].sort())
       tail.push(
         writable(walletAddress(market, key(participant), this.program)),
-        {
-          pubkey: traderAddress(this.config, key(participant), this.program),
-          isWritable: false,
-          isSigner: false,
-        },
+        readonly(traderAddress(this.config, key(participant), this.program)),
       );
     const credits = new Map<string, PublicKey>();
-    const refundedMakers = p.makers.filter((m, i) => {
-      if (m.side !== 0) return false;
-      const remaining = BigInt(p.expectedRemaining[i]!), quantity = BigInt(p.quantities[i]!), price = BigInt(m.limitPriceRawX18);
-      return quote(remaining, price, true) - quote(remaining - quantity, price, true) > quote(quantity, price, false);
-    });
-    for (const candidate of [o, ...refundedMakers]) {
-      if (candidate.fundingKind !== 0) continue;
-      const credit = assetCreditAddress(pools[candidate.side === 0 ? 1 : 0]!, key(candidate.maker), this.program);
+    const frame = (order: OrderWire) => {
+      if (order.fundingKind !== 0) return;
+      const credit = assetCreditAddress(this.collateralPool(market, orderCollateral(order)), key(order.maker), this.program);
       credits.set(credit.toBase58(), credit);
+    };
+    frame(o);
+    for (const [i, maker] of p.makers.entries()) {
+      const remaining = BigInt(p.expectedRemaining[i]!), quantity = BigInt(p.quantities[i]!);
+      if (maker.side === 0) {
+        // Bids funded from pool credit receive price improvement refunds.
+        const price = BigInt(maker.limitPriceRawX18);
+        if (quote(remaining, price, true) - quote(remaining - quantity, price, true) > quote(quantity, price, false))
+          frame(maker);
+      } else if (quantity === remaining && (p.surplus?.[i] ?? true)) {
+        // A completing ask returns its reservation surplus (round-down
+        // deliveries, dividend accrual) to its funding asset.
+        frame(maker);
+      }
     }
     for (const credit of credits.values()) tail.push(writable(credit));
     const grants = new Map<string, PublicKey>();
@@ -703,22 +822,22 @@ export class SolanaClient {
       const grant = delegationAddress(this.config, key(maker.maker), key(maker.delegate), this.program);
       grants.set(grant.toBase58(), grant);
     }
-    for (const grant of grants.values()) tail.push({pubkey: grant, isSigner: false, isWritable: false});
+    for (const grant of grants.values()) tail.push(readonly(grant));
+    const quotePool = this.collateralPool(market, QUOTE);
     return this.ix(
       "place",
       {
         terms: orderTerms(o),
         participants: owners.size,
         delegations: grants.size,
+        touched,
         plan: {
           deadline: bn(p.deadline),
           next_sequence: bn(p.guard.nextSequence),
+          min_fill: bn(p.minFill ?? "0"),
           maker_bps: p.guard.makerFeeBps,
           taker_bps: p.guard.takerFeeBps,
-          legs: p.quantities.map((quantity, i) => ({
-            quantity: bn(quantity),
-            expected_remaining: bn(p.expectedRemaining[i]!),
-          })),
+          legs: p.quantities.map((quantity) => ({ quantity: bn(quantity) })),
         },
       },
       {
@@ -730,9 +849,8 @@ export class SolanaClient {
         order: orderAddress(market, owner, bytes32(o.salt), this.program),
         token_program: TOKEN_PROGRAM_ID,
         system_program: SystemProgram.programId,
-        base_pool: pools[0]!, quote_pool: pools[1]!,
-        base_vault: poolVaultAddress(pools[0]!, this.program),
-        quote_vault: poolVaultAddress(pools[1]!, this.program),
+        quote_pool: quotePool,
+        quote_vault: poolVaultAddress(quotePool, this.program),
       },
       tail,
     );
@@ -764,34 +882,40 @@ export class SolanaClient {
       return w;
     });
     const asset = fundingAsset(order),
+      collateral = orderCollateral(order),
       mint = market.mints[asset]!;
-    const required =
-      order.side === 0
-        ? quote(BigInt(order.quantity), BigInt(order.limitPriceRawX18), true)
-        : BigInt(order.quantity);
-    const wallet = wallets[0];
-    let available = asset >= 2 && wallet ? big(wallet.balances[asset]!) : 0n;
-    let deficit = required > available ? required - available : 0n;
-    const instructions: TransactionInstruction[] = [];
-    for (const [index, participant] of participants.entries())
-      if (!wallets[index]) instructions.push(this.initializeWallet(marketKey, key(participant), owner));
-    if (!deficit) return {
-      amount: required.toString(), assetKind: "spl-token", approved: instructions.length === 0,
-      balanceSufficient: true, depositAmount: "0", transferFee: "0",
-      approvalCall: instructions.length ? envelope(instructions, this.program) : null,
-    };
+    if (collateral > market.bases) throw new Error("Order leg is not listed in this market");
+    const pooled = !isClaimAsset(asset);
     // Both possible ATAs are deterministic; reading them with the mint avoids a
-    // mint -> token-program -> ATA waterfall, including for Token-2022.
+    // mint -> token-program -> ATA waterfall, including for Token-2022. A sell
+    // reserves raw issuer units at the leg's live multiplier, so the leg's
+    // issuer mint is always read for sells.
     const programs = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID];
     const atas = programs.map((p) => getAssociatedTokenAddressSync(mint, owner, true, p));
     const pool = poolAddress(this.config, mint, this.program);
     const creditAddress = assetCreditAddress(pool, owner, this.program);
-    const second = await this.connection.getMultipleAccountsInfoAndContext([mint, ...atas, ...(asset < 2 ? [creditAddress] : [])], {
+    const legMint = market.mints[underlyingAsset(collateral)]!;
+    const second = await this.connection.getMultipleAccountsInfoAndContext(
+      [mint, ...atas, ...(pooled ? [creditAddress] : []), ...(order.side === 1 ? [legMint] : [])], {
       commitment: "confirmed", minContextSlot: first.context.slot,
     });
-    if (second.value.length !== (asset < 2 ? 4 : 3) || second.context.slot < first.context.slot)
+    if (second.value.length !== 3 + Number(pooled) + Number(order.side === 1) || second.context.slot < first.context.slot)
       throw new Error("Incomplete or stale funding token read");
-    if (asset < 2) {
+    let required: bigint;
+    if (order.side === 0) {
+      required = quote(BigInt(order.quantity), BigInt(order.limitPriceRawX18), true);
+    } else {
+      const leg = market.legs[collateral - 1]!;
+      const live = decodeSupportedMint(legMint, second.value[second.value.length - 1] ?? null).issuer;
+      required = baseRaw(BigInt(order.quantity), big(leg.scale), live.multiplier, true);
+    }
+    const wallet = wallets[0];
+    let available = !pooled && wallet ? big(wallet.balances[asset]!) : 0n;
+    let deficit = required > available ? required - available : 0n;
+    const instructions: TransactionInstruction[] = [];
+    for (const [index, participant] of participants.entries())
+      if (!wallets[index]) instructions.push(this.initializeWallet(marketKey, key(participant), owner));
+    if (pooled) {
       const info = second.value[3];
       if (info) {
         if (!info.owner.equals(this.program)) throw new Error("Invalid global credit program");
@@ -801,7 +925,13 @@ export class SolanaClient {
       }
       deficit = required > available ? required - available : 0n;
     }
+    if (!deficit) return {
+      amount: required.toString(), assetKind: "spl-token", approved: instructions.length === 0,
+      balanceSufficient: true, depositAmount: "0", transferFee: "0",
+      approvalCall: instructions.length ? envelope(instructions, this.program) : null,
+    };
     const metadata = decodeSupportedMint(mint, second.value[0] ?? null);
+    assertTransferable(metadata);
     const index = programs.findIndex((p) => p.equals(metadata.program));
     const tokenInfo = second.value[index + 1];
     const externalAccount = tokenInfo ? unpackAccount(atas[index]!, tokenInfo, metadata.program) : null;
@@ -848,8 +978,9 @@ export class SolanaClient {
     recipient: PublicKey,
     amount: bigint,
   ) {
-    const info = await supportedMint(this.connection, mint),
-      fee = await currentTransferFee(this.connection, info),
+    const info = await supportedMint(this.connection, mint);
+    assertTransferable(info);
+    const fee = await currentTransferFee(this.connection, info),
       source = getAssociatedTokenAddressSync(mint, owner, true, info.program),
       destination = getAssociatedTokenAddressSync(
         mint,
@@ -930,12 +1061,13 @@ export class SolanaClient {
       amount <= 0n ||
       amount > (1n << 64n) - 1n ||
       ![0, 1].includes(branch) ||
-      ![0, 1].includes(collateral)
+      !Number.isInteger(collateral) || collateral < 0 || collateral >= COLLATERALS
     )
       throw new Error("Invalid position action");
     const market = await this.market(marketKey),
       wallet = await this.wallet(marketKey, owner),
       instructions: TransactionInstruction[] = [];
+    if (collateral > market.bases) throw new Error("Collateral is not listed in this market");
     if (kind === "redeem") {
       if (![6, 7].includes(market.state))
         throw new Error("Market is not redeemable");
@@ -949,12 +1081,15 @@ export class SolanaClient {
     if (!wallet) instructions.push(this.initializeWallet(marketKey, owner));
     const assets =
       kind === "split"
-        ? [collateral]
+        ? [underlyingAsset(collateral)]
         : kind === "merge"
-          ? [2 + collateral * 2, 3 + collateral * 2]
-          : [2 + collateral * 2 + branch];
+          ? [claimAsset(collateral, 0), claimAsset(collateral, 1)]
+          : [claimAsset(collateral, branch)];
     for (const asset of assets) {
-      const available = wallet ? big(wallet.balances[asset]!) : 0n;
+      // Underlying lives in protocol-wide pool credit, claims in the market wallet.
+      const available = isClaimAsset(asset)
+        ? wallet ? big(wallet.balances[asset]!) : 0n
+        : big((await this.assetCredit(market.mints[asset]!, owner))?.available ?? 0);
       if (available < amount) {
         const mint = market.mints[asset]!,
           credit = amount - available;
@@ -975,6 +1110,7 @@ export class SolanaClient {
       }
     }
     instructions.push(
+      this.positionCredit(marketKey, owner, collateral),
       this.position(kind, marketKey, owner, collateral, amount, branch),
     );
     return { ...envelope(instructions, this.program), issuerTransfers };

@@ -17,6 +17,7 @@
   "cooldownMs": 60000,
   "maxDrawdownBps": 1000,
   "maxTransferFeeBps": 100,
+  "maxLegDispersionBps": 300,
   "minSolLamports": "100000000",
   "dailySolBudgetLamports": "100000000"
 }

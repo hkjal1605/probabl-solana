@@ -10,7 +10,7 @@ const deployment={rpcUrl:"http://127.0.0.1:8899",programId:PROGRAM_ID.toBase58()
 const source=normalizeGammaMarket(gammaMarket()),market=pubkey();
 const creation=()=>buildCreationEvidence({deployment,preparer:deployment.marketAdmin,preparedAt:"2026-09-12T00:00:00Z",attachments:[],
   metadata:source,metadataRawHash:hashCanonical(gammaMarket()),metadataSnapshotId:"fixture",sourceUrls:[source.canonicalUrl],
-  config:{baseToken:pubkey(),quoteToken:pubkey(),baseStep:"1",priceTickRawX18:"1000000000000000000",minNotional:"1",
+  config:{baseTokens:[pubkey(),pubkey()],shareDecimals:"6",quoteToken:pubkey(),baseStep:"1",priceTickRawX18:"1000000000000000000",minNotional:"1",
     maxOrderQuantity:"9007199254740993123",maxOrderNotional:"9007199254740993123",maxWalletOpenNotional:"9007199254740993123",
     maxMarketOpenNotional:"18014398509481986246",metadataUri:"ipfs://test",rules:"Example",tradingOpen:"1800000000",tradingCutoff:"1900000000"}});
 const resolution=(payout:PayoutVector={yes:"1",no:"0",denominator:"1"})=>buildResolutionEvidence({

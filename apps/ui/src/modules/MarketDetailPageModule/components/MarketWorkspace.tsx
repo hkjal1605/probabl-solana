@@ -5,9 +5,11 @@ import { LifecycleBadge } from "@/components/data/StatusBadge";
 import { PriceChart } from "@/components/market/PriceChart";
 import { ProbabilityGauge } from "@/components/market/ProbabilityGauge";
 import { SpotReference } from "@/components/market/SpotReference";
+import { TokenIdentity } from "@/components/market/TokenIdentity";
 import { ClaimTable } from "@/components/portfolio/ClaimTable";
 import { PositionTable } from "@/components/portfolio/PositionTable";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
@@ -28,8 +30,9 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useProbabilityStream } from "@/hooks/useProbabilityStream";
 import { useMarkets, useTrades } from "@/hooks/useProtocolData";
 import { formatNumber, formatTime } from "@/lib/format/display";
+import { legStatuses, listedMask, maskLegs } from "@/lib/markets/legs";
 import { midpoint, percent, spotImpactPercent } from "@/lib/markets/presentation";
-import { visibleDepthPerSide } from "@/lib/markets/visible-depth";
+import { type DepthLevel, depthLevels, visibleDepthPerSide } from "@/lib/markets/visible-depth";
 import { cn } from "@/lib/utils";
 import { OrdersClient } from "@/modules/OrdersPageModule/components/OrdersClient";
 import type { BranchBook, MarketView, TradeView } from "@/types/api";
@@ -97,7 +100,8 @@ export function MarketWorkspace({
   );
   const market = indexedMarket ? { ...indexedMarket, probability: stream.probability } : undefined;
   const [tab, setTab] = useState("positions"),
-    [bookBranch, setBookBranch] = useState<"YES" | "NO">("YES");
+    [bookBranch, setBookBranch] = useState<"YES" | "NO">("YES"),
+    [bookIssuer, setBookIssuer] = useState("All");
   if (!market)
     return query.isPending ? (
       <MarketDetailPageSkeleton />
@@ -163,6 +167,7 @@ export function MarketWorkspace({
             <SpotReference price={market.spotReference} variant="market" />
             <OutcomeStat market={market} branch="NO" />
           </div>
+          <ListedIssuers market={market} />
           {market.bookQuality === "truncated" && (
             <DataError
               message={
@@ -186,9 +191,20 @@ export function MarketWorkspace({
               value={`${market.ticker}-${bookBranch}`}
               onChange={(value) => setBookBranch(value === `${market.ticker}-YES` ? "YES" : "NO")}
             />
+            {market.bases.length > 1 && (
+              <Segmented
+                label="Order book issuer"
+                variant="chart"
+                options={["All", ...market.bases.map((leg) => leg.symbol)]}
+                value={market.bases.some((leg) => leg.symbol === bookIssuer) ? bookIssuer : "All"}
+                onChange={setBookIssuer}
+              />
+            )}
           </CardHeader>
           <CardContent className="flex min-h-0 flex-1 flex-col overflow-hidden px-0">
             <BranchDepth
+              market={market}
+              filter={market.bases.find((leg) => leg.symbol === bookIssuer)?.bit ?? null}
               book={bookBranch === "YES" ? market.yes : market.no}
               label={`${market.ticker}-${bookBranch}`}
               available={market.bookQuality === "available"}
@@ -244,13 +260,18 @@ export function MarketWorkspace({
   );
 }
 function BranchDepth({
+  market,
   book,
   label,
   available,
+  filter,
 }: {
+  market: MarketView;
   book: BranchBook;
   label: string;
   available: boolean;
+  /** Issuer mask to show (null = every issuer). */
+  filter: number | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [visibleLevels, setVisibleLevels] = useState(5);
@@ -271,38 +292,62 @@ function BranchDepth({
     observer.observe(container);
     return () => observer.disconnect();
   }, []);
-  const quoteSize = (level: BranchBook["asks"][number]) => level.price * level.quantity;
-  const cumulative = (levels: BranchBook["asks"]) => {
-    let total = 0;
-    return levels.map((level) => {
-      total += quoteSize(level);
-      return { ...level, cumulativeSize: total };
-    });
+  const listed = listedMask(market);
+  const asks = depthLevels(book.asks, visibleLevels, filter, listed);
+  const bids = depthLevels(book.bids, visibleLevels, filter, listed);
+  const bestAsk = asks[0]?.price ?? null,
+    bestBid = bids[0]?.price ?? null;
+  const mid =
+    filter === null
+      ? midpoint(book)
+      : bestAsk !== null && bestBid !== null && bestBid > 0 && bestAsk >= bestBid
+        ? (bestAsk + bestBid) / 2
+        : null;
+  const spread =
+    filter === null ? book.spread : bestAsk !== null && bestBid !== null ? bestAsk - bestBid : null;
+  const askTotal = asks.at(-1)?.cumulative ?? 0;
+  const bidTotal = bids.at(-1)?.cumulative ?? 0;
+  const multiIssuer = market.bases.length > 1;
+  const issuers = (level: DepthLevel, ask: boolean) => {
+    if (!level.mask) return <span className="text-muted-foreground">—</span>;
+    if (!ask && level.anyIssuer && multiIssuer)
+      return (
+        <Badge variant="outline" title="Accepts every listed issuer">
+          Any
+        </Badge>
+      );
+    return maskLegs(market, level.mask).map((leg) => (
+      <Badge
+        key={leg.collateral}
+        variant="secondary"
+        title={`${ask ? "Delivers" : "Accepts"} ${leg.symbol}${leg.issuer ? ` (${leg.issuer})` : ""}`}
+      >
+        {leg.symbol}
+      </Badge>
+    ));
   };
-  const asks = cumulative(book.asks.slice(0, visibleLevels));
-  const bids = cumulative(book.bids.slice(0, visibleLevels));
-  const askTotal = asks.at(-1)?.cumulativeSize ?? 0;
-  const bidTotal = bids.at(-1)?.cumulativeSize ?? 0;
-  const row = (
-    level: BranchBook["asks"][number] & { cumulativeSize: number },
-    ask: boolean,
-    total: number,
-  ) => (
+  const row = (level: DepthLevel, ask: boolean, total: number) => (
     <TableRow
       key={level.priceExact}
       className={cn("tabular-nums", ask ? "text-danger" : "text-positive")}
       style={{
-        backgroundImage: `linear-gradient(to left, var(--${ask ? "danger" : "positive"}-soft) ${total > 0 ? (level.cumulativeSize / total) * 100 : 0}%, transparent ${total > 0 ? (level.cumulativeSize / total) * 100 : 0}%)`,
+        backgroundImage: `linear-gradient(to left, var(--${ask ? "danger" : "positive"}-soft) ${total > 0 ? (level.cumulative / total) * 100 : 0}%, transparent ${total > 0 ? (level.cumulative / total) * 100 : 0}%)`,
       }}
     >
       <TableCell className="text-sm">{formatNumber(level.price)}</TableCell>
-      <TableCell className="text-right text-sm">{formatNumber(quoteSize(level), 2)}</TableCell>
-      <TableCell className="text-right text-sm">{formatNumber(level.cumulativeSize, 2)}</TableCell>
+      {multiIssuer && (
+        <TableCell aria-label={ask ? "Delivering issuers" : "Accepted issuers"}>
+          <span className="flex flex-wrap gap-0.5">{issuers(level, ask)}</span>
+        </TableCell>
+      )}
+      <TableCell className="text-right text-sm">{formatNumber(level.quantity, 2)}</TableCell>
+      <TableCell className="text-right text-sm">{formatNumber(level.cumulative, 2)}</TableCell>
     </TableRow>
   );
+  const columns = multiIssuer ? 4 : 3;
   const emptyRow = (ask: boolean) => (
     <TableRow key={`${ask ? "ask" : "bid"}-empty`}>
-      <TableCell colSpan={3} className="text-muted-foreground">
+      <TableCell colSpan={columns} className="text-muted-foreground">
         {available ? `No ${ask ? "asks" : "bids"}` : "—"}
       </TableCell>
     </TableRow>
@@ -316,18 +361,19 @@ function BranchDepth({
         <TableHeader className="[&_tr]:border-b-0">
           <TableRow className="hover:bg-transparent [&_th]:font-medium">
             <TableHead>Price</TableHead>
-            <TableHead className="text-right">Size (USDC)</TableHead>
-            <TableHead className="text-right">Size (Cumm)</TableHead>
+            {multiIssuer && <TableHead>Issuer</TableHead>}
+            <TableHead className="text-right">Shares</TableHead>
+            <TableHead className="text-right">Total</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody className="[&_tr]:border-b-0">
           {asks.length === 0 && emptyRow(true)}
           {[...asks].reverse().map((level) => row(level, true, askTotal))}
           <TableRow data-depth-midpoint>
-            <TableCell colSpan={3}>
-              <strong className="text-sm tabular-nums">{formatNumber(midpoint(book))}</strong>
+            <TableCell colSpan={columns}>
+              <strong className="text-sm tabular-nums">{formatNumber(mid)}</strong>
               <span className="ml-2 text-xs text-muted-foreground">
-                spr <span className="text-sm">{formatNumber(book.spread)}</span>
+                spr <span className="text-sm">{formatNumber(spread)}</span>
               </span>
             </TableCell>
           </TableRow>
@@ -336,5 +382,53 @@ function BranchDepth({
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+/** Listed issuer tokens with live multiplier and paused/delisted/halted state. */
+function ListedIssuers({ market }: { market: MarketView }) {
+  return (
+    <ul aria-label="Listed issuer tokens" className="flex flex-wrap gap-2 px-3 pb-3">
+      {legStatuses(market).map((status) => (
+        <li
+          key={status.collateral}
+          className="flex min-w-0 items-center gap-2 rounded-md bg-secondary px-2 py-1 text-xs"
+        >
+          <TokenIdentity
+            symbol={status.leg.symbol}
+            metadata={status.leg.metadata}
+            showName={false}
+            iconSize="sm"
+          />
+          {status.leg.issuer && (
+            <span className="truncate text-muted-foreground">{status.leg.issuer}</span>
+          )}
+          <span
+            className="tabular-nums text-muted-foreground"
+            title={
+              status.liveKnown
+                ? "Live issuer multiplier"
+                : "Listing multiplier (live state unavailable)"
+            }
+          >
+            ×{status.multiplierValue.toFixed(4)}
+          </span>
+          {status.tradable ? (
+            <Badge variant="positive">Tradable</Badge>
+          ) : (
+            <Badge
+              variant={status.halt === "delisted" ? "secondary" : "warning"}
+              title={status.reason ?? undefined}
+            >
+              {status.halt === "delisted"
+                ? "Delisted"
+                : status.halt === "issuer-paused"
+                  ? "Paused"
+                  : "Halted"}
+            </Badge>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

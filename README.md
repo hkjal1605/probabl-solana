@@ -4,9 +4,17 @@ Trading, custody, resolution and indexing run on Solana. The public and admin in
 
 **Work in progress, not production-approved.** Full program coverage and an independent security review remain outstanding. See [SECURITY.md](SECURITY.md) for release gates.
 
+A market is one order book per asset (for example "NVDA if YES") with one USDC quote
+and up to three whitelisted issuer tokens of the same stock as base legs (for example
+xStocks `NVDAx`, Ondo `NVDAon`, Remora `NVDAr`). Bids can accept several issuers;
+asks deliver one. Claims stay segregated per issuer. See
+[multi-issuer markets](docs/multi-issuer-markets.md).
+
 Classic SPL and selected Token-2022 collateral are supported, including fee-bearing
-base/quote tokens with net accounting and signed receipt limits. This does **not**
-mean every issuer or extension is supported. Read the [compatibility matrix and
+tokens with net accounting and signed receipt limits, and regulated issuer controls
+(permanent delegate, pause, default account state, UI multiplier, unset transfer hook,
+confidential-transfer mint config) admitted explicitly per custody pool. This does
+**not** mean every issuer or extension is supported. Read the [compatibility matrix and
 issuer integration gates](docs/TOKEN_COMPATIBILITY.md) before listing any asset.
 
 ## Local development
@@ -18,14 +26,28 @@ bun install --frozen-lockfile
 bun run build:contracts
 ```
 
+The indexer and API stream chain state over Yellowstone gRPC (Geyser). Install
+the plugin once (Linux downloads the checksum-pinned release; macOS builds the
+pinned tag from source):
+
+```sh
+bun scripts/solana/yellowstone.ts   # writes .local/yellowstone/geyser-10000.json
+```
+
 In a separate terminal, start a local validator with an unused ledger directory:
 
 ```sh
 solana-test-validator --ledger .local/validator \
   --bind-address 127.0.0.1 --rpc-port 8899 \
   --limit-ledger-size 1000000 \
+  --geyser-plugin-config .local/yellowstone/geyser-10000.json \
   --bpf-program 8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg target/deploy/conditional_stocks.so
 ```
+
+`YELLOWSTONE_GRPC_URL` (default `http://127.0.0.1:10000`) points the indexer at
+the stream; on devnet/mainnet use a hosted endpoint and `YELLOWSTONE_X_TOKEN`.
+The indexer is the only subscriber: the API reads its loopback relay
+(`INDEXER_RELAY_URL`, default `http://127.0.0.1:42070`).
 
 Then:
 
@@ -36,7 +58,7 @@ bun run solana:dev
 
 Public UI: http://localhost:3001. Admin UI: http://localhost:3002. API: http://127.0.0.1:3000. Indexer: http://127.0.0.1:42069.
 
-Bootstrap creates mock SPL tokens, two markets, resting liquidity and local test wallets under ignored `.local/`. It never reads a default wallet or source-project credentials, and refuses to overwrite an existing deployment. All demo tokens are mocks, without real stock rights. Reuse the same validator ledger and generated environment on restart; a different genesis is a different deployment.
+Bootstrap creates a mock quote token, mock issuer tokens replicating the mainnet xStocks/Ondo/Remora Token-2022 configurations, two multi-issuer markets, resting liquidity and local test wallets under ignored `.local/`. It never reads a default wallet or source-project credentials, and refuses to overwrite an existing deployment. All demo tokens are mocks, without real stock rights. Reuse the same validator ledger and generated environment on restart; a different genesis is a different deployment.
 
 The dev runner prints its PostgreSQL URL and retains its owned database/log directory on shutdown. By default it starts a fresh isolated database each run; previous offchain evidence remains in the retained directory, not automatically restored. Set an explicit localhost `DATABASE_URL` to reuse a running persistent database instead; the runner verifies the deployment and does not stop that database on shutdown. Do not use this development runner for production.
 
@@ -47,7 +69,8 @@ Polymarket metadata/probability ingestion is optional in the mock demo. Set a ne
 ## Devnet staging
 
 The [Devnet deployment runbook](docs/runbooks/solana-devnet.md) covers an env-file
-deployer key, guarded/resumable program deployment, six mock SPL/Token-2022 mints,
+deployer key, guarded/resumable program deployment, a mock USDC quote and mock issuer
+tokens per asset (NVDA/TSLA/SPY, replicating real issuer Token-2022 configurations),
 wrapped Devnet SOL, and configuration exports for the backend and local UI.
 Start with `.env.devnet.example`; actual deployment requires the wallet key,
 sufficient Devnet SOL and an explicit `devnet:deploy --execute` command.
@@ -58,7 +81,9 @@ sufficient Devnet SOL and an explicit `devnet:deploy --execute` command.
 bun run typecheck
 bun run test                     # fast TS + host Rust tests
 bun run test:references          # Polymarket service; isolated PostgreSQL required
-bun run test:solana              # actual SBF tests; running localhost validator required
+bun run test:solana              # SBF core, Token-2022 and multi-issuer suites; localhost validator required
+bun run test:pools               # protocol-wide custody (SOLANA_POOL_TEST_RPC)
+bun run test:delegation          # trading delegation (SOLANA_DELEGATION_TEST_RPC)
 bun run test:coverage            # host-instrumented Rust report, NOT SBF coverage
 bun run build:ui
 bun run build:admin-ui

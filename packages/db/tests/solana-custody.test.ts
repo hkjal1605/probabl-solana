@@ -14,7 +14,7 @@ run(
     const image: SnapshotWrite = {
       slot: 100,
       observedAt: Date.now(),
-      accounts: { version: 3, healthy: true, rawAccounts: [{ address: "fixture", data: "one" }] },
+      accounts: { version: 4, healthy: true, rawAccounts: [{ address: "fixture", data: "one" }] },
       pools: [
         {
           address: "pool",
@@ -28,6 +28,7 @@ run(
       claims: [
         { market: "A", owner: "alice", mint: "USDC-A-YES", asset: 4, available: "10" },
         { market: "B", owner: "alice", mint: "USDC-B-YES", asset: 4, available: "20" },
+        { market: "B", owner: "alice", mint: "NVDAr-B-NO", asset: 11, available: "30" },
       ],
     };
     try {
@@ -42,7 +43,18 @@ run(
         (
           await sql.query("SELECT available::text FROM solana_market_claims ORDER BY market")
         ).rows.map((r) => r.available),
-      ).toEqual(["10", "20"]);
+      ).toEqual(["10", "20", "30"]);
+      // Only claim assets (3c + 1 + branch) are market-wallet credit; underlying
+      // (3c) is protocol-wide pool credit and never a market claim row.
+      for (const asset of [0, 3, 9, 12])
+        await expect(
+          db.persistSnapshot("deployment", {
+            ...image,
+            slot: 100,
+            accounts: { ...image.accounts, rawAccounts: [{ address: "asset", data: String(asset) }] },
+            claims: [{ ...image.claims[0]!, asset }],
+          }),
+        ).rejects.toThrow();
       expect(await db.persistSnapshot("deployment", { ...image, slot: 99 })).toBe(false);
       expect(await db.persistSnapshot("deployment", { ...image, slot: 101 })).toBe(true);
       expect((await sql.query("SELECT count(*) FROM solana_asset_credits")).rows[0].count).toBe(
@@ -115,6 +127,28 @@ run(
         }),
       ).rejects.toThrow("abort");
       expect(await db.eventCount("test")).toBe(1);
+      await db.locked("history:test", async (tx) => {
+        for (const [index, kind, slot] of [
+          [2, 15, 3],
+          [3, 16, 4],
+          [4, 1, 2],
+          [5, 16, 9],
+        ] as const)
+          await tx.putEvent("test", {
+            ...event,
+            event_index: index,
+            slot,
+            name: "Change",
+            market: "M",
+            data: { market: "M", account: "admin", kind, asset: 2, amount: "1000" },
+          });
+      });
+      expect(
+        (await db.legEvents("test", "M", 5)).map((e) => [e.data.kind, String(e.slot)]),
+      ).toEqual([
+        [15, "3"],
+        [16, "4"],
+      ]);
       await db.locked("auth:test", (tx) =>
         tx.createChallenge("test", "alice", "challenge", "message"),
       );

@@ -11,8 +11,10 @@ import {
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { PROGRAM_ID, type DeploymentPlan } from "../devnet-policy.ts";
+import { ASSETS, PROGRAM_ID, type DeploymentPlan } from "../devnet-policy.ts";
+import { ISSUERS } from "../mock-issuers.ts";
 import { writeJson, readJson } from "../devnet-store.ts";
+import { decodeSupportedMint } from "@conditional-stocks/solana-client";
 import { pacedUpload } from "../devnet-upload.ts";
 import {
   prepare,
@@ -93,7 +95,7 @@ describe.skipIf(!enabled)("fresh-validator deployment rehearsal", () => {
     await expect(
       prepare(directory, Keypair.generate().publicKey, programPath),
     ).rejects.toThrow("identity differs");
-    expect(signers.size).toBe(6);
+    expect(signers.size).toBe(ASSETS.filter((a) => a.kind !== "native").length);
   });
   test("paced buffer writes are byte-exact, preserve authority and resume without duplicate fees", async () => {
     const buffer = Keypair.generate(),
@@ -128,7 +130,7 @@ describe.skipIf(!enabled)("fresh-validator deployment rehearsal", () => {
       programStatus(connection, changed, deployer.publicKey),
     ).rejects.toThrow("differs");
   }, 300_000);
-  test("atomically creates all seven allocations and initializes correct protocol roles", async () => {
+  test("atomically creates every allocation, issuer replicas included, and initializes correct protocol roles", async () => {
     await initializeAssets(ctx, plan, signers, new Set());
     await initializeConfig(ctx, plan);
     await verifyConfiguration(ctx, plan);
@@ -139,7 +141,7 @@ describe.skipIf(!enabled)("fresh-validator deployment rehearsal", () => {
       if (asset.symbol !== "SOL")
         expect(verified.currentSupply).toBe(asset.initialRaw);
     }
-  }, 180_000);
+  }, 480_000); // One finalized step per allocation (12 assets).
   test("reruns and uncertain-receipt recovery do not deploy or mint again", async () => {
     const before = await connection.getBalance(deployer.publicKey, "finalized");
     await deployProgram(ctx, directory, programPath, artifact);
@@ -154,15 +156,20 @@ describe.skipIf(!enabled)("fresh-validator deployment rehearsal", () => {
     );
     expect(
       [...recovered.completed].filter((s) => s.startsWith("asset:")).length,
-    ).toBe(7);
+    ).toBe(ASSETS.length);
     await initializeAssets(recovered.ctx, plan, signers, recovered.completed);
     expect(await connection.getBalance(deployer.publicKey, "finalized")).toBe(
       before,
     );
   }, 90_000);
-  test("Token-2022 fee transfers debit/credit exactly; later reruns do not refill spent allocations", async () => {
-    const asset = plan.assets.find((a) => a.symbol === "NVDA")!,
+  test("issuer-replica transfers debit/credit exactly; later reruns do not refill spent allocations", async () => {
+    const asset = plan.assets.find((a) => a.symbol === "NVDAon")!,
       mint = new PublicKey(asset.mint);
+    // Real Token-2022 extension state of the replica: exact issuer admission set.
+    const decoded = decodeSupportedMint(mint, await connection.getAccountInfo(mint, "finalized"));
+    expect(decoded.issuer.controls).toBe(ISSUERS.ondo.admitted);
+    expect(decoded.issuer.paused).toBe(false);
+    expect(decoded.decimals).toBe(9);
     const receiver = Keypair.generate().publicKey,
       ata = getAssociatedTokenAddressSync(
         mint,
@@ -184,7 +191,7 @@ describe.skipIf(!enabled)("fresh-validator deployment rehearsal", () => {
         ata,
         deployer.publicKey,
         100_000_000n,
-        6,
+        9,
         [],
         TOKEN_2022_PROGRAM_ID,
       ),
@@ -192,7 +199,7 @@ describe.skipIf(!enabled)("fresh-validator deployment rehearsal", () => {
     expect(
       (await getAccount(connection, ata, "finalized", TOKEN_2022_PROGRAM_ID))
         .amount,
-    ).toBe(99_750_000n);
+    ).toBe(100_000_000n);
     const replay = await journalContext(
       connection,
       deployer,
@@ -241,7 +248,7 @@ describe.skipIf(!enabled)("fresh-validator deployment rehearsal", () => {
       programId: plan.programId,
       artifactSha256: plan.artifactSha256,
       deployer: plan.deployer,
-      allocationsVerified: 7,
+      allocationsVerified: ASSETS.length,
       passed: true,
     });
     const journal = await readFile(join(directory, "journal.json"), "utf8");

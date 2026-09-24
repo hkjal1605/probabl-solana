@@ -81,7 +81,8 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
       ).rejects.toThrow("role");
       const now = Math.floor(Date.now() / 1000),
         config = {
-          baseToken: deployment.baseMint,
+          baseTokens: (deployment.baseMints as string[] | undefined) ?? [deployment.baseMint],
+          shareDecimals: "6",
           quoteToken: deployment.quoteMint,
           baseStep: "1000",
           priceTickRawX18: "10000000000000000",
@@ -130,6 +131,7 @@ test.skipIf(process.env.SOLANA_APP_E2E !== "1")(
         client,
         market.toBase58(),
         admin.publicKey.toBase58(),
+        config.baseTokens,
       ))
         await send(transaction);
       const lifecycle = async (action: number) => {

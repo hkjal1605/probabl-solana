@@ -18,9 +18,17 @@ use anchor_spl::token::{
 use conditional_stocks::pool::{pool_address, pool_vault, AssetCredit, AssetPool};
 use conditional_stocks::{
     accounts, instruction,
-    state::{Config, Market, OrderTerms, Plan, Roles, Terms, Trader, Wallet},
+    state::{
+        claim, underlying, BaseLeg, Config, Market, OrderTerms, Plan, Roles, Terms, Trader, Wallet,
+        ASSETS, QUOTE,
+    },
     ID,
 };
+
+/// The single listed base leg. Assets 0..6 cover the quote (0 underlying,
+/// 1/2 claims) and this leg (3 underlying, 4/5 claims).
+const BASE: usize = 1;
+const LISTED: usize = 6;
 use solana_program_test::ProgramTest;
 use solana_sdk::{
     account::{Account as BankAccount, AccountSharedData},
@@ -66,23 +74,34 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
         Pubkey::find_program_address(&[b"wallet", market_key.as_ref(), owner.as_ref()], &ID);
     let (trader_key, trader_bump) =
         Pubkey::find_program_address(&[b"trader", config_key.as_ref(), owner.as_ref()], &ID);
-    let mut vaults: Vec<_> = (0..6)
+    let mut vaults: Vec<_> = (0..LISTED as u8)
         .map(|a| Pubkey::find_program_address(&[b"vault", market_key.as_ref(), &[a]], &ID).0)
         .collect();
-    let mut mints = [Pubkey::new_unique(); 6];
-    mints[1] = Pubkey::new_unique();
+    let mut mints = vec![Pubkey::default(); ASSETS];
+    for (i, mint) in mints.iter_mut().enumerate().take(LISTED) {
+        *mint = if i % 3 == 0 {
+            Pubkey::new_unique()
+        } else {
+            Pubkey::find_program_address(&[b"claim", market_key.as_ref(), &[i as u8]], &ID).0
+        };
+    }
+    // Indexed by collateral: quote pool, base-leg pool.
     let pools = [
-        pool_address(&config_key, &mints[0]),
-        pool_address(&config_key, &mints[1]),
+        pool_address(&config_key, &mints[underlying(QUOTE)]),
+        pool_address(&config_key, &mints[underlying(BASE)]),
     ];
     let credits = pools.map(|p| {
         Pubkey::find_program_address(&[b"asset-credit", p.as_ref(), owner.as_ref()], &ID).0
     });
-    vaults[0] = pool_vault(&pools[0]);
-    vaults[1] = pool_vault(&pools[1]);
-    for (i, mint) in mints.iter_mut().enumerate().skip(2) {
-        *mint = Pubkey::find_program_address(&[b"claim", market_key.as_ref(), &[i as u8]], &ID).0;
-    }
+    vaults[underlying(QUOTE)] = pool_vault(&pools[QUOTE]);
+    vaults[underlying(BASE)] = pool_vault(&pools[BASE]);
+    let pool_bumps = [QUOTE, BASE].map(|c| {
+        Pubkey::find_program_address(
+            &[b"pool", config_key.as_ref(), mints[underlying(c)].as_ref()],
+            &ID,
+        )
+        .1
+    });
     let roles = Roles {
         market_admin: owner,
         guardian: owner,
@@ -91,7 +110,7 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
     let config = Config {
         seed_authority: owner,
         admin: owner,
-        quote_mint: mints[1],
+        quote_mint: mints[underlying(QUOTE)],
         roles,
         paused: false,
         maker_bps: 0,
@@ -102,16 +121,26 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
     };
     let zero = vec![0; 8 + Market::INIT_SPACE];
     let mut market = Market::try_deserialize_unchecked(&mut zero.as_slice()).unwrap();
+    market.ledgers();
     market.config = config_key;
     market.id = id;
     market.bump = market_bump;
-    market.mints = mints;
-    market.decimals = [6, 6];
-    market.vaults_initialized = 63;
+    market.mints = mints.clone();
+    market.bases = 1;
+    market.legs[0] = BaseLeg {
+        scale: 1,
+        multiplier: protocol_core::UNIT_MULTIPLIER,
+        active: true,
+    };
+    market.decimals = [6; 4];
+    market.pool_bumps[..2].copy_from_slice(&pool_bumps);
+    market.vaults_initialized = (1 << LISTED) - 1;
     market.state = protocol_core::OPEN;
-    market.credits = [100; 6];
-    market.credits[..2].fill(0);
-    market.backing = [100, 100];
+    for asset in 0..LISTED {
+        market.credits[asset] = if asset % 3 == 0 { 0 } else { 100 };
+    }
+    market.backing[QUOTE] = 100;
+    market.backing[BASE] = 100;
     market.terms = Terms {
         condition: [1; 32],
         yes_index: 1,
@@ -121,6 +150,7 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
         metadata_uri: String::new(),
         trading_open: 0,
         trading_cutoff: i64::MAX,
+        share_decimals: 6,
         tick: protocol_core::WAD,
         step: 1,
         min_notional: 1,
@@ -132,7 +162,7 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
     let wallet = Wallet {
         market: market_key,
         owner,
-        balances: [0, 0, 100, 100, 100, 100],
+        balances: [0, 100, 100, 0, 100, 100, 0, 0, 0, 0, 0, 0],
         open_notional: 0,
         bump: wallet_bump,
     };
@@ -149,42 +179,45 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
         (wallet_key, serialized(&wallet)),
         (trader_key, serialized(&trader)),
     ];
-    for asset in 0..2 {
+    for collateral in [QUOTE, BASE] {
         baseline.push((
-            pools[asset],
+            pools[collateral],
             serialized(&AssetPool {
                 config: config_key,
-                mint: mints[asset],
+                mint: mints[underlying(collateral)],
                 token_program: token::ID,
                 decimals: 6,
                 liability: 200,
-                bump: Pubkey::find_program_address(
-                    &[b"pool", config_key.as_ref(), mints[asset].as_ref()],
+                bump: pool_bumps[collateral],
+                admitted: 0,
+                vault_bump: Pubkey::find_program_address(
+                    &[b"pool-vault", pools[collateral].as_ref()],
                     &ID,
                 )
                 .1,
             }),
         ));
         baseline.push((
-            credits[asset],
+            credits[collateral],
             serialized(&AssetCredit {
-                pool: pools[asset],
+                pool: pools[collateral],
                 owner,
                 available: 100,
                 bump: Pubkey::find_program_address(
-                    &[b"asset-credit", pools[asset].as_ref(), owner.as_ref()],
+                    &[b"asset-credit", pools[collateral].as_ref(), owner.as_ref()],
                     &ID,
                 )
                 .1,
             }),
         ));
     }
-    for asset in 0..6 {
+    for asset in 0..LISTED {
+        let custody = asset % 3 == 0;
         baseline.push((
             mints[asset],
             token_data(RawMint {
-                mint_authority: COption::Some(if asset < 2 { owner } else { market_key }),
-                supply: if asset < 2 { 200 } else { 100 },
+                mint_authority: COption::Some(if custody { owner } else { market_key }),
+                supply: if custody { 200 } else { 100 },
                 decimals: 6,
                 is_initialized: true,
                 freeze_authority: COption::None,
@@ -194,8 +227,12 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
             vaults[asset],
             token_data(RawAccount {
                 mint: mints[asset],
-                owner: if asset < 2 { pools[asset] } else { market_key },
-                amount: if asset < 2 { 200 } else { 100 },
+                owner: if custody {
+                    pools[asset / 3]
+                } else {
+                    market_key
+                },
+                amount: if custody { 200 } else { 100 },
                 state: AccountState::Initialized,
                 ..RawAccount::default()
             }),
@@ -214,19 +251,20 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
         program.add_account(*key, account.clone());
     }
     let mut context = program.start_with_context().await;
+    let (yes, no) = (claim(BASE, 0), claim(BASE, 1));
     let position_accounts = accounts::Positions {
-        system_program: anchor_lang::system_program::ID,
         owner,
         market: market_key,
         wallet: wallet_key,
-        yes_mint: mints[2],
-        no_mint: mints[3],
-        yes_vault: vaults[2],
-        no_vault: vaults[3],
+        yes_mint: mints[yes],
+        no_mint: mints[no],
+        yes_vault: vaults[yes],
+        no_vault: vaults[no],
         token_program: token::ID,
-        underlying_vault: vaults[0],
-        pool: pools[0],
-        credit: credits[0],
+        underlying_vault: vaults[underlying(BASE)],
+        underlying_mint: mints[underlying(BASE)],
+        pool: pools[BASE],
+        credit: credits[BASE],
     }
     .to_account_metas(None);
     for fault in 0..2 {
@@ -241,20 +279,20 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
             }
             let (target, mut bad) = if fault == 0 {
                 (
-                    mints[3],
+                    mints[no],
                     baseline
                         .iter()
-                        .find(|(k, _)| *k == mints[3])
+                        .find(|(k, _)| *k == mints[no])
                         .unwrap()
                         .1
                         .clone(),
                 )
             } else {
                 (
-                    vaults[0],
+                    vaults[underlying(BASE)],
                     baseline
                         .iter()
-                        .find(|(k, _)| *k == vaults[0])
+                        .find(|(k, _)| *k == vaults[underlying(BASE)])
                         .unwrap()
                         .1
                         .clone(),
@@ -294,17 +332,17 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
                     accounts: position_accounts.clone(),
                     data: match path {
                         0 => instruction::Split {
-                            collateral: 0,
+                            collateral: BASE as u8,
                             amount: 1,
                         }
                         .data(),
                         1 => instruction::Merge {
-                            collateral: 0,
+                            collateral: BASE as u8,
                             amount: 1,
                         }
                         .data(),
                         _ => instruction::Redeem {
-                            collateral: 0,
+                            collateral: BASE as u8,
                             yes_amount: 2,
                             no_amount: 0,
                         }
@@ -321,25 +359,33 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
                     order,
                     token_program: token::ID,
                     system_program: anchor_lang::system_program::ID,
-                    base_vault: vaults[0],
-                    quote_vault: vaults[1],
-                    base_pool: pools[0],
-                    quote_pool: pools[1],
+                    quote_vault: vaults[underlying(QUOTE)],
+                    quote_pool: pools[QUOTE],
                 }
                 .to_account_metas(None);
-                for asset in 2..6 {
+                // Quote claims, then the touched leg: pool, pool vault, issuer
+                // mint (read-only), then its claim mints and vaults.
+                for asset in [claim(QUOTE, 0), claim(QUOTE, 1)] {
+                    accounts.push(AccountMeta::new(mints[asset], false));
+                    accounts.push(AccountMeta::new(vaults[asset], false));
+                }
+                accounts.push(AccountMeta::new_readonly(pools[BASE], false));
+                accounts.push(AccountMeta::new_readonly(vaults[underlying(BASE)], false));
+                accounts.push(AccountMeta::new_readonly(mints[underlying(BASE)], false));
+                for asset in [yes, no] {
                     accounts.push(AccountMeta::new(mints[asset], false));
                     accounts.push(AccountMeta::new(vaults[asset], false));
                 }
                 accounts.push(AccountMeta::new(wallet_key, false));
                 accounts.push(AccountMeta::new_readonly(trader_key, false));
-                accounts.push(AccountMeta::new(credits[0], false));
+                accounts.push(AccountMeta::new(credits[BASE], false));
                 Instruction {
                     program_id: ID,
                     accounts,
                     data: instruction::Place {
                         delegations: 0,
                         participants: 1,
+                        touched: 1,
                         terms: OrderTerms {
                             recipient: owner,
                             salt,
@@ -352,10 +398,12 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
                             side: 1,
                             funding: 0,
                             tif: 0,
+                            bases: 1,
                         },
                         plan: Plan {
                             deadline: i64::MAX - 2,
                             next_sequence: 0,
+                            min_fill: 0,
                             maker_bps: 0,
                             taker_bps: 0,
                             legs: vec![],
@@ -404,12 +452,12 @@ async fn sbf_rejects_unbacked_external_supply_and_custody_shortfalls_before_ever
     }
     for data in [
         instruction::Split {
-            collateral: 0,
+            collateral: BASE as u8,
             amount: 1,
         }
         .data(),
         instruction::Merge {
-            collateral: 0,
+            collateral: BASE as u8,
             amount: 1,
         }
         .data(),

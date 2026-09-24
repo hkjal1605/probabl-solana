@@ -47,6 +47,7 @@ fn terms(owner: Pubkey) -> OrderTerms {
         side: 0,
         funding: 0,
         tif: 0,
+        bases: 1,
     }
 }
 

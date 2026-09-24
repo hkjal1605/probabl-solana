@@ -86,14 +86,14 @@ export function MarketSearchResults({
                 <div className="flex items-center justify-between gap-3">
                   <TokenIdentity
                     symbol={market.ticker}
-                    metadata={market.baseTokenMetadata}
+                    metadata={market.assetMetadata}
                     showName={false}
                   />
                   <LifecycleBadge state={market.lifecycle} />
                 </div>
                 <p className="mt-2 line-clamp-2 text-sm leading-5">{market.question}</p>
                 <p className="mt-1 truncate text-xs text-muted-foreground">
-                  {market.baseTokenMetadata?.name ?? market.ticker} /{" "}
+                  {market.assetMetadata?.name ?? market.ticker} /{" "}
                   {market.quoteTokenMetadata?.symbol ?? market.quoteToken.slice(0, 8)}
                 </p>
               </div>

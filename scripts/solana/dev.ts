@@ -43,7 +43,8 @@ const stop = async () => {
 process.once("SIGINT", () => void stop());
 process.once("SIGTERM", () => void stop());
 // Schema operations are owned by packages/db, before runtime services start.
-for (const script of ["migrate", "migrate:solana"]) {
+// packages/db owns the Solana schema (`migrate:solana`); there is no generic `migrate`.
+for (const script of ["migrate:solana"]) {
   const migration = spawn(process.execPath, ["run", "--filter", "@conditional-stocks/db", script], {
     stdio: "inherit",
     env: environment,

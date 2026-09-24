@@ -4,10 +4,53 @@ One Bun process, one dedicated wallet, one private checkpoint file. No database,
 Redis, external signing endpoint, hedging engine or new contract is required.
 Dry-run is the default. Nothing starts automatically with the API/indexer.
 
+## One book, every issuer
+
+A market (for example "NVDA if YES") lists up to three whitelisted issuer tokens
+of the same stock (xStocks `NVDAx`, Ondo `NVDAon`, Remora `NVDAr`) against one
+USDC quote; see [multi-issuer markets](../../docs/multi-issuer-markets.md). The bot
+quotes that market as **one book per branch**:
+
+- **Bids** are consolidated: each bid level pays the shared USDC claim and accepts
+  every currently tradable issuer (`bases` = mask of tradable legs). A 100k USDC
+  maker therefore serves holders of every whitelisted issuer with one ladder.
+- **Asks** deliver exactly one issuer each. Each issuer gets its own ask ladder,
+  sized from that issuer's claim inventory; the per-side ask budget is shared
+  across issuers in proportion to their holdings.
+- Inventory risk is the branch position **across issuers**: bids stop at twice
+  `targetShares`, and every fragment counts toward it, including fragments too
+  small to post an ask on their own issuer.
+
+Issuer state is read every cycle through the SDK's `liveLegs`. A leg that is
+delisted, paused by its issuer, has a frozen pool vault, a configured transfer
+hook, or a multiplier outside the dividend band (a split or reverse split) is
+**halted**: the bot posts no asks on it, cancels its resting asks, and replaces
+bids so they no longer accept it. The other issuers keep quoting. With every leg
+halted the market is paused and its quotes are cancelled. A resting ask whose
+reservation no longer covers the live multiplier is re-reserved.
+
 ## Pricing
 
 These books trade **YES-stock against YES-quote** and **NO-stock against NO-quote**.
 They are not ordinary prediction shares priced at `p` and `1-p` dollars.
+
+Prices and quantities are **per share unit** (`10^-shareDecimals` of one economic
+share), not per raw issuer token. Only **reference issuers** (`referenceMints`,
+default: every leg) price the book. Each tradable reference issuer observes the
+share price as its Jupiter token price divided by its **live ScaledUiAmount
+multiplier** (exact rational arithmetic on the f64 bits; `1.0` for mints without
+the extension), times the reviewed `basePriceMultipliers` entry. The spot is the
+median of these observations. Reference issuers without a usable price are left
+out; if the rest disagree by more than `maxLegDispersionBps` the market pauses.
+Illiquid issuer tokens routinely price several percent apart on Jupiter
+(September 2026: NVDAx $228.89 vs NVDAon $218.94; SPYx $773.78 vs SPYon $853.19),
+so **reference only the most liquid issuer (typically xStocks)**. Non-reference
+issuers never move the price or pause quoting; they still get bids and asks from
+inventory at the reference share price. If every reference issuer is halted, the
+market pauses. Claim
+inventory is raw units of each issuer's mint and converts to share units as
+`floor(raw * multiplier / scale)`, the exact inverse of the program's rounded-up
+ask reservation, so an ask never reserves more claims than the issuer leg holds.
 
 For spot `S` in quote-token units and a reviewed scenario gap `D`:
 
@@ -37,7 +80,7 @@ mean actual best bids/asks and last trades will not satisfy an exact identity.
 The half-spread includes a minimum, maker fee, adverse-selection buffer, recent
 spot movement and probability-book uncertainty. Inventory changes order sizes
 rather than breaking the paired center relationship. A branch stops buying at
-twice its seeded base inventory, and never offers unowned claims. There is no
+twice its target share position, and never offers unowned claims. There is no
 automatic leverage, borrowing, self-trading, taker execution or external hedge.
 Placement uses an empty maker-leg plan, so it cannot consume liquidity; known
 crossing sides are omitted. The program has no global post-only constraint, so a
@@ -69,7 +112,7 @@ bun --env-file=.local/ec2/env/market-maker.env services/market-maker/src/main.ts
 For actual execution, provide `MM_PRIVATE_KEY` (base58 or JSON 64-byte keypair)
 and its matching `MM_WALLET_ADDRESS`. The service rejects governance/admin keys.
 Set `MM_MODE=live` **and** pass `--execute`; neither switch alone enables signing.
-First fund the dedicated wallet with the configured whole base/quote tokens and
+First fund the dedicated wallet with the configured issuer/quote tokens and
 SOL for fees/rent. SOL token collateral must already be wrapped SOL in its ATA;
 the bot never spends the native gas reserve to wrap or swap assets automatically.
 
@@ -84,9 +127,12 @@ bun --env-file=.local/ec2/env/market-maker.env services/market-maker/src/main.ts
 bun --env-file=.local/ec2/env/market-maker.env services/market-maker/src/main.ts --execute --cancel
 ```
 
-Funding deposits `baseInventory` and `quoteInventory`, then splits each into equal
-YES/NO claim credits. The quotes use **conditional-credit funding**, with matched
-branch collateral. Ordinary quoting never deposits more tokens. Funding is
+Funding deposits `quoteInventory` and each non-zero `baseInventories` entry into
+that token's protocol-wide pool (fee-aware for Token-2022 transfer fees), then
+initializes the owner's pool credit and splits each collateral into equal YES/NO
+claims of **its own issuer**. Issuers that are halted at funding time (for example
+paused) are skipped and logged; `--static` tops them up once they resume. The
+quotes use **conditional-credit funding**, with matched branch collateral. Ordinary quoting never deposits more tokens. Funding is
 journaled before the first transaction; a completed allocation is not deposited
 again, and a partial attempt requires manual inspection. Do not clear this latch
 to blindly retry. Unfilled, cancelled and acquired inventory stays in the wallet's
@@ -95,14 +141,43 @@ stopping the bot; this service does not automatically liquidate or settle.
 
 ### Allocation fields
 
+```json
+{
+  "market": "<market address>",
+  "baseMints": [
+    "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
+    "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo",
+    "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu"
+  ],
+  "referenceMints": ["Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"],
+  "quoteMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  "baseInventories": ["0", "0", "0"],
+  "targetShares": "500",
+  "quoteInventory": "100000",
+  "orderQuote": "25000",
+  "gapBps": 0,
+  "basePriceMultipliers": ["1", "1", "1"],
+  "quotePriceMultiplier": "1"
+}
+```
+
+This is a quote-only maker: 100k USDC, no issuer tokens, one consolidated bid
+ladder per branch accepting NVDAx, NVDAon and NVDAr, priced from NVDAx alone.
+Asks appear per issuer as the bids fill.
+
 | Field | Meaning |
 | --- | --- |
-| `market`, `baseMint`, `quoteMint` | Exact allowlisted identities; all three must match chain state. |
-| `baseInventory`, `quoteInventory` | One-time whole-token seed amounts, in normal decimal units. Splitting does not double their economic value. |
-| `orderQuote` | Maximum aggregate conditional-quote notional per branch/side ladder, at most 25% of seed quote inventory. Contract caps can reduce it. |
-| `quoteLevels`, `levelSpacingBps` | Number of ranked prices per branch/side (1–5) and outward gap between neighboring levels. More levels multiply order-account rent, not economic collateral. |
+| `market`, `quoteMint` | Exact allowlisted identities; must match chain state and the deployment quote. |
+| `baseMints` | The market's issuer tokens in on-chain leg order (1–3, distinct, not the quote). Must equal the listed legs exactly: a newly listed issuer pauses the market until reviewed. |
+| `referenceMints` | Optional non-empty, distinct subset of `baseMints` whose Jupiter prices form the spot (median). Default: every leg. Recommended: the single most liquid issuer. Only these mints are requested from the spot-price API. |
+| `baseInventories` | One-time seed per issuer, in whole tokens of that mint (raw / 10^decimals, before any ScaledUiAmount multiplier). `"0"` seeds nothing. |
+| `targetShares` | Reference branch position across all issuers, in economic shares. Bids stop at twice this; ask/bid sizes skew around it. Optional when some issuer is seeded (defaults to the seeds at their live multipliers); required for a quote-only maker. |
+| `quoteInventory` | One-time USDC seed. Splitting does not double its economic value. |
+| `orderQuote` | Maximum aggregate conditional-quote notional per branch/side ladder (all issuers' asks together), at most 25% of seed quote inventory. Contract caps can reduce it. |
+| `quoteLevels`, `levelSpacingBps` | Number of ranked prices per ladder (1–10) and outward gap between neighboring levels. More levels (and issuers) multiply order-account rent, not economic collateral. |
 | `gapBps` | Signed scenario price difference relative to spot, bounded to ±7500. Zero is the neutral prior. |
-| `basePriceMultiplier`, `quotePriceMultiplier` | Reviewed multiplier from each reference-price unit to one raw token unit divided by `10^decimals`. Never infer scaled stock units from a ticker. |
+| `basePriceMultipliers`, `quotePriceMultiplier` | Reviewed multiplier from each reference-price unit to one raw token unit divided by `10^decimals`, per issuer. The live ScaledUiAmount multiplier is applied on top automatically; never infer scaled stock units from a ticker. |
+| `maxLegDispersionBps` (global) | Maximum disagreement between **reference** issuers' per-share prices before the market pauses (default 300). Irrelevant with a single reference. |
 
 Defaults are in `config.example.json`. The 0.1 SOL daily spending cap is a safety
 limit, **not an estimate that continuous operation costs 0.1 SOL/day**. Quote
@@ -114,14 +189,16 @@ it is not realized/net-dollar P&L and does not subtract the separate SOL budget.
 ## Safety and operation
 
 - Fail closed on stale, missing, one-sided, crossed, shallow, extreme-probability
-  or mismapped feeds. Both base and quote prices must be available and recent.
+  or mismapped feeds. The quote price and at least one tradable reference price must
+  be available and recent; a substituted or duplicated issuer identity fails closed.
   The existing price endpoint remains display-only for the product; **this bot
   explicitly adopts those indicative observations as its own off-chain trading
   inputs**. They never become contract funding or settlement oracles.
 - SPL and the protocol-supported Token-2022 extensions reuse the audited client
-  policy and fee-aware deposit calculation. Frozen accounts fail simulation.
-  Transfer hooks, confidential/rebasing/scaled features not supported by the
-  program are **not** silently supported. Arbitrary issuer/token coverage is not
+  policy and fee-aware deposit calculation. Issuer controls (pausable, default
+  frozen state, ScaledUiAmount, permanent delegate, unset transfer hook) are
+  admitted per pool by the program; their live state halts one issuer leg, not
+  the whole book. Frozen accounts fail simulation. Arbitrary issuer/token coverage is not
   possible when a compatible price or issuer integration is absent.
 - Atomic cancel/replace uses current chain inventory, nonce, fee and sequence.
   No API-provided instructions are signed. Rejected simulations spend no funds.
@@ -155,8 +232,9 @@ program and run `scripts/solana/bootstrap.ts` into a fresh private fixture direc
 Set `MM_VALIDATOR_FIXTURE` to that directory and run
 `bun --no-env-file test services/market-maker/test/validator.test.ts`. Repeat with a
 separate bootstrap using `SOLANA_TEST_TOKEN_2022=1` for transfer-fee collateral.
-The test rejects non-localhost fixtures. It tests fresh-wallet funding, splits,
-four resting orders, a real maker fill, replacement and stale-feed cancellation.
+The test rejects non-localhost fixtures. It reads the issuer legs from the listed
+market and tests fresh-wallet funding per issuer, splits, consolidated bids plus
+per-issuer asks, a real maker fill, replacement and stale-feed cancellation.
 
 ## Production constraint: order-account rent
 

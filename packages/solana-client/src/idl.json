@@ -51,6 +51,118 @@
       "args": []
     },
     {
+      "name": "add_base",
+      "discriminator": [
+        116,
+        210,
+        51,
+        55,
+        228,
+        34,
+        52,
+        0
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          },
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "relations": [
+            "pool"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "approve_delegate",
       "discriminator": [
         68,
@@ -620,10 +732,57 @@
           }
         },
         {
-          "name": "base_mint"
+          "name": "quote_mint"
         },
         {
-          "name": "quote_mint"
+          "name": "quote_pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config"
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  45,
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quote_pool"
+              }
+            ]
+          }
         },
         {
           "name": "market",
@@ -1038,16 +1197,16 @@
       ]
     },
     {
-      "name": "initialize_asset",
+      "name": "initialize_claims",
       "discriminator": [
-        214,
-        153,
-        49,
-        248,
-        95,
-        248,
-        208,
-        179
+        83,
+        1,
+        155,
+        15,
+        158,
+        204,
+        114,
+        146
       ],
       "accounts": [
         {
@@ -1060,108 +1219,19 @@
           "writable": true
         },
         {
-          "name": "mint",
-          "relations": [
-            "pool"
-          ]
-        },
-        {
-          "name": "pool",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  111,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "market.config",
-                "account": "Market"
-              },
-              {
-                "kind": "account",
-                "path": "mint"
-              }
-            ]
-          }
-        },
-        {
-          "name": "vault",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  111,
-                  108,
-                  45,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "pool"
-              }
-            ]
-          }
-        },
-        {
-          "name": "token_program",
-          "relations": [
-            "pool"
-          ]
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "asset",
-          "type": "u8"
-        }
-      ]
-    },
-    {
-      "name": "initialize_claim",
-      "discriminator": [
-        100,
-        184,
-        96,
-        221,
-        157,
-        222,
-        134,
-        17
-      ],
-      "accounts": [
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "market",
+          "name": "yes_mint",
           "writable": true
         },
         {
-          "name": "mint",
+          "name": "no_mint",
           "writable": true
         },
         {
-          "name": "vault",
+          "name": "yes_vault",
+          "writable": true
+        },
+        {
+          "name": "no_vault",
           "writable": true
         },
         {
@@ -1175,7 +1245,7 @@
       ],
       "args": [
         {
-          "name": "asset",
+          "name": "collateral",
           "type": "u8"
         }
       ]
@@ -1282,6 +1352,9 @@
       "accounts": [
         {
           "name": "payer",
+          "docs": [
+            "Admission of issuer controls is a listing decision."
+          ],
           "writable": true,
           "signer": true
         },
@@ -1371,7 +1444,12 @@
           "address": "11111111111111111111111111111111"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "admitted",
+          "type": "u16"
+        }
+      ]
     },
     {
       "name": "initialize_wallet",
@@ -1655,33 +1733,13 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "pool",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  111,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "market.config",
-                "account": "Market"
-              },
-              {
-                "kind": "account",
-                "path": "market.mints [usize :: from(collateral != 0)]",
-                "account": "Market"
-              }
-            ]
-          }
+          "name": "pool"
         },
         {
           "name": "credit",
+          "docs": [
+            "Created beforehand by `initialize_credit` (idempotent; the SDK prepends it)."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -1714,10 +1772,6 @@
           }
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        },
-        {
           "name": "underlying_vault",
           "pda": {
             "seeds": [
@@ -1742,6 +1796,9 @@
               }
             ]
           }
+        },
+        {
+          "name": "underlying_mint"
         }
       ],
       "args": [
@@ -1880,31 +1937,6 @@
           "address": "11111111111111111111111111111111"
         },
         {
-          "name": "base_pool",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  111,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "config"
-              },
-              {
-                "kind": "account",
-                "path": "market.mints [0]",
-                "account": "Market"
-              }
-            ]
-          }
-        },
-        {
           "name": "quote_pool",
           "pda": {
             "seeds": [
@@ -1923,34 +1955,8 @@
               },
               {
                 "kind": "account",
-                "path": "market.mints [1]",
+                "path": "market.mints [underlying(QUOTE)]",
                 "account": "Market"
-              }
-            ]
-          }
-        },
-        {
-          "name": "base_vault",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  111,
-                  108,
-                  45,
-                  118,
-                  97,
-                  117,
-                  108,
-                  116
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "base_pool"
               }
             ]
           }
@@ -2010,6 +2016,10 @@
         },
         {
           "name": "delegations",
+          "type": "u8"
+        },
+        {
+          "name": "touched",
           "type": "u8"
         }
       ]
@@ -2142,33 +2152,13 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "pool",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  111,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "market.config",
-                "account": "Market"
-              },
-              {
-                "kind": "account",
-                "path": "market.mints [usize :: from(collateral != 0)]",
-                "account": "Market"
-              }
-            ]
-          }
+          "name": "pool"
         },
         {
           "name": "credit",
+          "docs": [
+            "Created beforehand by `initialize_credit` (idempotent; the SDK prepends it)."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -2201,10 +2191,6 @@
           }
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        },
-        {
           "name": "underlying_vault",
           "pda": {
             "seeds": [
@@ -2229,6 +2215,9 @@
               }
             ]
           }
+        },
+        {
+          "name": "underlying_mint"
         }
       ],
       "args": [
@@ -2261,6 +2250,7 @@
       "accounts": [
         {
           "name": "actor",
+          "writable": true,
           "signer": true
         },
         {
@@ -2292,6 +2282,10 @@
         {
           "name": "market",
           "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -2529,6 +2523,65 @@
       "args": []
     },
     {
+      "name": "set_base",
+      "discriminator": [
+        69,
+        182,
+        195,
+        139,
+        98,
+        166,
+        46,
+        127
+      ],
+      "accounts": [
+        {
+          "name": "actor",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "config.seed_authority",
+                "account": "Config"
+              }
+            ]
+          },
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "market",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "collateral",
+          "type": "u8"
+        },
+        {
+          "name": "active",
+          "type": "bool"
+        }
+      ]
+    },
+    {
       "name": "split",
       "discriminator": [
         124,
@@ -2604,33 +2657,13 @@
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "pool",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  111,
-                  108
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "market.config",
-                "account": "Market"
-              },
-              {
-                "kind": "account",
-                "path": "market.mints [usize :: from(collateral != 0)]",
-                "account": "Market"
-              }
-            ]
-          }
+          "name": "pool"
         },
         {
           "name": "credit",
+          "docs": [
+            "Created beforehand by `initialize_credit` (idempotent; the SDK prepends it)."
+          ],
           "writable": true,
           "pda": {
             "seeds": [
@@ -2663,10 +2696,6 @@
           }
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        },
-        {
           "name": "underlying_vault",
           "pda": {
             "seeds": [
@@ -2691,6 +2720,9 @@
               }
             ]
           }
+        },
+        {
+          "name": "underlying_mint"
         }
       ],
       "args": [
@@ -3408,6 +3440,21 @@
       "code": 6021,
       "name": "DelegateBudget",
       "msg": "Delegated order exceeds its per-order or remaining allowance"
+    },
+    {
+      "code": 6022,
+      "name": "LegHalted",
+      "msg": "Base leg is delisted, uninitialized, paused, frozen or past a split-sized multiplier change"
+    },
+    {
+      "code": 6023,
+      "name": "IssuerPaused",
+      "msg": "Issuer token is paused"
+    },
+    {
+      "code": 6024,
+      "name": "TransferHookEnabled",
+      "msg": "Issuer transfer hook is configured; hook execution is not supported"
     }
   ],
   "types": [
@@ -3463,6 +3510,49 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "admitted",
+            "docs": [
+              "Issuer-control categories the market administrator admitted for this mint."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "vault_bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BaseLeg",
+      "docs": [
+        "One whitelisted issuer token of the market's asset. Claims on a leg are",
+        "backed only by that issuer's token; legs never share collateral."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "scale",
+            "docs": [
+              "10^(decimals - share_decimals): raw issuer units per share unit at a",
+              "multiplier of one. Deliveries also divide by the live multiplier."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "multiplier",
+            "docs": [
+              "Effective ScaledUiAmount multiplier (f64 bits, 1.0 if none) at listing.",
+              "A live multiplier outside the 4/5..5/4 band of it halts the leg."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "active",
+            "type": "bool"
           }
         ]
       }
@@ -3653,15 +3743,15 @@
     },
     {
       "name": "Leg",
+      "docs": [
+        "Up to this many share units of one planned maker. A maker filled, cancelled",
+        "or invalidated since planning is skipped; a partially filled one is capped."
+      ],
       "type": {
         "kind": "struct",
         "fields": [
           {
             "name": "quantity",
-            "type": "u64"
-          },
-          {
-            "name": "expected_remaining",
             "type": "u64"
           }
         ]
@@ -3694,12 +3784,34 @@
             }
           },
           {
-            "name": "mints",
+            "name": "bases",
+            "docs": [
+              "Listed base legs occupy collaterals 1..=bases."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "legs",
             "type": {
               "array": [
-                "pubkey",
-                6
+                {
+                  "defined": {
+                    "name": "BaseLeg"
+                  }
+                },
+                3
               ]
+            }
+          },
+          {
+            "name": "mints",
+            "docs": [
+              "The four per-asset ledgers are heap vectors of exactly ASSETS entries",
+              "(see `Market::ledgers`), keeping every SBF frame that deserializes a",
+              "Market below 4 KiB. Their length never changes after creation."
+            ],
+            "type": {
+              "vec": "pubkey"
             }
           },
           {
@@ -3707,13 +3819,22 @@
             "type": {
               "array": [
                 "u8",
-                2
+                4
+              ]
+            }
+          },
+          {
+            "name": "pool_bumps",
+            "type": {
+              "array": [
+                "u8",
+                4
               ]
             }
           },
           {
             "name": "vaults_initialized",
-            "type": "u8"
+            "type": "u16"
           },
           {
             "name": "state",
@@ -3729,25 +3850,35 @@
             }
           },
           {
+            "name": "recent",
+            "docs": [
+              "The last RECENT placements of each branch: branch b, sequence s at",
+              "`b * RECENT + s % RECENT` (the sequence is implied: within the window",
+              "each slot holds the latest placement mapping to it). Heap-sized like",
+              "the ledgers. Kept compact: the market is rewritten by every placement."
+            ],
+            "type": {
+              "vec": {
+                "defined": {
+                  "name": "Placement"
+                }
+              }
+            }
+          },
+          {
             "name": "open_notional",
             "type": "u128"
           },
           {
             "name": "credits",
             "type": {
-              "array": [
-                "u128",
-                6
-              ]
+              "vec": "u128"
             }
           },
           {
             "name": "escrow",
             "type": {
-              "array": [
-                "u128",
-                6
-              ]
+              "vec": "u128"
             }
           },
           {
@@ -3755,17 +3886,17 @@
             "type": {
               "array": [
                 "u64",
-                2
+                4
               ]
             }
           },
           {
             "name": "fees",
+            "docs": [
+              "Indexed by claim asset; underlying slots stay zero."
+            ],
             "type": {
-              "array": [
-                "u64",
-                4
-              ]
+              "vec": "u64"
             }
           },
           {
@@ -3950,6 +4081,35 @@
           {
             "name": "tif",
             "type": "u8"
+          },
+          {
+            "name": "bases",
+            "docs": [
+              "Base-leg bitmask (bit i = collateral i + 1). A buy lists every issuer it",
+              "accepts; a sell names exactly the one issuer token it delivers."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Placement",
+      "docs": [
+        "A placement as retained for race checks: its limit price in ticks of the",
+        "market (prices are tick multiples) and its side, `rules::SIDE_NONE` when",
+        "the order did not rest."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "ticks",
+            "type": "u64"
+          },
+          {
+            "name": "side",
+            "type": "u8"
           }
         ]
       }
@@ -3965,6 +4125,17 @@
           },
           {
             "name": "next_sequence",
+            "docs": [
+              "The branch sequence the plan observed: every planned maker is older."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "min_fill",
+            "docs": [
+              "Least total fill that makes the placement worthwhile (e.g. one step for",
+              "immediate-or-cancel); fewer fillable makers fail it as stale."
+            ],
             "type": "u64"
           },
           {
@@ -4008,7 +4179,8 @@
           {
             "name": "kind",
             "docs": [
-              "0 deposit (net received), 1 withdrawal (gross debited)."
+              "0 deposit (net received), 1 withdrawal (gross debited), 2 pool listed",
+              "(amount = admitted issuer-control categories)."
             ],
             "type": "u8"
           }
@@ -4088,6 +4260,14 @@
             "type": "i64"
           },
           {
+            "name": "share_decimals",
+            "docs": [
+              "Canonical share-unit decimals. Order quantities, step and max_quantity",
+              "are share units; a base leg with d decimals converts at 10^(d - share_decimals)."
+            ],
+            "type": "u8"
+          },
+          {
             "name": "tick",
             "type": "u128"
           },
@@ -4140,7 +4320,24 @@
             "type": "u8"
           },
           {
+            "name": "base",
+            "docs": [
+              "Base leg (collateral index) whose claims the buyer received."
+            ],
+            "type": "u8"
+          },
+          {
             "name": "quantity",
+            "docs": [
+              "Share units."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "base_amount",
+            "docs": [
+              "Raw base-leg claim units delivered: floor(quantity * scale / live multiplier)."
+            ],
             "type": "u64"
           },
           {
@@ -4274,7 +4471,7 @@
             "type": {
               "array": [
                 "u64",
-                6
+                12
               ]
             }
           },

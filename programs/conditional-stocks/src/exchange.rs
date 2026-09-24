@@ -38,14 +38,14 @@ pub struct Cancel<'info> {
     pub market: Box<Account<'info, Market>>,
     #[account(mut, has_one = market,
         seeds = [b"order", market.key().as_ref(), order.owner.as_ref(), &order.terms.salt], bump = order.bump)]
-    pub order: Account<'info, Order>,
+    pub order: Box<Account<'info, Order>>,
     #[account(mut, has_one = market, constraint = wallet.owner == order.owner @ ProtocolError::InvalidAccount,
         seeds = [b"wallet", market.key().as_ref(), order.owner.as_ref()], bump = wallet.bump)]
-    pub wallet: Account<'info, Wallet>,
+    pub wallet: Box<Account<'info, Wallet>>,
     #[account(constraint = trader.owner == order.owner @ ProtocolError::InvalidAccount,
         constraint = trader.config == market.config @ ProtocolError::InvalidAccount,
         seeds = [b"trader", market.config.as_ref(), order.owner.as_ref()], bump = trader.bump)]
-    pub trader: Account<'info, Trader>,
+    pub trader: Box<Account<'info, Trader>>,
     pub delegation: Option<Box<Account<'info, TradingDelegate>>>,
 }
 
@@ -53,13 +53,21 @@ pub fn cancel(ctx: Context<Cancel>) -> Result<()> {
     let order = &mut ctx.accounts.order;
     require!(order.status == 1, ProtocolError::InvalidOrder);
     let now = Clock::get()?.unix_timestamp;
-    let public_release = rules::releasable(
-        ctx.accounts.market.state,
-        now,
-        order.terms.expiry,
-        order.terms.nonce,
-        ctx.accounts.trader.minimum_nonce,
-    );
+    // An ask on a delisted leg can never fill again: anyone may release it.
+    let delisted = order.terms.side == 1
+        && ctx
+            .accounts
+            .market
+            .leg(order.terms.collateral())
+            .map_or(true, |leg| !leg.active);
+    let public_release = delisted
+        || rules::releasable(
+            ctx.accounts.market.state,
+            now,
+            order.terms.expiry,
+            order.terms.nonce,
+            ctx.accounts.trader.minimum_nonce,
+        );
     let mut delegated_cancel = false;
     if let Some(grant) = &ctx.accounts.delegation {
         require_keys_neq!(
@@ -90,7 +98,7 @@ pub fn cancel(ctx: Context<Cancel>) -> Result<()> {
         ProtocolError::Unauthorized
     );
     let asset = order.terms.asset();
-    let hydrated = if asset < 2 {
+    let hydrated = if !is_claim(asset) {
         require!(
             ctx.remaining_accounts.len() == 1,
             ProtocolError::InvalidAccount
@@ -168,34 +176,57 @@ pub struct Place<'info> {
     pub market: Box<Account<'info, Market>>,
     #[account(init, payer = authority, space = 8 + Order::INIT_SPACE,
         seeds = [b"order", market.key().as_ref(), owner.key().as_ref(), &terms.salt], bump)]
-    pub order: Account<'info, Order>,
+    pub order: Box<Account<'info, Order>>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
-    #[account(seeds = [b"pool", config.key().as_ref(), market.mints[0].as_ref()], bump = base_pool.bump)]
-    pub base_pool: Box<Account<'info, AssetPool>>,
-    #[account(seeds = [b"pool", config.key().as_ref(), market.mints[1].as_ref()], bump = quote_pool.bump)]
+    #[account(seeds = [b"pool", config.key().as_ref(), market.mints[underlying(QUOTE)].as_ref()], bump = quote_pool.bump)]
     pub quote_pool: Box<Account<'info, AssetPool>>,
-    #[account(seeds = [b"pool-vault", base_pool.key().as_ref()], bump,
-        constraint = base_vault.mint == market.mints[0] @ ProtocolError::InvalidAsset,
-        constraint = base_vault.owner == base_pool.key() @ ProtocolError::InvalidAccount)]
-    pub base_vault: Box<InterfaceAccount<'info, InterfaceTokenAccount>>,
-    #[account(seeds = [b"pool-vault", quote_pool.key().as_ref()], bump,
-        constraint = quote_vault.mint == market.mints[1] @ ProtocolError::InvalidAsset,
+    #[account(seeds = [b"pool-vault", quote_pool.key().as_ref()], bump = quote_pool.vault_bump,
+        constraint = quote_vault.mint == market.mints[underlying(QUOTE)] @ ProtocolError::InvalidAsset,
         constraint = quote_vault.owner == quote_pool.key() @ ProtocolError::InvalidAccount)]
     pub quote_vault: Box<InterfaceAccount<'info, InterfaceTokenAccount>>,
     #[account(mut)]
     pub delegation: Option<Box<Account<'info, TradingDelegate>>>,
 }
 
-/// Wire order of remaining accounts: four (claim mint, claim vault) pairs in asset
-/// order 2..6, one order per plan leg, then unique (wallet, trader) PDA pairs per participant.
-/// Load each wallet once, aggregate self-trades/recipient aliases, and serialize once.
+/// One collateral whose claims this placement may mint: the quote, and each
+/// base leg named in `touched` (the legs of every ask involved).
+struct Touched {
+    collateral: usize,
+    /// Index of its YES claim mint in the remaining accounts; vault, NO mint
+    /// and NO vault follow.
+    claims: usize,
+    underlying: u64,
+    multiplier: u64,
+    before: [ClaimSnapshot; 2],
+    minted: [u64; 2],
+}
+
+fn touched_index(touched: &[Touched], collateral: usize) -> Result<usize> {
+    touched
+        .iter()
+        .position(|t| t.collateral == collateral)
+        .ok_or_else(|| error!(ProtocolError::InvalidAccount))
+}
+
+/// Wire order of remaining accounts:
+/// 1. quote (YES mint, YES vault, NO mint, NO vault);
+/// 2. per base leg in `touched`, ascending: pool, pool vault, issuer mint,
+///    (YES mint, YES vault, NO mint, NO vault);
+/// 3. one maker order per plan leg;
+/// 4. unique (wallet, trader) PDA pairs per participant;
+/// 5. asset-credit frames, then maker delegation grants.
+///
+/// Asks deliver exactly one base leg; bids accept a bitmask of legs. Quantities
+/// are share units; each fill converts to the ask's raw issuer units at that
+/// leg's live multiplier, rounding the delivery down.
 pub fn place<'info>(
     ctx: Context<'info, Place<'info>>,
     terms: OrderTerms,
     plan: Plan,
     participants: u8,
     delegations: u8,
+    touched: u8,
 ) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let market_key = ctx.accounts.market.key();
@@ -203,7 +234,9 @@ pub fn place<'info>(
     let config = &ctx.accounts.config;
     let market = &mut ctx.accounts.market;
     pool::empty_underlying(market)?;
-    let core_len = 8 + plan.legs.len() + 2 * usize::from(participants);
+    let legs = touched.count_ones() as usize;
+    let prefix = 4 + LEG_ACCOUNTS * legs;
+    let core_len = prefix + plan.legs.len() + 2 * usize::from(participants);
     require!(
         participants > 0
             && usize::from(participants) <= 2 * (plan.legs.len() + 1)
@@ -217,13 +250,18 @@ pub fn place<'info>(
     if let Some(bound) = terms.bound_nonce() {
         require!(terms.nonce == bound, ProtocolError::InvalidTerms);
     }
+    let listed = ((1u16 << market.bases) - 1) as u8;
     require!(
         terms.branch < 2
             && terms.side < 2
             && terms.funding < 2
             && terms.tif < 2
             && terms.max_fee_bps <= rules::MAX_FEE_BPS
-            && terms.recipient != Pubkey::default(),
+            && terms.recipient != Pubkey::default()
+            && terms.bases != 0
+            && terms.bases & !listed == 0
+            && (terms.side == 0 || single_base(terms.bases).is_some())
+            && touched & !listed == 0,
         ProtocolError::InvalidTerms
     );
     checked(rules::trading(
@@ -249,7 +287,7 @@ pub fn place<'info>(
             config.taker_bps,
         ),
     ))?;
-    let wallet_start = 8 + plan.legs.len();
+    let wallet_start = prefix + plan.legs.len();
     require!(
         plan.legs.len() <= MAX_MAKERS && remaining.len() >= wallet_start + 2,
         ProtocolError::InvalidTerms
@@ -264,7 +302,7 @@ pub fn place<'info>(
     for (index, info) in remaining.iter().enumerate() {
         let trader = index >= wallet_start && (index - wallet_start) % 2 == 1;
         require!(
-            (index < 8 || trader || info.is_writable)
+            (index < prefix || trader || info.is_writable)
                 && !remaining[..index].iter().any(|a| a.key == info.key),
             ProtocolError::InvalidAccount
         );
@@ -275,36 +313,57 @@ pub fn place<'info>(
         );
         require_keys_neq!(*info.key, market_key, ProtocolError::InvalidAccount);
     }
-    let mut before = [ClaimSnapshot::default(); 4];
-    for (i, snapshot) in before.iter_mut().enumerate() {
-        *snapshot = invariants::read_claim(
-            market,
-            &market_key,
-            i + 2,
-            &remaining[i * 2],
-            &remaining[i * 2 + 1],
-        )?;
-    }
-    let underlying = [
-        ctx.accounts.base_vault.amount,
+
+    // Quote custody (typed accounts) plus every touched base leg (untyped).
+    let mut collaterals = Vec::<Touched>::with_capacity(1 + legs);
+    pool::validate_pool(
+        &ctx.accounts.quote_pool.to_account_info(),
+        market,
+        QUOTE,
         ctx.accounts.quote_vault.amount,
-    ];
-    for (i, info) in [
-        ctx.accounts.base_pool.to_account_info(),
-        ctx.accounts.quote_pool.to_account_info(),
-    ]
-    .iter()
-    .enumerate()
-    {
-        pool::validate_pool(info, market, i, underlying[i])?;
-    }
-    for collateral in 0..2 {
-        invariants::check_collateral(
+    )?;
+    collaterals.push(Touched {
+        collateral: QUOTE,
+        claims: 0,
+        underlying: ctx.accounts.quote_vault.amount,
+        multiplier: rules::UNIT_MULTIPLIER,
+        before: [ClaimSnapshot::default(); 2],
+        minted: [0; 2],
+    });
+    let mut offset = 4;
+    for collateral in 1..=MAX_BASES {
+        if touched & (1 << (collateral - 1)) == 0 {
+            continue;
+        }
+        let (underlying, multiplier) = pool::validate_leg(
             market,
             collateral,
-            underlying[collateral],
-            [before[collateral * 2], before[collateral * 2 + 1]],
+            &remaining[offset],
+            &remaining[offset + 1],
+            &remaining[offset + 2],
+            now,
         )?;
+        collaterals.push(Touched {
+            collateral,
+            claims: offset + 3,
+            underlying,
+            multiplier,
+            before: [ClaimSnapshot::default(); 2],
+            minted: [0; 2],
+        });
+        offset += LEG_ACCOUNTS;
+    }
+    for t in collaterals.iter_mut() {
+        for branch in 0..2 {
+            t.before[branch] = invariants::read_claim(
+                market,
+                &market_key,
+                claim(t.collateral, branch),
+                &remaining[t.claims + 2 * branch],
+                &remaining[t.claims + 2 * branch + 1],
+            )?;
+        }
+        invariants::check_collateral(market, t.collateral, t.underlying, t.before)?;
     }
 
     // One bounded allocation, in account order. A linear lookup over <=18
@@ -314,10 +373,7 @@ pub fn place<'info>(
         let info = &pair[0];
         require_keys_eq!(*info.owner, crate::ID, ProtocolError::InvalidAccount);
         let wallet = Wallet::try_deserialize(&mut info.try_borrow_data()?.as_ref())?;
-        require!(
-            wallet.balances[0] == 0 && wallet.balances[1] == 0,
-            ProtocolError::InvalidAccount
-        );
+        require!(pool::empty_wallet(&wallet), ProtocolError::InvalidAccount);
         require_keys_eq!(wallet.market, market_key, ProtocolError::InvalidAccount);
         let key = Pubkey::create_program_address(
             &[
@@ -356,20 +412,24 @@ pub fn place<'info>(
             delegation_epoch: trader.delegation_epoch,
         });
     }
+    let mut pools = Vec::with_capacity(collaterals.len());
+    pools.push((ctx.accounts.quote_pool.key(), QUOTE));
+    let mut offset = 4;
+    for t in collaterals.iter().skip(1) {
+        pools.push((*remaining[offset].key, t.collateral));
+        offset += LEG_ACCOUNTS;
+    }
     let mut frames = Vec::with_capacity(credit_accounts.len());
     for (i, info) in credit_accounts.iter().enumerate() {
         require!(
             !credit_accounts[..i].iter().any(|a| a.key == info.key),
             ProtocolError::InvalidAccount
         );
-        let frame = CreditFrame::load_for_pools(
-            info,
-            &[ctx.accounts.base_pool.key(), ctx.accounts.quote_pool.key()],
-        )?;
+        let frame = CreditFrame::load_for_pools(info, &pools)?;
         frame.hydrate(market, wallet(&mut wallets, &frame.credit.owner)?)?;
         frames.push(frame);
     }
-    let conserved = [market.liability(0)?, market.liability(1)?];
+    let conserved = market.liabilities()?;
     checked(rules::valid_nonce(
         terms.nonce,
         nonce(&wallets, &owner_key)?,
@@ -418,13 +478,31 @@ pub fn place<'info>(
         );
         grants.push((info.key, delegation::read_grant(info)?));
     }
-    let mut used_grants = 0u8;
+    // A credit frame is present for `owner` in `collateral`'s pool.
+    let framed = |owner: &Pubkey, collateral: usize| {
+        pools
+            .iter()
+            .find(|(_, c)| *c == collateral)
+            .is_some_and(|(pool, _)| {
+                frames
+                    .iter()
+                    .any(|f| f.credit.pool == *pool && f.credit.owner == *owner)
+            })
+    };
 
-    let mut makers = Vec::with_capacity(plan.legs.len());
+    // Planned makers that were filled, cancelled, closed, expired, nonce- or
+    // delegation-invalidated or re-priced out of their fee cap since planning
+    // are skipped, and a partially filled maker is capped to what remains:
+    // concurrent book activity never fails a placement. A malformed plan
+    // (wrong market/branch/side, uncrossed prices, missing accounts) still does.
+    let mut used_legs = if terms.side == 1 { terms.bases } else { 0 };
+    let mut makers = Vec::<(usize, Order, u64)>::with_capacity(plan.legs.len());
     let mut total = 0u64;
     for (i, leg) in plan.legs.iter().enumerate() {
-        let info = &remaining[8 + i];
-        require_keys_eq!(*info.owner, crate::ID, ProtocolError::InvalidAccount);
+        let info = &remaining[wallet_start - plan.legs.len() + i];
+        if *info.owner != crate::ID {
+            continue; // Retired: the order account was closed.
+        }
         let order = Order::try_deserialize(&mut info.try_borrow_data()?.as_ref())?;
         require_keys_eq!(order.market, market_key, ProtocolError::InvalidAccount);
         let key = Pubkey::create_program_address(
@@ -439,59 +517,96 @@ pub fn place<'info>(
         )
         .map_err(|_| error!(ProtocolError::InvalidAccount))?;
         require_keys_eq!(key, *info.key, ProtocolError::InvalidAccount);
+        if order.status != 1 {
+            continue;
+        }
+        let (bid, ask) = if terms.side == 0 {
+            (&terms, &order.terms)
+        } else {
+            (&order.terms, &terms)
+        };
+        let base = ask.collateral();
         require!(
-            order.status == 1
-                && order.remaining == leg.expected_remaining
-                && leg.quantity > 0
-                && leg.quantity <= order.remaining
+            leg.quantity > 0
                 && order.terms.tif == 0
                 && order.terms.branch == terms.branch
                 && order.terms.side != terms.side
-                && order.sequence < plan.next_sequence,
+                && order.sequence < plan.next_sequence
+                && bid.accepts(base),
             ProtocolError::StalePlan
         );
-        checked(rules::valid_expiry(
-            now,
-            order.terms.expiry,
-            market.terms.trading_cutoff,
-        ))?;
-        checked(rules::valid_nonce(
-            order.terms.nonce,
-            nonce(&wallets, &order.owner)?,
-        ))?;
+        if rules::valid_expiry(now, order.terms.expiry, market.terms.trading_cutoff).is_err()
+            || rules::valid_nonce(order.terms.nonce, nonce(&wallets, &order.owner)?).is_err()
+            || config.maker_bps > order.terms.max_fee_bps
+        {
+            continue;
+        }
         if order.delegate != Pubkey::default() {
-            let (index, (address, grant)) = grants
+            let (address, grant) = grants
                 .iter()
-                .enumerate()
-                .find(|(_, (_, g))| g.owner == order.owner && g.delegate == order.delegate)
+                .find(|(_, g)| g.owner == order.owner && g.delegate == order.delegate)
                 .ok_or_else(|| error!(ProtocolError::InvalidDelegation))?;
             grant.identity(address, &market.config, &order.owner, &order.delegate)?;
-            grant.authorize(
-                &market_key,
-                epoch(&wallets, &order.owner)?,
-                now,
-                delegation::TRADE,
-            )?;
-            used_grants |= 1 << index;
+            if grant
+                .authorize(
+                    &market_key,
+                    epoch(&wallets, &order.owner)?,
+                    now,
+                    delegation::TRADE,
+                )
+                .is_err()
+            {
+                continue;
+            }
         }
         wallet(&mut wallets, &order.terms.recipient)?;
-        require!(
-            config.maker_bps <= order.terms.max_fee_bps && config.taker_bps <= terms.max_fee_bps,
-            ProtocolError::FeeCap
-        );
-        total = add(total, leg.quantity)?;
-        makers.push(order);
+        require!(config.taker_bps <= terms.max_fee_bps, ProtocolError::FeeCap);
+        let quantity = leg.quantity.min(order.remaining);
+        if terms.side == 0 {
+            // Maker ask: its reservation must cover the live conversion, and
+            // completing it returns the surplus to its funding pool credit.
+            let slot = touched_index(&collaterals, base)?;
+            let base_amount = market.raw(base, quantity, collaterals[slot].multiplier, false)?;
+            if base_amount == 0
+                || base_amount > order.reserved
+                || (quantity == order.remaining
+                    && order.reserved > base_amount
+                    && order.terms.funding == 0
+                    && !framed(&order.owner, base))
+            {
+                continue;
+            }
+        } else {
+            // Maker bid: rounding improvement returns to its funding pool credit.
+            let fill = checked(rules::fill(
+                quantity,
+                market.terms.step,
+                order.remaining,
+                quantity,
+                order.terms.price,
+                terms.price,
+                true,
+            ))?;
+            if fill.improvement > 0 && order.terms.funding == 0 && !framed(&order.owner, QUOTE) {
+                continue;
+            }
+        }
+        used_legs |= 1 << (base - 1);
+        total = add(total, quantity)?;
+        makers.push((i, order, quantity));
     }
     require!(total <= terms.quantity, ProtocolError::InvalidTerms);
-    require!(
-        u32::from(used_grants).count_ones() as usize == grants.len(),
-        ProtocolError::InvalidDelegation
-    );
+    require!(total >= plan.min_fill, ProtocolError::StalePlan);
+    // Every leg a fill delivers (and a selling taker's own leg) is touched;
+    // legs of skipped makers may remain touched.
+    require!(used_legs & !touched == 0, ProtocolError::InvalidAccount);
     let asset = terms.asset();
     let reserved = if terms.side == 0 {
         notional
     } else {
-        terms.quantity
+        let base = terms.collateral();
+        let multiplier = collaterals[touched_index(&collaterals, base)?].multiplier;
+        market.raw(base, terms.quantity, multiplier, true)?
     };
     market.debit(wallet(&mut wallets, &owner_key)?, asset, reserved)?;
     market.escrow[asset] = market.escrow[asset]
@@ -523,18 +638,20 @@ pub fn place<'info>(
         .ok_or_else(|| error!(ProtocolError::Arithmetic))?;
     taker.terms = terms;
 
-    let mut expected_minted = [0u64; 4];
-    for (i, (maker, leg)) in makers.iter_mut().zip(&plan.legs).enumerate() {
+    for (i, maker, quantity) in makers.iter_mut() {
+        let (i, quantity) = (*i, *quantity);
         let taker_is_buy = taker.terms.side == 0;
         let taker_key = taker.key();
         let price = maker.terms.price;
         let (buy, sell): (&mut Order, &mut Order) = if taker_is_buy {
-            (&mut *taker, maker)
+            (&mut **taker, maker)
         } else {
-            (maker, &mut *taker)
+            (maker, &mut **taker)
         };
+        let base = sell.terms.collateral();
+        let slot = touched_index(&collaterals, base)?;
         let fill = checked(rules::fill(
-            leg.quantity,
+            quantity,
             market.terms.step,
             buy.remaining,
             sell.remaining,
@@ -542,8 +659,14 @@ pub fn place<'info>(
             sell.terms.price,
             !taker_is_buy,
         ))?;
+        // Delivery rounds down: the buyer never receives more than the shares it paid for.
+        let base_amount = market.raw(base, quantity, collaterals[slot].multiplier, false)?;
+        require!(
+            base_amount > 0 && base_amount <= sell.reserved,
+            ProtocolError::StalePlan
+        );
         let (buyer_fee, buyer_carry) = checked(rules::fee(
-            leg.quantity,
+            base_amount,
             if taker_is_buy {
                 config.taker_bps
             } else {
@@ -566,7 +689,7 @@ pub fn place<'info>(
             .checked_sub(fill.buyer_notional_reduction as u128)
             .ok_or_else(|| error!(ProtocolError::Insolvent))?;
         market.escrow[sell.terms.asset()] = market.escrow[sell.terms.asset()]
-            .checked_sub(leg.quantity as u128)
+            .checked_sub(base_amount as u128)
             .ok_or_else(|| error!(ProtocolError::Insolvent))?;
         market.credit(
             wallet(&mut wallets, &buy.owner)?,
@@ -586,32 +709,31 @@ pub fn place<'info>(
 
         // Expected deltas come from the validated fills, independently of the
         // mint helpers and their changes to backing or credits.
-        for (collateral, funding, amount) in [
-            (0, sell.terms.funding, leg.quantity),
-            (1, buy.terms.funding, fill.quote),
-        ] {
-            if funding == 0 {
-                for branch in 0..2 {
-                    let index = collateral * 2 + branch;
-                    expected_minted[index] = add(expected_minted[index], amount)?;
-                }
+        if sell.terms.funding == 0 {
+            for minted in collaterals[slot].minted.iter_mut() {
+                *minted = add(*minted, base_amount)?;
+            }
+        }
+        if buy.terms.funding == 0 {
+            for minted in collaterals[0].minted.iter_mut() {
+                *minted = add(*minted, fill.quote)?;
             }
         }
         settle_asset(
             market,
             &mut wallets,
-            0,
+            base,
             sell.terms.funding,
             &sell.owner,
             &buy.terms.recipient,
             buy.terms.branch,
-            leg.quantity,
+            base_amount,
             buyer_fee,
         )?;
         settle_asset(
             market,
             &mut wallets,
-            1,
+            QUOTE,
             buy.terms.funding,
             &buy.owner,
             &sell.terms.recipient,
@@ -620,25 +742,30 @@ pub fn place<'info>(
             seller_fee,
         )?;
         buy.remaining = fill.buyer_remaining;
-        buy.filled = add(buy.filled, leg.quantity)?;
+        buy.filled = add(buy.filled, quantity)?;
         buy.reserved = fill.buyer_reserved;
         buy.open_notional = sub(buy.open_notional, fill.buyer_notional_reduction)?;
         sell.remaining = fill.seller_remaining;
-        sell.filled = add(sell.filled, leg.quantity)?;
-        sell.reserved = sub(sell.reserved, leg.quantity)?;
+        sell.filled = add(sell.filled, quantity)?;
+        sell.reserved = sub(sell.reserved, base_amount)?;
         sell.open_notional = sub(sell.open_notional, fill.seller_notional_reduction)?;
         if buy.remaining == 0 {
             buy.status = 2;
         }
         if sell.remaining == 0 {
             sell.status = 2;
+            // Round-down deliveries and dividend accrual leave a reservation
+            // surplus once the ask completes; return it to the seller.
+            refund_surplus(market, sell, wallet(&mut wallets, &sell.owner)?)?;
         }
         emit!(Trade {
             market: market_key,
             taker: taker_key,
-            maker: *remaining[8 + i].key,
+            maker: *remaining[wallet_start - plan.legs.len() + i].key,
             branch: buy.terms.branch,
-            quantity: leg.quantity,
+            base: base as u8,
+            quantity,
+            base_amount,
             price,
             quote: fill.quote,
             buyer_fee,
@@ -648,37 +775,61 @@ pub fn place<'info>(
     if taker.terms.tif == 1 && taker.remaining != 0 {
         release(market, taker, wallet(&mut wallets, &owner_key)?)?;
     }
+    // A resting order must not cross an opposite order placed after its plan
+    // (which it could not match); record this placement for later checks.
+    let resting = taker.status == 1;
+    let branch = taker.terms.branch as usize;
+    // Retained in ticks (validated tick multiples): 9 bytes per placement.
+    let ticks = u64::try_from(taker.terms.price / market.terms.tick)
+        .map_err(|_| error!(ProtocolError::InvalidTerms))?;
+    if resting {
+        checked(rules::race_free(
+            RECENT,
+            plan.next_sequence,
+            taker.sequence,
+            taker.terms.side,
+            u128::from(ticks),
+            |slot| {
+                let p = &market.recent[branch * RECENT + slot];
+                (u128::from(p.ticks), p.side)
+            },
+        ))?;
+    }
+    market.recent[branch * RECENT + (taker.sequence % RECENT as u64) as usize] = Placement {
+        ticks,
+        side: if resting {
+            taker.terms.side
+        } else {
+            rules::SIDE_NONE
+        },
+    };
     checked(market.terms.caps().final_exposure(
         wallet(&mut wallets, &owner_key)?.open_notional,
         market.open_notional,
     ))?;
     // Classic SPL claim mints have no hooks. Accumulate accounting per fill,
     // but mint once per asset, preserving independent expected-delta checks.
-    for (i, amount) in expected_minted.iter().enumerate() {
-        mint_claim(
-            market,
-            market.to_account_info(),
-            remaining[i * 2].clone(),
-            remaining[i * 2 + 1].clone(),
-            *amount,
-        )?;
-    }
-    let mut after = before;
-    for (i, snapshot) in after.iter_mut().enumerate() {
-        // With no CPI for this mint/vault, their initial snapshot is still
-        // current. Final liabilities are nevertheless checked below.
-        if expected_minted[i] != 0 {
-            *snapshot = invariants::reload_claim(&remaining[i * 2], &remaining[i * 2 + 1])?;
+    for t in collaterals.iter_mut() {
+        for branch in 0..2 {
+            let (mint, vault) = (t.claims + 2 * branch, t.claims + 2 * branch + 1);
+            mint_claim(
+                market,
+                market.to_account_info(),
+                remaining[mint].clone(),
+                remaining[vault].clone(),
+                t.minted[branch],
+            )?;
+            // With no CPI for this mint/vault, the initial snapshot is still
+            // current. Final liabilities are nevertheless checked below.
+            let after = if t.minted[branch] != 0 {
+                invariants::reload_claim(&remaining[mint], &remaining[vault])?
+            } else {
+                t.before[branch]
+            };
+            invariants::check_delta(t.before[branch], after, t.minted[branch], true)?;
+            t.before[branch] = after;
         }
-        invariants::check_delta(before[i], *snapshot, expected_minted[i], true)?;
-    }
-    for collateral in 0..2 {
-        invariants::check_collateral(
-            market,
-            collateral,
-            underlying[collateral],
-            [after[collateral * 2], after[collateral * 2 + 1]],
-        )?;
+        invariants::check_collateral(market, t.collateral, t.underlying, t.before)?;
     }
     pool::conserved(market, conserved)?;
     for (frame, info) in frames.iter_mut().zip(credit_accounts) {
@@ -687,14 +838,18 @@ pub fn place<'info>(
     pool::empty_underlying(market)?;
     for participant in &wallets {
         require!(
-            participant.wallet.balances[0] == 0 && participant.wallet.balances[1] == 0,
+            pool::empty_wallet(&participant.wallet),
             ProtocolError::Insolvent
         );
     }
     // Serialization happens only after every leg and final cap check succeeds.
     // Solana rolls back token CPIs as well as state on every instruction/transaction error.
-    for (i, maker) in makers.iter().enumerate() {
-        maker.try_serialize(&mut remaining[8 + i].try_borrow_mut_data()?.as_mut())?;
+    for (i, maker, _) in &makers {
+        maker.try_serialize(
+            &mut remaining[wallet_start - plan.legs.len() + i]
+                .try_borrow_mut_data()?
+                .as_mut(),
+        )?;
     }
     for (pair, participant) in remaining[wallet_start..].chunks_exact(2).zip(&wallets) {
         let info = &pair[0];
@@ -709,6 +864,24 @@ pub fn place<'info>(
         amount: taker.remaining,
         asset: asset as u8
     });
+    Ok(())
+}
+
+/// Return a completed ask's leftover base reservation to its funding asset.
+pub(crate) fn refund_surplus(
+    market: &mut Market,
+    order: &mut Order,
+    wallet: &mut Wallet,
+) -> Result<()> {
+    if order.reserved == 0 {
+        return Ok(());
+    }
+    let asset = order.terms.asset();
+    market.escrow[asset] = market.escrow[asset]
+        .checked_sub(order.reserved as u128)
+        .ok_or_else(|| error!(ProtocolError::Insolvent))?;
+    market.credit(wallet, asset, order.reserved)?;
+    order.reserved = 0;
     Ok(())
 }
 
@@ -754,13 +927,13 @@ fn settle_asset(
     amount: u64,
     fee: u64,
 ) -> Result<()> {
-    let active = 2 + collateral * 2 + branch as usize;
-    let inactive = 2 + collateral * 2 + (1 - branch) as usize;
+    let active = claim(collateral, branch as usize);
+    let inactive = claim(collateral, 1 - branch as usize);
     if funding == 0 {
         market.backing[collateral] = add(market.backing[collateral], amount)?;
         market.credit(wallet(wallets, funder)?, inactive, amount)?;
     }
     market.credit(wallet(wallets, recipient)?, active, sub(amount, fee)?)?;
-    market.fees[active - 2] = add(market.fees[active - 2], fee)?;
+    market.fees[active] = add(market.fees[active], fee)?;
     Ok(())
 }

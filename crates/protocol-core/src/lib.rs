@@ -232,6 +232,9 @@ pub fn fill(
     })
 }
 
+/// A plan is usable until its deadline if it was made against the current or
+/// an earlier book (`quoted.0 <= actual.0`: orders placed since planning never
+/// invalidate it) at the current fee rates.
 pub fn guard(
     now: i64,
     deadline: i64,
@@ -239,8 +242,51 @@ pub fn guard(
     quoted: (u64, u16, u16),
     actual: (u64, u16, u16),
 ) -> Result<()> {
-    if now >= deadline || deadline > expiry || quoted != actual {
+    if now >= deadline
+        || deadline > expiry
+        || quoted.0 > actual.0
+        || quoted.1 != actual.1
+        || quoted.2 != actual.2
+    {
         return Err(Error::StaleQuote);
+    }
+    Ok(())
+}
+
+/// Side of a placement that did not rest (filled, immediate-or-cancel).
+pub const SIDE_NONE: u8 = 2;
+
+/// Whether an order on `side` at `price` crosses an opposite resting order.
+pub fn crosses(side: u8, price: u128, other_side: u8, other_price: u128) -> bool {
+    match (side, other_side) {
+        (0, 1) => price >= other_price,
+        (1, 0) => price <= other_price,
+        _ => false,
+    }
+}
+
+/// A resting order planned against book sequence `planned` must not cross an
+/// opposite order placed since (sequences `planned..current`), which its plan
+/// could not match: that race would leave the book crossed. `entry(slot)`
+/// returns the retained placement `(price, side)` at `sequence % window`.
+/// Every placement writes its slot, so within the last `window` placements
+/// each slot holds exactly that sequence; an older range fails closed (replan).
+pub fn race_free(
+    window: usize,
+    planned: u64,
+    current: u64,
+    side: u8,
+    price: u128,
+    entry: impl Fn(usize) -> (u128, u8),
+) -> Result<()> {
+    if window == 0 || planned > current || current - planned > window as u64 {
+        return Err(Error::StaleQuote);
+    }
+    for sequence in planned..current {
+        let (other_price, other_side) = entry((sequence % window as u64) as usize);
+        if crosses(side, price, other_side, other_price) {
+            return Err(Error::StaleQuote);
+        }
     }
     Ok(())
 }
@@ -249,4 +295,56 @@ pub fn guard(
 /// Pausing trading alone does not authorize a third party to cancel live orders.
 pub fn releasable(state: u8, now: i64, expiry: i64, nonce: u64, minimum: u64) -> bool {
     state != OPEN || now >= expiry || nonce < minimum
+}
+
+/// `1.0f64` bits: the multiplier of every mint without ScaledUiAmount.
+pub const UNIT_MULTIPLIER: u64 = 0x3FF0_0000_0000_0000;
+/// Largest ratio between a leg's live and listing multiplier that is treated as
+/// dividend reinvestment rather than a split/reverse split: 5/4 either way.
+pub const BAND_NUMERATOR: u128 = 5;
+pub const BAND_DENOMINATOR: u128 = 4;
+
+/// An issuer's ScaledUiAmount multiplier (IEEE-754 binary64 bits) as the exact
+/// rational `mantissa / 2^shift`. Only positive, finite, normal values with
+/// `0 <= shift <= 63` (about 2^-11 .. 2^52) are meaningful stock scalings.
+pub fn multiplier_parts(bits: u64) -> Result<(u64, u32)> {
+    let exponent = (bits >> 52) & 0x7ff;
+    if bits >> 63 != 0 || exponent == 0 || exponent == 0x7ff {
+        return Err(Error::InvalidTerms);
+    }
+    let mantissa = (bits & ((1 << 52) - 1)) | (1 << 52);
+    let shift = 1075i64 - exponent as i64;
+    if !(0..=63).contains(&shift) {
+        return Err(Error::InvalidTerms);
+    }
+    Ok((mantissa, shift as u32))
+}
+
+/// Raw issuer units for `units` share units: `units * scale / multiplier`, where
+/// `scale = 10^(decimals - share_decimals)` and one raw unit is worth
+/// `multiplier / 10^decimals` shares. Deliveries round down, reservations up.
+pub fn base_raw(units: u64, scale: u64, multiplier: u64, up: bool) -> Result<u64> {
+    let (mantissa, shift) = multiplier_parts(multiplier)?;
+    let tokens = (units as u128)
+        .checked_mul(scale as u128)
+        .filter(|v| *v <= u64::MAX as u128)
+        .ok_or(Error::Overflow)?;
+    // tokens < 2^64 and shift <= 63: the product is below 2^127.
+    let numerator = tokens << shift;
+    let mantissa = mantissa as u128;
+    let raw = numerator / mantissa + u128::from(up && numerator % mantissa != 0);
+    u64::try_from(raw).map_err(|_| Error::Overflow)
+}
+
+/// Whether `current` stays within the dividend band of `listing`:
+/// 4/5 <= current / listing <= 5/4, compared exactly without floats.
+pub fn within_band(listing: u64, current: u64) -> Result<bool> {
+    let (lm, ls) = multiplier_parts(listing)?;
+    let (cm, cs) = multiplier_parts(current)?;
+    // current/listing = (cm / 2^cs) / (lm / 2^ls) = cm * 2^ls / (lm * 2^cs).
+    // Mantissas < 2^53, shifts <= 63 and band terms <= 5: products < 2^119.
+    let current = cm as u128 * (1u128 << ls);
+    let listing = lm as u128 * (1u128 << cs);
+    Ok(BAND_DENOMINATOR * current <= BAND_NUMERATOR * listing
+        && BAND_NUMERATOR * current >= BAND_DENOMINATOR * listing)
 }

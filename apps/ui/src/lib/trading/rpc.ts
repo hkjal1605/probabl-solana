@@ -1,10 +1,12 @@
-import { SolanaClient,key,big } from "@conditional-stocks/solana-client";
+import { SolanaClient,key,big,underlyingAsset } from "@conditional-stocks/solana-client";
 import { protocolConfig } from "@/config/protocol";
 import type { MarketView } from "@/types/api";
 export const solana=()=>new SolanaClient(protocolConfig);
+/** Canonical market read; the indexed quote, issuer legs and units must match the program exactly. */
 export async function readClaimMarket(market:MarketView){const client=solana();await client.assertNetwork();const m=await client.market(key(market.id));
-  if(m.mints[0]!.toBase58()!==market.baseToken||m.mints[1]!.toBase58()!==market.quoteToken
-    ||m.decimals[0]!==market.baseTokenDecimals||m.decimals[1]!==market.quoteTokenDecimals)throw new Error("Indexed market differs from the Solana program.");
+  const legs=market.bases.every(leg=>m.mints[underlyingAsset(leg.collateral)]?.toBase58()===leg.mint&&m.decimals[leg.collateral]===leg.decimals);
+  if(m.mints[0]!.toBase58()!==market.quoteToken||m.decimals[0]!==market.quoteTokenDecimals||m.bases!==market.bases.length||!legs
+    ||m.terms.share_decimals!==market.shareDecimals)throw new Error("Indexed market differs from the Solana program.");
   return {...m,conditionId:market.id,tradingCutoff:big(m.terms.trading_cutoff)};
 }
 export async function transactionReceipt(signature:string){

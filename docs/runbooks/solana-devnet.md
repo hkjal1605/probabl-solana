@@ -1,8 +1,10 @@
 # Solana Devnet deployment
 
-This pipeline deploys the Rust program, creates six mock token mints, wraps Devnet
-SOL, allocates all seven assets to the deployer's associated token accounts, and
-initializes the protocol configuration. It does **not** create markets, deposit
+This pipeline deploys the Rust program, creates the mock quote/crypto mints and
+eight mock issuer tokens (replicas of the mainnet xStocks, Ondo and Remora
+Token-2022 configurations for NVDA, TSLA and SPY), wraps Devnet SOL, allocates
+every asset to the deployer's associated token accounts, and initializes the
+protocol configuration. It does **not** create markets, deposit
 wallet balances into protocol custody, deploy EC2 services, or approve production
 use. Existing migration/security limitations still apply.
 
@@ -127,15 +129,20 @@ rejected by the public deployment CLI. Every network mutation requires
 
 ## Assets in the deployer's wallet
 
-| Label | Standard                                  | Decimals | Initial wallet balance |
-| ----- | ----------------------------------------- | -------: | ---------------------: |
-| USDC  | Classic SPL mock                          |        6 |              1,000,000 |
-| BTC   | Classic SPL mock                          |        8 |                  1,000 |
-| ETH   | Classic SPL mock                          |        9 |                 10,000 |
-| SOL   | Canonical wrapped Devnet SOL, classic SPL |        9 |                    0.1 |
-| TSLA  | Token-2022 mock                           |        6 |                 10,000 |
-| NVDA  | Token-2022 mock with transfer fee         |        6 |                 10,000 |
-| SPY   | Token-2022 mock                           |        6 |                 10,000 |
+| Label  | Standard                                              | Decimals | Initial wallet balance |
+| ------ | ----------------------------------------------------- | -------: | ---------------------: |
+| USDC   | Classic SPL mock                                      |        6 |              1,000,000 |
+| BTC    | Classic SPL mock                                      |        8 |                  1,000 |
+| ETH    | Classic SPL mock                                      |        9 |                 10,000 |
+| SOL    | Canonical wrapped Devnet SOL, classic SPL             |        9 |                    0.1 |
+| NVDAx  | Token-2022 xStocks replica (issuer controls 63)       |        8 |                 10,000 |
+| NVDAon | Token-2022 Ondo replica (issuer controls 62)          |        9 |                 10,000 |
+| NVDAr  | Token-2022 Remora replica (issuer controls 47)        |        9 |                 10,000 |
+| TSLAx  | Token-2022 xStocks replica                            |        8 |                 10,000 |
+| TSLAon | Token-2022 Ondo replica                               |        9 |                 10,000 |
+| TSLAr  | Token-2022 Remora replica                             |        9 |                 10,000 |
+| SPYx   | Token-2022 xStocks replica                            |        8 |                 10,000 |
+| SPYon  | Token-2022 Ondo replica                               |        9 |                 10,000 |
 
 SOL cannot be minted like a mock token. The pipeline transfers 0.1 Devnet SOL
 into its canonical wrapped-native associated account and calls `SyncNative`.
@@ -143,13 +150,19 @@ Native fee SOL remains in the same wallet separately. The mint address is
 `So11111111111111111111111111111111111111112`; the mint's zero supply field is
 normal for native SOL and is not a record of wrapped-account balances.
 
-Stock mocks have self-hosted `MetadataPointer` and `TokenMetadata` extensions,
-names such as `Devnet Mock TSLA`, symbols `dTSLA`/`dNVDA`/`dSPY`, and no hosted
-image/URI. NVDA additionally has a **25 bps (0.25%) transfer fee**, capped at one
-token per transfer, to exercise supported fee-bearing collateral. The deployer
-controls its fee configuration and withheld-fee authority. Initial minting has
-no transfer fee. All mock mints have the deployer as mint authority and no freeze
-authority. These are development choices, not issuer or production policies.
+Issuer mocks are built by `scripts/solana/mock-issuers.ts` with the real Token-2022
+instructions, in the mainnet extension order: MetadataPointer/TokenMetadata,
+PermanentDelegate (not Ondo), DefaultAccountState (initialized), ScaledUiAmount
+(realistic multipliers, e.g. ≈1.0017 for xStocks), Pausable, ConfidentialTransferMint
+(no auto-approve) and an unset TransferHook (not Remora). The deployer is the mock
+issuer authority (mint, freeze, pause, multiplier, metadata) so pause, dividend and
+corporate-action behaviour can be rehearsed. There is no fee-bearing stock mock on
+Devnet: Token-2022 rejects a transfer fee next to ConfidentialTransferMint. Each
+pool admits exactly its mock's issuer controls (see
+[the compatibility matrix](../TOKEN_COMPATIBILITY.md)). These are development
+choices, not issuer or production policies. Their public mint addresses belong in
+`DEVNET_ISSUER_MOCK_MINTS` (`packages/shared/src/spot-prices.ts`) once prepared, so
+the UI can show the mainnet counterpart's reference price.
 
 Classic USDC/BTC/ETH labels are recorded in the manifest; they do not have
 Metaplex metadata. Some wallets will show only their mint addresses. Import the
@@ -162,7 +175,10 @@ The mock USDC mint is the configuration's quote token. The deployer is the admin
 market admin, guardian and resolution admin; protocol maker/taker fees start at
 zero. There are no automatically listed markets or manufactured resolution
 conditions. Create reviewed Devnet markets through the native admin workflow
-after the API/indexer are configured.
+after the API/indexer are configured. `scripts/solana/seed-devnet-markets.ts --execute`
+seeds one market per asset (NVDA, TSLA, SPY) per pinned event, each listing that
+asset's issuer mocks as base legs (creation evidence → `initializeMarketVaults`
+with the ordered issuer list → open).
 
 ## Records, retries and recovery
 
@@ -184,7 +200,7 @@ program signer; do not delete it to “retry.” Resubmit the same `deploy --exe
 command with the same wallet, artifact and directory after a temporary failure.
 The buffer and mint addresses stay stable. Token creation, metadata, ATA creation
 and initial mint are atomic per asset; reruns verify instead of minting again.
-The six mock allocations are one-time fixtures, not balance targets. Tokens that
+The mock allocations are one-time fixtures, not balance targets. Tokens that
 you transferred/burned are not replaced, and closing an already-recorded wrapped
 SOL account does not wrap more SOL on a later run.
 
@@ -288,8 +304,8 @@ the complete API/indexer/UI trading product.
 They are included in `test:ts` and the existing CI host-verification job.
 
 `bun run devnet:rehearse` starts a fresh localhost validator, creates a local-only
-wallet, performs an actual upgradeable-loader deployment, initializes all seven
-balances and protocol config, verifies fee transfers, and checks repeated runs
+wallet, performs an actual upgradeable-loader deployment, initializes every asset
+balance (including the issuer replicas' extension sets) and protocol config, and checks repeated runs
 after spending/unwrapping. It stops only its own validator and retains diagnostic
 ledgers/fixtures under `.local/`. It never uses `.env.devnet`'s wallet. Default RPC
 port is 18997; set `DEVNET_REHEARSAL_PORT` to an unused port if needed. It needs a

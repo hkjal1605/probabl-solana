@@ -21,12 +21,18 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { adminConfig } from "@/config/protocol";
-import { requestJson } from "@/lib/admin-api";
+import { adminRequest, type EvidenceView, requestJson } from "@/lib/admin-api";
 import { short } from "@/lib/format";
+import { creationBaseTokens } from "@/lib/market-setup";
+import { IssuerLegs } from "./IssuerLegs";
 import { MarketLifecycleAction } from "./MarketLifecycleAction";
+import { MarketSetupPanel } from "./MarketSetupPanel";
 
 interface Market {
   id: string;
+  /** Indexed contract v3; live leg state is read from chain below. */
+  bases?: Array<{ collateral: number; mint: string; active: boolean }>;
+  shareDecimals?: number;
   maxMarketOpenNotional: string | null;
   maxOrderNotional: string | null;
   maxWalletOpenNotional: string | null;
@@ -49,12 +55,26 @@ export function MarketControls() {
     queryFn: ({ signal }) => requestJson<{ markets: Market[] }>("/api/indexer/markets", { signal }),
     refetchInterval: 10_000,
   });
+  const admin = useAdmin();
+  const evidence = useQuery({
+    queryKey: ["evidence", admin.account, adminConfig.genesisHash],
+    queryFn: ({ signal }) =>
+      adminRequest<{ packets: EvidenceView[] }>(admin.token ?? "", "admin/evidence", { signal }),
+    enabled: Boolean(admin.token),
+    refetchInterval: 30_000,
+  });
   const markets = query.data?.markets ?? [];
   return (
     <div className="grid gap-4">
       <QueryStatus query={query} />
       {markets.map((market) => (
-        <MarketControl key={market.id} market={market} />
+        <MarketControl
+          key={market.id}
+          market={market}
+          baseTokens={
+            evidence.data ? creationBaseTokens(evidence.data.packets, market.id, adminConfig) : null
+          }
+        />
       ))}
       {query.isSuccess && markets.length === 0 && (
         <div className="flex min-h-64 items-center justify-center rounded-xl bg-card text-sm text-muted-foreground">
@@ -64,7 +84,7 @@ export function MarketControls() {
     </div>
   );
 }
-function MarketControl({ market }: { market: Market }) {
+function MarketControl({ market, baseTokens }: { market: Market; baseTokens: string[] | null }) {
   const admin = useAdmin();
   const [reason, setReason] = useState("");
   const [payload, setPayload] = useState<string | null>(null);
@@ -112,7 +132,12 @@ function MarketControl({ market }: { market: Market }) {
           <Fact label="Wallet open-order cap" value={market.maxWalletOpenNotional ?? "—"} />
           <Fact label="Market open-order cap" value={market.maxMarketOpenNotional ?? "—"} />
         </div>
-        {market.state === 1 && <MarketLifecycleAction marketId={market.id} action="openMarket" />}
+        <IssuerLegs marketId={market.id} />
+        {market.state === 1 && (
+          <div className="mt-4">
+            <MarketSetupPanel marketId={market.id} baseTokens={baseTokens} />
+          </div>
+        )}
         {market.state === 2 && (
           <MarketLifecycleAction marketId={market.id} action="freezeAtCutoff" />
         )}

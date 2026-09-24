@@ -12,17 +12,15 @@ import { useWalletAssets } from "@/hooks/useWalletAssets";
 import { formatCompactNumber, formatNumber, tokenAmount } from "@/lib/format/display";
 import { groupMarkets, sortEventGroups } from "@/lib/markets/presentation";
 import { walletTradeRows } from "@/lib/portfolio/presentation";
-import type { MarketView, PositionView } from "@/types/api";
+import { positionHasClaims } from "@/services/index-stream";
+import type { MarketView } from "@/types/api";
 import { PortfolioEventCard } from "./PortfolioEventCard";
 import { PortfolioEventSkeleton } from "./PortfolioEventSkeleton";
 import { PortfolioTradeHistory } from "./PortfolioTradeHistory";
 import { PortfolioVault } from "./PortfolioVault";
 import { TradingPermissionCard } from "./TradingPermissionCard";
 
-const hasClaims = (position: PositionView) =>
-  [position.stockYes, position.stockNo, position.quoteYes, position.quoteNo].some(
-    (amount) => BigInt(amount) > 0n,
-  );
+const hasClaims = positionHasClaims;
 
 export function PortfolioClient({ markets: initial }: { markets: MarketView[] }) {
   const wallet = useWallet();
@@ -151,7 +149,9 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                     {total === null ? "—" : `$${formatNumber(total, 2)}`}
                   </p>
                 )}
-                <p className="mt-2 text-xs text-muted-foreground">Available in vault · estimated value</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Available in vault · estimated value
+                </p>
               </div>
               {assetQuery.isInitialError ? (
                 <DataError
@@ -175,24 +175,32 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                 <p className="text-sm text-muted-foreground">Deposit tokens to start trading.</p>
               ) : (
                 <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-4 lg:grid-cols-7">
-                  {balances.filter(asset => asset.available > 0n).map((asset) => (
-                    <div key={asset.token} className="min-w-0">
-                      <dt className="text-sm font-medium text-muted-foreground">{asset.symbol}</dt>
-                      <dd className="mt-2 truncate text-lg font-medium tabular-nums">
-                        {formatCompactNumber(
-                          tokenAmount(asset.available.toString(), asset.decimals),
-                        )}
-                      </dd>
-                    </div>
-                  ))}
+                  {balances
+                    .filter((asset) => asset.available > 0n)
+                    .map((asset) => (
+                      <div key={asset.token} className="min-w-0">
+                        <dt className="text-sm font-medium text-muted-foreground">
+                          {asset.symbol}
+                        </dt>
+                        <dd className="mt-2 truncate text-lg font-medium tabular-nums">
+                          {formatCompactNumber(
+                            tokenAmount(asset.available.toString(), asset.decimals),
+                          )}
+                        </dd>
+                      </div>
+                    ))}
                 </dl>
               )}
             </CardContent>
           </Card>
 
           <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-            <PortfolioVault assets={assetQuery.assets} balances={assetQuery.balances}
-              fresh={assetQuery.isDataFresh} refresh={assetQuery.refetch} />
+            <PortfolioVault
+              assets={assetQuery.assets}
+              balances={assetQuery.balances}
+              fresh={assetQuery.isDataFresh}
+              refresh={assetQuery.refetch}
+            />
             <TradingPermissionCard />
           </div>
 

@@ -1,3 +1,4 @@
+import { marketAssetKey } from "@/lib/markets/presentation";
 import type { MarketView } from "@/types/api";
 
 /** Asset navigation follows the event, not per-asset lifecycle or trading windows. */
@@ -14,7 +15,7 @@ export function relatedMarkets(current: MarketView, catalogue: MarketView[]): Ma
   );
   const assets = new Map<string, MarketView>();
   for (const market of related) {
-    const key = `${market.baseToken}:${market.quoteToken}`;
+    const key = marketAssetKey(market);
     const existing = assets.get(key);
     // Keep the route's current market for its asset. Otherwise prefer an open
     // market, then a stable ID, so a retried deployment cannot duplicate tabs.

@@ -15,7 +15,10 @@ import {
   jupiterEnvironment,
   parseJupiterPrice,
 } from "../../src/integrations/jupiter/prices.ts";
-import { mountSpotPrices } from "../../src/solana/market-data/spot-routes.ts";
+import {
+  mountMarketSpotPrices,
+  mountSpotPrices,
+} from "../../src/solana/market-data/spot-routes.ts";
 
 const NOW = 1_800_000_000_000;
 const valid = { usdPrice: 123.456, decimals: 8, blockId: 100 };
@@ -348,5 +351,45 @@ describe("Jupiter transport and validation", () => {
     expect((await app.request(`/v1/spot-prices?mints=${D.SOL}`, { method: "POST" })).status).toBe(
       404,
     );
+  });
+});
+
+describe("multi-issuer market reference prices", () => {
+  test("one batch prices the quote and every issuer leg, with per-share prices", async () => {
+    const f = fixture(MAIN);
+    const app = new Hono();
+    app.onError((e) => Response.json({ error: e.message }, { status: 404 }));
+    const NVDAON = "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo",
+      NVDAR = "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu",
+      market = mint(7);
+    mountMarketSpotPrices(app, f.service, async (id) => {
+      if (id !== market) throw new Error("Unknown indexed market");
+      return {
+        quoteMint: M.USDC,
+        bases: [
+          { collateral: 1, mint: M.NVDA, multiplierValue: 1.0017, tradable: true, halt: null },
+          { collateral: 2, mint: NVDAON, multiplierValue: 1, tradable: true, halt: null },
+          { collateral: 3, mint: NVDAR, multiplierValue: null, tradable: null, halt: null },
+        ],
+      };
+    });
+    const response = await app.request(`/v1/markets/${market}/spot-prices`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(f.jupiterCalls()).toHaveLength(1);
+    expect(new URL(f.jupiterCalls()[0]!.url).searchParams.get("ids")!.split(",")).toHaveLength(4);
+    expect(body.marketId).toBe(market);
+    expect(body.quote).toMatchObject({ mint: M.USDC, status: "available" });
+    expect(body.bases.map((b: { spot: { referenceSymbol: string } }) => b.spot.referenceSymbol)).toEqual([
+      "NVDAx",
+      "NVDAon",
+      "NVDAr",
+    ]);
+    expect(body.bases[0].sharePriceUsd).toBeCloseTo(123.456 / 1.0017, 9);
+    expect(body.bases[1].sharePriceUsd).toBe(123.456);
+    // Unreadable issuer state never yields a per-share price.
+    expect(body.bases[2].sharePriceUsd).toBeNull();
+    expect((await app.request(`/v1/markets/${mint(8)}/spot-prices`)).status).toBe(404);
+    expect((await app.request(`/v1/markets/not-a-key/spot-prices`)).status).toBe(400);
   });
 });

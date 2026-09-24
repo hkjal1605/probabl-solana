@@ -3,29 +3,39 @@ import {
   type NormalizedPolymarketMarket,
 } from "@conditional-stocks/market-data";
 import {
-  decodeSupportedMint,
   key,
+  MAX_BASES,
+  marketAddress,
   type SolanaClient,
-  TOKEN_PROGRAM_ID,
 } from "@conditional-stocks/solana-client";
-import { type AdminDeployment, evidenceTransaction } from "@conditional-stocks/solana-client/admin";
+import {
+  type AdminDeployment,
+  evidenceTransaction,
+  marketIdFromConfig,
+} from "@conditional-stocks/solana-client/admin";
 import {
   assertEvidenceIntegrity,
   buildCreationEvidence,
 } from "@conditional-stocks/solana-client/evidence";
 import type { EvidenceView } from "./admin-api";
+import {
+  assetLegProblems,
+  checkIssuerMints,
+  inspectMint,
+  type MintCheck,
+  type MintInfo,
+  parseShareDecimals,
+} from "./issuer-mints";
 
+export type { MintInfo } from "./issuer-mints";
+/** Asset markets per batch (e.g. NVDA and TSLA of one Polymarket event), each with 1-3 issuer legs. */
 export const MAX_BATCH_MARKETS = 20;
 const U64 = (1n << 64n) - 1n,
   U128 = (1n << 128n) - 1n,
   WAD = 10n ** 18n;
 const min = (a: bigint, b: bigint) => (a < b ? a : b);
 const ceil = (a: bigint, b: bigint) => (a + b - 1n) / b;
-export interface MintInfo {
-  address: string;
-  decimals: number;
-  standard: string;
-}
+/** Quantities (step, max quantity) are share units; notionals are quote raw units. */
 export interface MarketCaps {
   baseStep: string;
   priceTickRawX18: string;
@@ -35,8 +45,10 @@ export interface MarketCaps {
   maxWalletOpenNotional: string;
   maxMarketOpenNotional: string;
 }
+/** One market for one asset: its ordered issuer-token legs and share precision. */
 export interface MarketRow {
-  mint: MintInfo;
+  legs: MintInfo[];
+  shareDecimals: number;
   caps: MarketCaps;
 }
 export interface MarketSource {
@@ -50,14 +62,18 @@ export interface SharedMarketFields {
   metadataUri: string;
   sourceUrls: string;
 }
+export type CreationConfigBody = Record<string, string | string[]>;
 export interface BatchPlan {
-  base: MintInfo;
+  legs: MintInfo[];
+  baseTokens: string[];
+  shareDecimals: number;
   quote: MintInfo;
+  /** Market PDA of `marketIdFromConfig(config)`. */
   expectedMarketId: string;
   envelope: ReturnType<typeof buildCreationEvidence>;
   body: {
     attachments: never[];
-    config: Record<string, string>;
+    config: CreationConfigBody;
     metadataSnapshotId: string;
     sourceUrls: string[];
   };
@@ -68,39 +84,53 @@ export type BatchResult =
   | { phase: "uncertain"; message: string }
   | { phase: "prepared"; packet: EvidenceView };
 
-export function parseBaseMints(input: string): string[] {
+/** One market's issuer mints, in leg order: 1-3 distinct addresses. */
+export function parseIssuerMints(input: string): string[] {
   const addresses = input
     .trim()
     .split(/[\s,]+/)
     .filter(Boolean)
     .map((value) => key(value).toBase58());
-  if (!addresses.length || addresses.length > MAX_BATCH_MARKETS)
-    throw new Error(`Enter between 1 and ${MAX_BATCH_MARKETS} base mint addresses.`);
+  if (!addresses.length || addresses.length > MAX_BASES)
+    throw new Error(`Enter 1 to ${MAX_BASES} issuer token mints of the same asset per market.`);
   if (new Set(addresses).size !== addresses.length)
-    throw new Error("Duplicate base mint in this batch.");
+    throw new Error("Duplicate issuer token in one market.");
   return addresses;
 }
 
-export async function loadBatchMints(client: SolanaClient, addresses: string[]) {
-  const bases = parseBaseMints(addresses.join("\n"));
+/** Every market row's issuer mints; an issuer token may belong to only one market of the batch. */
+export function parseAssetRows(inputs: string[]): string[][] {
+  if (!inputs.length || inputs.length > MAX_BATCH_MARKETS)
+    throw new Error(`Enter between 1 and ${MAX_BATCH_MARKETS} asset markets.`);
+  const rows = inputs.map((input, index) => {
+    try {
+      return parseIssuerMints(input);
+    } catch (error) {
+      throw new Error(
+        `Market ${index + 1}: ${error instanceof Error ? error.message : "invalid mints"}`,
+      );
+    }
+  });
+  const all = rows.flat();
+  if (new Set(all).size !== all.length)
+    throw new Error("An issuer token appears in more than one market of this batch.");
+  return rows;
+}
+
+export async function loadBatchMints(client: SolanaClient, rows: string[][], nowMs = Date.now()) {
+  const flat = parseAssetRows(rows.map((row) => row.join("\n"))).flat();
   await client.assertNetwork();
   const config = await client.configAccount();
   const quoteAddress = config.quote_mint.toBase58();
-  if (bases.includes(quoteAddress))
-    throw new Error("A base token cannot also be the configured quote token.");
-  const all = [quoteAddress, ...bases];
-  const accounts = await client.connection.getMultipleAccountsInfo(all.map(key), "confirmed");
-  const mints = all.map((address, index): MintInfo => {
-    const mint = decodeSupportedMint(key(address), accounts[index] ?? null);
-    return {
-      address,
-      decimals: mint.decimals,
-      standard: mint.program.equals(TOKEN_PROGRAM_ID) ? "SPL Token" : "Token-2022",
-    };
-  });
+  const [quoteInfo] = await client.connection.getMultipleAccountsInfo(
+    [config.quote_mint],
+    "confirmed",
+  );
+  const quote = inspectMint(quoteAddress, quoteInfo ?? null, BigInt(Math.floor(nowMs / 1000)));
+  const checks: Record<string, MintCheck> = await checkIssuerMints(client, flat, nowMs);
   return {
-    quote: mints[0]!,
-    bases: mints.slice(1),
+    quote,
+    checks,
     deployment: {
       ...client.deployment,
       programId: client.program.toBase58(),
@@ -109,13 +139,73 @@ export async function loadBatchMints(client: SolanaClient, addresses: string[]) 
     } satisfies AdminDeployment,
   };
 }
+export type VerifiedMints = Awaited<ReturnType<typeof loadBatchMints>>;
 
-/** Human defaults: step .001 base, max 1000 base, tick .01 quote/base.
- * Clamp to integer domains for unusual mint precision; every row is reviewed. */
-export function defaultMarketCaps(baseDecimals: number, quoteDecimals: number): MarketCaps {
-  for (const d of [baseDecimals, quoteDecimals])
+/** Immutable facts a reviewed row depends on; live multipliers and pause state are re-validated instead. */
+export function mintIdentity(verified: VerifiedMints) {
+  const mint = (m: MintInfo) => ({
+    address: m.address,
+    decimals: m.decimals,
+    standard: m.standard,
+    controls: m.issuer.controls,
+    pool: m.pool?.admitted ?? null,
+  });
+  return canonicalStringify({
+    deployment: verified.deployment,
+    quote: mint(verified.quote),
+    mints: Object.values(verified.checks).map((check) =>
+      check.ok ? mint(check.mint) : { address: check.address, error: true },
+    ),
+  });
+}
+
+/** Rows ready for planning (every leg verified), or the problems per market. */
+export function resolveRows(
+  verified: VerifiedMints,
+  rows: { mints: string[]; shareDecimals: string; caps: MarketCaps }[],
+): { rows: MarketRow[]; problems: string[][] } {
+  const problems: string[][] = [],
+    ready: MarketRow[] = [];
+  for (const row of rows) {
+    const checks = row.mints.map(
+      (address): MintCheck =>
+        verified.checks[address] ?? {
+          ok: false,
+          address,
+          error: "Token not verified. Load the tokens again.",
+        },
+    );
+    let shareDecimals = 0;
+    const issues: string[] = [];
+    try {
+      shareDecimals = parseShareDecimals(row.shareDecimals);
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : "Invalid share decimals");
+    }
+    if (!issues.length)
+      issues.push(...assetLegProblems(checks, verified.quote.address, shareDecimals));
+    try {
+      validateMarketCaps(row.caps);
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : "Invalid caps");
+    }
+    problems.push(issues);
+    if (!issues.length)
+      ready.push({
+        legs: checks.map((check) => (check as { ok: true; mint: MintInfo }).mint),
+        shareDecimals,
+        caps: row.caps,
+      });
+  }
+  return { rows: problems.some((list) => list.length) ? [] : ready, problems };
+}
+
+/** Human defaults in share units: step .001 share, max 1000 shares, tick .01 quote/share.
+ * Clamp to integer domains for unusual precision; every row is reviewed. */
+export function defaultMarketCaps(shareDecimals: number, quoteDecimals: number): MarketCaps {
+  for (const d of [shareDecimals, quoteDecimals])
     if (!Number.isInteger(d) || d < 0 || d > 255) throw new Error("Invalid mint decimals");
-  const base = 10n ** BigInt(baseDecimals),
+  const base = 10n ** BigInt(shareDecimals),
     quote = 10n ** BigInt(quoteDecimals);
   const step = min(base >= 1000n ? base / 1000n : 1n, U64);
   const humanTick = min(ceil(WAD * quote, 100n * base), U128);
@@ -177,7 +267,7 @@ export function buildBatchPlans(input: {
 }): BatchPlan[] {
   const { rows, quote, source, shared, deployment, owner } = input;
   const nowMs = input.nowMs ?? Date.now();
-  parseBaseMints(rows.map((row) => row.mint.address).join("\n"));
+  parseAssetRows(rows.map((row) => row.legs.map((leg) => leg.address).join("\n")));
   if (owner !== deployment.marketAdmin)
     throw new Error("Connect the configured market-admin wallet to prepare this batch.");
   if (
@@ -185,12 +275,20 @@ export function buildBatchPlans(input: {
     BigInt(shared.tradingCutoff) <= BigInt(Math.floor(nowMs / 1000))
   )
     throw new Error("Trading cutoff must still be in the future.");
-  return rows.map((row) => {
-    if (row.mint.address === quote.address) throw new Error("Base and quote mints must differ.");
+  return rows.map((row, index) => {
+    const shareDecimals = parseShareDecimals(row.shareDecimals);
+    const problems = assetLegProblems(
+      row.legs.map((mint) => ({ ok: true, mint })),
+      quote.address,
+      shareDecimals,
+    );
+    if (problems.length) throw new Error(`Market ${index + 1}: ${problems[0]}`);
     validateMarketCaps(row.caps);
+    const baseTokens = row.legs.map((leg) => leg.address);
     const config = {
       ...row.caps,
-      baseToken: row.mint.address,
+      baseTokens,
+      shareDecimals: String(shareDecimals),
       quoteToken: quote.address,
       tradingOpen: shared.tradingOpen,
       tradingCutoff: shared.tradingCutoff,
@@ -211,12 +309,23 @@ export function buildBatchPlans(input: {
         .map((v) => v.trim())
         .filter(Boolean),
     });
-    const expected = evidenceTransaction(envelope, "create-market", deployment);
+    const expectedMarketId = marketAddress(
+      key(deployment.config),
+      marketIdFromConfig(envelope.packet.config),
+      key(deployment.programId),
+    ).toBase58();
+    if (
+      evidenceTransaction(envelope, "create-market", deployment).expectedMarketId !==
+      expectedMarketId
+    )
+      throw new Error("Market identity differs from the create-market transaction.");
     return {
-      base: row.mint,
+      legs: row.legs,
+      baseTokens,
+      shareDecimals,
       quote,
       envelope,
-      expectedMarketId: expected.expectedMarketId,
+      expectedMarketId,
       body: {
         attachments: [],
         config,

@@ -13,13 +13,13 @@ import {
   SolanaClient,
   bn,
   coder,
-  claimAddress,
   poolAddress, poolVaultAddress,
   unwrap,
   envelope,
   type MarketAccount,
   type WalletAccount,
 } from "../src/index.ts";
+import { marketAccount } from "./market-fixture";
 
 const maximum = (1n << 64n) - 1n;
 test("local placement preparation budgets CPI guards without accepting remote priority fees", async () => {
@@ -33,10 +33,12 @@ test("local placement preparation budgets CPI guards without accepting remote pr
     new TransactionInstruction({
       programId: f.client.program,
       // Layout-only fixture for budgeting, not executable account identities.
-      keys: Array.from({ length: 22 + count }, (_, i) => ({ pubkey: i === 11 ? f.client.program : f.owner, isSigner: false, isWritable: i !== 11 })),
+      // 10 named (delegation slot 9 absent), 4 quote claim accounts, makers, one participant pair.
+      keys: Array.from({ length: 16 + count }, (_, i) => ({ pubkey: i === 9 ? f.client.program : f.owner, isSigner: false, isWritable: i !== 9 })),
       data: coder.instruction.encode("place", {
         participants: 1,
         delegations: 0,
+        touched: 0,
         terms: {
           recipient: f.owner,
           salt: Array(32).fill(0),
@@ -49,16 +51,15 @@ test("local placement preparation budgets CPI guards without accepting remote pr
           side: 0,
           funding: 0,
           tif: 0,
+          bases: 1,
         },
         plan: {
           deadline: bn(50),
           next_sequence: bn(0),
+          min_fill: bn(0),
           maker_bps: 0,
           taker_bps: 0,
-          legs: Array.from({ length: count }, () => ({
-            quantity: bn(1),
-            expected_remaining: bn(1),
-          })),
+          legs: Array.from({ length: count }, () => ({ quantity: bn(1) })),
         },
       }),
     });
@@ -78,7 +79,7 @@ test("local placement preparation budgets CPI guards without accepting remote pr
       expect(
         ComputeBudgetInstruction.decodeSetComputeUnitLimit(instructions[0]!)
           .units,
-      ).toBe(106_000 + 11_000 * legs + 32_000);
+      ).toBe(106_000 + 11_000 * legs + 16_000);
     }
     const pinned = await f.client.prepareTransaction(f.owner, envelope([ix]), {
       pinWalletFees: true,
@@ -89,7 +90,7 @@ test("local placement preparation budgets CPI guards without accepting remote pr
     expect(pinnedInstructions).toHaveLength(3);
     expect(
       ComputeBudgetInstruction.decodeSetComputeUnitLimit(pinnedInstructions[0]!).units,
-    ).toBe(106_000 + 11_000 * legs + (legs ? 32_000 : 0));
+    ).toBe(106_000 + 11_000 * legs + (legs ? 16_000 : 0));
     expect(
       ComputeBudgetInstruction.decodeSetComputeUnitPrice(pinnedInstructions[1]!).microLamports,
     ).toBe(0n);
@@ -103,7 +104,7 @@ test("local placement preparation budgets CPI guards without accepting remote pr
     ComputeBudgetInstruction.decodeSetComputeUnitLimit(
       TransactionMessage.decompile(capped.transaction.message).instructions[0]!,
     ).units,
-  ).toBe(2 * (106_000 + 88_000 + 32_000));
+  ).toBe(2 * (106_000 + 88_000 + 16_000));
   await expect(f.client.prepareTransaction(f.owner, envelope(Array.from({ length: 8 }, () => placement(8)))))
     .rejects.toThrow("compute budget exceeds");
   await expect(
@@ -185,19 +186,13 @@ function clientFixture() {
     genesisHash: "test",
   });
   const state = {
-    config: client.config,
-    state: 6,
+    ...marketAccount({ config: client.config, market, state: 6 }),
     payouts: [1, 1],
-    mints: [
-      key(),
-      key(),
-      ...Array.from({ length: 4 }, (_, i) => claimAddress(market, i + 2)),
-    ],
   } as MarketAccount;
   client.rememberMarket(market, state);
   client.market = async () => state;
   client.wallet = async () =>
-    ({ balances: [0, 0, 1, 1, 0, 0].map(bn) }) as WalletAccount;
+    ({ balances: [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0].map(bn) }) as WalletAccount;
   const deposits: { asset: number; credit: bigint }[] = [];
   client.depositForCredit = async (m, o, mint, asset, credit) => {
     deposits.push({ asset, credit });
@@ -212,7 +207,8 @@ function clientFixture() {
 
 test("reviewed recovery bytes fund only burned claims and bind the read-only underlying vault", async () => {
   const f = clientFixture();
-  const tx = await f.client.redemptionTransaction(f.market, f.owner, 0, 4n, 1n);
+  // Collateral 1 is the market's first issuer leg (claims 4/5).
+  const tx = await f.client.redemptionTransaction(f.market, f.owner, 1, 4n, 1n);
   expect(tx.recovery).toMatchObject({
     merge: 1n,
     redeemYes: 2n,
@@ -221,20 +217,26 @@ test("reviewed recovery bytes fund only burned claims and bind the read-only und
     burnYes: 3n,
     burnNo: 1n,
   });
-  expect(f.deposits).toEqual([{ asset: 2, credit: 2n }]);
+  expect(f.deposits).toEqual([{ asset: 4, credit: 2n }]);
   const ixs = unwrap(tx);
   expect(ixs.map((ix) => coder.instruction.decode(ix.data)!.name)).toEqual([
+    "initialize_credit",
     "deposit",
     "merge",
     "redeem",
   ]);
-  for (const ix of ixs.slice(1)) {
-    const underlying = ix.keys.at(-1)!;
-    expect(underlying.pubkey.equals(poolVaultAddress(poolAddress(f.client.config, f.state.mints[0]!)))).toBe(true);
-    expect(underlying.isWritable).toBe(false);
-    expect(underlying.isSigner).toBe(false);
+  const pool = poolAddress(f.client.config, f.state.mints[3]!);
+  for (const ix of ixs.slice(2)) {
+    // underlying_vault then underlying_mint (the leg's issuer mint), both read-only.
+    const [vault, mint] = ix.keys.slice(-2);
+    expect(vault!.pubkey.equals(poolVaultAddress(pool))).toBe(true);
+    expect(mint!.pubkey.equals(f.state.mints[3]!)).toBe(true);
+    for (const meta of [vault!, mint!]) {
+      expect(meta.isWritable).toBe(false);
+      expect(meta.isSigner).toBe(false);
+    }
   }
-  const combined = f.client.redeem(f.market, f.owner, 0, 1n, 1n);
+  const combined = f.client.redeem(f.market, f.owner, 1, 1n, 1n);
   const decoded = coder.instruction.decode(combined.data)!.data as {
     yes_amount: { toString(): string };
     no_amount: { toString(): string };
@@ -245,19 +247,19 @@ test("reviewed recovery bytes fund only burned claims and bind the read-only und
 
 test("unredeemable odd claim stays put; legacy high-level single-branch funding fails before deposit", async () => {
   const f = clientFixture();
-  const tx = await f.client.redemptionTransaction(f.market, f.owner, 0, 1n, 0n);
+  const tx = await f.client.redemptionTransaction(f.market, f.owner, 1, 1n, 0n);
   expect(tx.executable).toBe(false);
   expect(() => unwrap(tx)).toThrow("Invalid instruction bundle");
   expect(tx.recovery.retainedYes).toBe(1n);
   await expect(
-    f.client.positionTransaction("redeem", f.market, f.owner, 0, 3n),
+    f.client.positionTransaction("redeem", f.market, f.owner, 1, 3n),
   ).rejects.toThrow("fractional raw unit");
   expect(f.deposits).toHaveLength(0);
   f.state.state = 2;
   await expect(
-    f.client.redemptionTransaction(f.market, f.owner, 0, 1n, 1n),
+    f.client.redemptionTransaction(f.market, f.owner, 1, 1n, 1n),
   ).rejects.toThrow("not redeemable");
-  for (const collateral of [-1, 2, 255])
+  for (const collateral of [-1, 4, 255])
     expect(() =>
       f.client.redeem(f.market, f.owner, collateral, 1n, 1n),
     ).toThrow();

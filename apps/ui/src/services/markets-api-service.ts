@@ -1,12 +1,27 @@
 import {
-  assertMarketUnits,
+  assertShareUnits,
   formatPriceRawX18,
-  formatTokenAmount,
-  type MarketUnits,
+  formatShareAmount,
+  type ShareUnits,
+  tokenDecimals,
 } from "@conditional-stocks/domain";
 import { polymarketImageUrl } from "@conditional-stocks/market-data";
+import {
+  ASSETS,
+  claimAsset,
+  legBit,
+  MAX_BASES,
+  underlyingAsset,
+} from "@conditional-stocks/solana-client";
 import { marketTokenDisplay } from "../lib/tokens/devnet";
-import type { BranchBook, MarketLifecycle, MarketView } from "../types/api";
+import type {
+  BranchBook,
+  LegLiveView,
+  LevelBases,
+  MarketLegView,
+  MarketLifecycle,
+  MarketView,
+} from "../types/api";
 import { requestJson } from "./api";
 import { API_URL } from "./constants";
 import { expireCachedProbability, parseProbabilityMessage } from "./probability";
@@ -66,24 +81,159 @@ function metadataProbability(attached: Record<string, unknown>): MarketView["pro
     value,
   };
 }
-function aggregateBook(
+const MINT = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const DIGITS = /^(0|[1-9][0-9]{0,39})$/;
+const HALTS = new Set([
+  "delisted",
+  "claims-uninitialized",
+  "issuer-paused",
+  "vault-frozen",
+  "corporate-action",
+  "transfer-hook",
+  "unreadable",
+]);
+const mint = (value: unknown, label: string) => {
+  if (typeof value !== "string" || !MINT.test(value)) throw new Error(`Invalid ${label} mint`);
+  return value;
+};
+const digits = (value: unknown, label: string) => {
+  const raw = typeof value === "number" && Number.isSafeInteger(value) ? String(value) : value;
+  if (typeof raw !== "string" || !DIGITS.test(raw)) throw new Error(`Invalid ${label}`);
+  return raw;
+};
+const claimPair = (value: unknown, label: string) => {
+  const pair = record(value);
+  return { yes: mint(pair.yes, `${label} YES`), no: mint(pair.no, `${label} NO`) };
+};
+function liveLeg(value: unknown): LegLiveView | undefined {
+  if (value === undefined || value === null) return undefined;
+  const live = record(value);
+  const halt = live.halt === null || live.halt === undefined ? null : live.halt;
+  if (
+    typeof live.paused !== "boolean" ||
+    typeof live.vaultFrozen !== "boolean" ||
+    typeof live.tradable !== "boolean" ||
+    typeof live.multiplierValue !== "number" ||
+    !Number.isFinite(live.multiplierValue) ||
+    (halt !== null && (typeof halt !== "string" || !HALTS.has(halt))) ||
+    live.tradable !== (halt === null)
+  )
+    throw new Error("Invalid live issuer state");
+  return {
+    multiplier: digits(live.multiplier, "live multiplier"),
+    multiplierValue: live.multiplierValue,
+    paused: live.paused,
+    vaultFrozen: live.vaultFrozen,
+    tradable: live.tradable,
+    halt: halt as LegLiveView["halt"],
+  };
+}
+
+/** v3 base legs: up to MAX_BASES issuer tokens in collateral order, each matching the asset
+ * table. A newly created market lists the quote only until its first `add_base`. */
+export function parseMarketLegs(
+  market: Record<string, unknown>,
+  claimMints: string[],
+): Omit<MarketLegView, "symbol" | "issuer" | "metadata">[] {
+  const bases = market.bases;
+  if (!Array.isArray(bases) || bases.length > MAX_BASES)
+    throw new Error("A v3 market lists at most three issuer legs");
+  return bases.map((value, index) => {
+    const leg = record(value);
+    const collateral = index + 1;
+    if (leg.collateral !== collateral || leg.bit !== legBit(collateral))
+      throw new Error("Issuer legs must be listed in collateral order");
+    if (typeof leg.active !== "boolean" || typeof leg.ready !== "boolean")
+      throw new Error("Invalid issuer leg state");
+    const parsed = {
+      collateral,
+      bit: legBit(collateral),
+      mint: mint(leg.mint, "issuer"),
+      decimals: tokenDecimals(leg.decimals),
+      scale: digits(leg.scale, "leg scale"),
+      listingMultiplier: digits(leg.listingMultiplier, "listing multiplier"),
+      active: leg.active,
+      ready: leg.ready,
+      claimMints: claimPair(leg.claimMints, "leg claim"),
+    };
+    if (
+      claimMints[underlyingAsset(collateral)] !== parsed.mint ||
+      claimMints[claimAsset(collateral, 0)] !== parsed.claimMints.yes ||
+      claimMints[claimAsset(collateral, 1)] !== parsed.claimMints.no ||
+      BigInt(parsed.scale) !==
+        10n ** BigInt(Math.max(0, parsed.decimals - Number(market.shareDecimals))) ||
+      parsed.decimals < Number(market.shareDecimals)
+    )
+      throw new Error("Issuer leg differs from the market asset table");
+    const live = liveLeg(leg.live);
+    return live ? { ...parsed, live } : parsed;
+  });
+}
+
+function parseLevelBases(value: unknown, units: ShareUnits): LevelBases[] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return Object.entries(value as Record<string, unknown>)
+    .map(([mask, remaining]) => {
+      const bits = Number(mask);
+      const raw = BigInt(digits(remaining, "level remaining"));
+      if (!Number.isInteger(bits) || bits <= 0 || bits >= 1 << MAX_BASES)
+        throw new Error("Invalid level issuer mask");
+      return { mask: bits, quantityRaw: raw, quantity: 0 };
+    })
+    .filter((entry) => entry.quantityRaw > 0n)
+    .sort((a, b) => a.mask - b.mask)
+    .map((entry) => ({
+      mask: entry.mask,
+      quantityRaw: entry.quantityRaw.toString(),
+      quantity: Number(formatShareAmount(entry.quantityRaw, units)),
+    }));
+}
+
+/** Aggregate compact levels (`byBases`) or full indexed orders (`bases`) into one branch book. */
+export function aggregateBook(
   orders: Record<string, unknown>[],
   branch: number,
-  units: MarketUnits,
+  units: ShareUnits,
 ): BranchBook {
   const side = (value: number) => {
-    const totals = new Map<bigint, bigint>();
+    const totals = new Map<bigint, { total: bigint; byBases: Map<number, bigint> | null }>();
     for (const order of orders) {
       if (Number(order.branch) !== branch || Number(order.side) !== value) continue;
       const price = BigInt(text(order.limitPriceRawX18));
-      totals.set(price, (totals.get(price) ?? 0n) + BigInt(text(order.remaining)));
+      const remaining = BigInt(text(order.remaining));
+      const entry = totals.get(price) ?? { total: 0n, byBases: new Map<number, bigint>() };
+      entry.total += remaining;
+      const breakdown =
+        order.byBases !== undefined
+          ? parseLevelBases(order.byBases, units)?.map(
+              (item) => [item.mask, BigInt(item.quantityRaw)] as const,
+            )
+          : typeof order.bases === "number" && order.bases > 0
+            ? [[order.bases, remaining] as const]
+            : undefined;
+      if (!breakdown) entry.byBases = null;
+      else if (entry.byBases)
+        for (const [mask, amount] of breakdown)
+          entry.byBases.set(mask, (entry.byBases.get(mask) ?? 0n) + amount);
+      totals.set(price, entry);
     }
     return [...totals]
       .sort(([a], [b]) => (a === b ? 0 : (a < b ? -1 : 1) * (value === 0 ? -1 : 1)))
-      .map(([price, quantity]) => ({
+      .map(([price, { total, byBases }]) => ({
         priceExact: formatPriceRawX18(price, units),
         price: Number(formatPriceRawX18(price, units)),
-        quantity: Number(formatTokenAmount(quantity, units.baseTokenDecimals)),
+        quantity: Number(formatShareAmount(total, units)),
+        ...(byBases?.size
+          ? {
+              byBases: [...byBases]
+                .sort(([a], [b]) => a - b)
+                .map(([mask, amount]) => ({
+                  mask,
+                  quantityRaw: amount.toString(),
+                  quantity: Number(formatShareAmount(amount, units)),
+                })),
+            }
+          : {}),
       }));
   };
   const bids = side(0);
@@ -100,6 +250,23 @@ function aggregateBook(
     depthUsd: [...bids, ...asks].reduce((total, item) => total + item.price * item.quantity, 0),
     spread: bestAsk !== null && bestBid !== null ? bestAsk - bestBid : null,
   };
+}
+
+/** The 12-entry asset mint table; quote claims must match `quoteClaimMints`. */
+function parseAssetTable(market: Record<string, unknown>) {
+  const table = market.claimMints;
+  if (!Array.isArray(table) || table.length !== ASSETS)
+    throw new Error("A v3 market carries all 12 asset mints");
+  const claimMints = table.map((value, index) => mint(value, `asset ${index}`));
+  const quoteToken = mint(market.quoteToken, "quote");
+  const quoteClaimMints = claimPair(market.quoteClaimMints, "quote claim");
+  if (
+    claimMints[0] !== quoteToken ||
+    claimMints[claimAsset(0, 0)] !== quoteClaimMints.yes ||
+    claimMints[claimAsset(0, 1)] !== quoteClaimMints.no
+  )
+    throw new Error("Quote claims differ from the market asset table");
+  return { claimMints, quoteToken, quoteClaimMints };
 }
 
 async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<MarketView[]> {
@@ -142,8 +309,10 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
   const batch = await batchPromise;
   return Promise.all(
     marketResponse.markets.map(async (market): Promise<MarketView> => {
-      assertMarketUnits(market);
+      assertShareUnits(market);
       const id = text(market.id);
+      const table = parseAssetTable(market);
+      const legs = parseMarketLegs(market, table.claimMints);
       const condition = text(market.polymarketConditionId).toLowerCase();
       const [attached, book] = await Promise.all([
         attachments.get(condition) ?? Promise.resolve({}),
@@ -189,15 +358,32 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
         no.bestBid !== null && no.bestAsk !== null && no.bestAsk >= no.bestBid
           ? (no.bestBid + no.bestAsk) / 2
           : null;
+      const display = marketTokenDisplay(
+        legs.map((leg) => leg.mint),
+        table.quoteToken,
+        process.env.NEXT_PUBLIC_SOLANA_GENESIS_HASH ?? "",
+        text(record(metadata.asset).symbol, "STOCK"),
+      );
+      const bases: MarketLegView[] = legs.map((leg, index) => {
+        const shown = display.legs[index] ?? { symbol: display.ticker, issuer: null };
+        return {
+          ...leg,
+          symbol: shown.symbol,
+          issuer: shown.issuer,
+          ...(shown.metadata ? { metadata: shown.metadata } : {}),
+        };
+      });
       return {
-        baseTokenDecimals: market.baseTokenDecimals,
+        shareDecimals: market.shareDecimals,
         quoteTokenDecimals: market.quoteTokenDecimals,
         protocolVersion: market.protocolVersion,
         priceFormat: market.priceFormat,
         baseStep: text(market.baseStep),
         priceTickRawX18: text(market.priceTickRawX18, "1"),
         bookQuality: book.unavailable ? "unavailable" : book.truncated ? "truncated" : "available",
-        baseToken: text(market.baseToken),
+        bases,
+        claimMints: table.claimMints,
+        quoteClaimMints: table.quoteClaimMints,
         cutoff: isoSeconds(market.tradingCutoff),
         createdAt: text(market.createdAt) || null,
         description: text(
@@ -220,14 +406,13 @@ async function liveMarkets(marketId?: string, signal?: AbortSignal): Promise<Mar
         imageUrl:
           polymarketImageUrl(metadata) ??
           polymarketImageUrl(record(attachedRecord.metadata).rawPayload),
-        quoteToken: text(market.quoteToken),
+        quoteToken: table.quoteToken,
         residual: null,
-        ...marketTokenDisplay(
-          text(market.baseToken),
-          text(market.quoteToken),
-          process.env.NEXT_PUBLIC_SOLANA_GENESIS_HASH ?? "",
-          text(record(metadata.asset).symbol, "STOCK"),
-        ),
+        ticker: display.ticker,
+        // A market without listed legs yet is its own asset until issuers are added.
+        assetKey: bases.length ? display.assetKey : `market:${id}`,
+        ...(display.assetMetadata ? { assetMetadata: display.assetMetadata } : {}),
+        ...(display.quoteTokenMetadata ? { quoteTokenMetadata: display.quoteTokenMetadata } : {}),
         tradingOpen: isoSeconds(market.tradingOpen),
         yes,
       };

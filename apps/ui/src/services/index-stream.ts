@@ -1,6 +1,7 @@
 let healthyUntil = 0;
 
-import { assertMarketUnits } from "@conditional-stocks/domain";
+import { SHARE_PROTOCOL_VERSION, tokenDecimals } from "@conditional-stocks/domain";
+import { MAX_BASES } from "@conditional-stocks/solana-client";
 import type { PositionView, WholeBalanceView } from "../types/api";
 
 const address = (v: unknown): v is string =>
@@ -54,18 +55,43 @@ export function parseStreamWallet(value: any, owner: string): StreamWallet {
       throw new Error("Invalid streamed balance");
     balances[mint] = { ...balance, vaultAvailable, reserved };
   }
-  for (const p of value.positions) {
-    if (
-      !address(p.marketId) ||
-      p.conditionId !== p.marketId ||
-      typeof p.redeemable !== "boolean" ||
-      [p.stockYes, p.stockNo, p.quoteYes, p.quoteNo].some((n) => !amount(n, 65))
-    )
-      throw new Error("Invalid streamed position");
-    assertMarketUnits(p);
-  }
+  for (const p of value.positions) parsePosition(p);
   return { ...value, balances };
 }
+/** v3 position: quote claims plus per-issuer claims, each in raw units of its own mint. */
+export function parsePosition(p: any): PositionView {
+  if (
+    !p ||
+    !address(p.marketId) ||
+    p.conditionId !== p.marketId ||
+    typeof p.redeemable !== "boolean" ||
+    p.protocolVersion !== SHARE_PROTOCOL_VERSION ||
+    [p.quoteYes, p.quoteNo].some((n) => !amount(n, 65)) ||
+    !Array.isArray(p.bases) ||
+    p.bases.length > MAX_BASES ||
+    // Legs whose claims are not initialized yet are omitted; the rest ascend.
+    p.bases.some(
+      (leg: any, index: number) =>
+        !leg ||
+        !Number.isInteger(leg.collateral) ||
+        leg.collateral < 1 ||
+        leg.collateral > MAX_BASES ||
+        (index > 0 && leg.collateral <= p.bases[index - 1]?.collateral) ||
+        !address(leg.mint) ||
+        !amount(leg.yes, 65) ||
+        !amount(leg.no, 65),
+    )
+  )
+    throw new Error("Invalid streamed position");
+  tokenDecimals(p.shareDecimals);
+  tokenDecimals(p.quoteTokenDecimals);
+  for (const leg of p.bases) tokenDecimals(leg.decimals);
+  return p as PositionView;
+}
+export const positionHasClaims = (p: PositionView) =>
+  [p.quoteYes, p.quoteNo, ...p.bases.flatMap((leg) => [leg.yes, leg.no])].some(
+    (value) => BigInt(value) > 0n,
+  );
 export const setIndexStreamHealthy = (until: number) => {
   healthyUntil = until;
 };

@@ -24,7 +24,7 @@ export function marketCategoryFromPathname(pathname: string): MarketCategory | n
 export function currentSpotUsd(market: MarketView, nowMs = Date.now()): number | null {
   const spot = market.spotReference && expireSpotPrice(market.spotReference, nowMs);
   return spot?.status === "available" &&
-    spot.mint === market.baseToken &&
+    market.bases.some((leg) => leg.mint === spot.mint) &&
     spot.priceUsd !== null &&
     Number.isFinite(spot.priceUsd) &&
     spot.priceUsd > 0
@@ -93,12 +93,15 @@ function preferredAssetMarket(current: MarketView, candidate: MarketView): Marke
   return current.id.localeCompare(candidate.id) <= 0 ? current : candidate;
 }
 
+/** Sibling markets of one event are different assets (NVDA vs TSLA), each multi-issuer. */
+export const marketAssetKey = (market: MarketView) => `${market.assetKey}:${market.quoteToken}`;
+
 export function groupMarkets(markets: MarketView[]): MarketView[][] {
   const groups = new Map<string, Map<string, MarketView>>();
   for (const market of markets) {
     const key = eventKey(market);
     const group = groups.get(key) ?? new Map<string, MarketView>();
-    const assetKey = `${market.baseToken}:${market.quoteToken}`;
+    const assetKey = marketAssetKey(market);
     const existing = group.get(assetKey);
     group.set(assetKey, existing ? preferredAssetMarket(existing, market) : market);
     groups.set(key, group);

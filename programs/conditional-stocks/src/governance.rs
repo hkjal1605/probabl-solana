@@ -1,6 +1,7 @@
-use crate::state::*;
+use crate::pool::AssetPool;
+use crate::{state::*, token_policy};
 use anchor_lang::prelude::*;
-use anchor_spl::token_interface::Mint;
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 use protocol_core as rules;
 use solana_sha256_hasher::hashv;
 
@@ -111,22 +112,32 @@ pub struct CreateMarket<'info> {
     #[account(seeds = [b"config", config.seed_authority.as_ref()], bump = config.bump,
         constraint = config.roles.market_admin == admin.key() @ ProtocolError::Unauthorized)]
     pub config: Account<'info, Config>,
-    pub base_mint: InterfaceAccount<'info, Mint>,
     #[account(address = config.quote_mint)]
-    pub quote_mint: InterfaceAccount<'info, Mint>,
-    #[account(init, payer = admin, space = Market::allocation_size(terms.metadata_uri.len(), None),
+    pub quote_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(seeds = [b"pool", config.key().as_ref(), quote_mint.key().as_ref()], bump = quote_pool.bump,
+        constraint = quote_pool.mint == quote_mint.key() @ ProtocolError::InvalidAsset)]
+    pub quote_pool: Box<Account<'info, AssetPool>>,
+    #[account(seeds = [b"pool-vault", quote_pool.key().as_ref()], bump = quote_pool.vault_bump,
+        constraint = quote_vault.mint == quote_mint.key() @ ProtocolError::InvalidAsset,
+        constraint = quote_vault.owner == quote_pool.key() @ ProtocolError::InvalidAccount)]
+    pub quote_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(init, payer = admin, space = Market::allocation_size(terms.metadata_uri.len(), 0),
         seeds = [b"market", config.key().as_ref(), &id], bump)]
     pub market: Box<Account<'info, Market>>,
     pub system_program: Program<'info, System>,
 }
 
+/// A market starts with the deployment quote only. Base legs (one per
+/// whitelisted issuer token of the same asset) are listed with `add_base`.
 pub fn create_market(ctx: Context<CreateMarket>, id: [u8; 32], terms: Terms) -> Result<()> {
-    crate::token_policy::validate_mint(&ctx.accounts.base_mint.to_account_info())?;
-    crate::token_policy::validate_mint(&ctx.accounts.quote_mint.to_account_info())?;
-    require_keys_neq!(
-        ctx.accounts.base_mint.key(),
-        ctx.accounts.quote_mint.key(),
-        ProtocolError::InvalidAsset
+    token_policy::validate_mint(&ctx.accounts.quote_mint.to_account_info())?;
+    require!(
+        ctx.accounts.quote_pool.admitted == 0,
+        ProtocolError::UnsupportedTokenExtension
+    );
+    require!(
+        ctx.accounts.quote_vault.amount >= ctx.accounts.quote_pool.liability,
+        ProtocolError::Insolvent
     );
     require!(
         id != [0; 32] && terms.condition != [0; 32] && terms.rules_hash != [0; 32],
@@ -150,17 +161,20 @@ pub fn create_market(ctx: Context<CreateMarket>, id: [u8; 32], terms: Terms) -> 
             && terms.trading_cutoff > Clock::get()?.unix_timestamp,
         ProtocolError::InvalidTerms
     );
+    require!(
+        terms.share_decimals <= MAX_SHARE_DECIMALS,
+        ProtocolError::InvalidTerms
+    );
     checked(terms.caps().validate())?;
     let market = &mut ctx.accounts.market;
+    market.ledgers();
     market.config = ctx.accounts.config.key();
     market.id = id;
     market.terms = terms;
-    market.mints[0] = ctx.accounts.base_mint.key();
-    market.mints[1] = ctx.accounts.quote_mint.key();
-    market.decimals = [
-        ctx.accounts.base_mint.decimals,
-        ctx.accounts.quote_mint.decimals,
-    ];
+    market.mints[underlying(QUOTE)] = ctx.accounts.quote_mint.key();
+    market.decimals[QUOTE] = ctx.accounts.quote_mint.decimals;
+    market.pool_bumps[QUOTE] = ctx.accounts.quote_pool.bump;
+    market.vaults_initialized = 1 << underlying(QUOTE);
     market.state = rules::SCHEDULED;
     market.bump = ctx.bumps.market;
     emit!(Change {
@@ -169,6 +183,143 @@ pub fn create_market(ctx: Context<CreateMarket>, id: [u8; 32], terms: Terms) -> 
         kind: 1,
         amount: 0,
         asset: 0
+    });
+    Ok(())
+}
+
+pub const MAX_SHARE_DECIMALS: u8 = 18;
+/// 10^19 is the largest power of ten in u64.
+pub const MAX_SCALE_EXPONENT: u8 = 19;
+
+#[derive(Accounts)]
+pub struct AddBase<'info> {
+    pub admin: Signer<'info>,
+    #[account(seeds = [b"config", config.seed_authority.as_ref()], bump = config.bump,
+        constraint = config.roles.market_admin == admin.key() @ ProtocolError::Unauthorized)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, has_one = config, seeds = [b"market", config.key().as_ref(), &market.id], bump = market.bump)]
+    pub market: Box<Account<'info, Market>>,
+    #[account(owner = token_program.key())]
+    pub mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(seeds = [b"pool", config.key().as_ref(), mint.key().as_ref()], bump = pool.bump,
+        has_one = mint, has_one = token_program)]
+    pub pool: Box<Account<'info, AssetPool>>,
+    #[account(seeds = [b"pool-vault", pool.key().as_ref()], bump = pool.vault_bump,
+        token::mint = mint, token::authority = pool, token::token_program = token_program)]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+/// Whitelist one issuer's token of the market's asset as a new base leg. Its
+/// claims are backed only by that token. The unified book trades share units:
+/// each fill converts to this issuer's raw units at its live multiplier.
+pub fn add_base(ctx: Context<AddBase>) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    let mint = ctx.accounts.mint.key();
+    let decimals = ctx.accounts.mint.decimals;
+    let market = &mut ctx.accounts.market;
+    require!(
+        [rules::SCHEDULED, rules::OPEN].contains(&market.state)
+            && now < market.terms.trading_cutoff,
+        ProtocolError::InvalidState
+    );
+    require!(
+        (market.bases as usize) < MAX_BASES,
+        ProtocolError::InvalidAsset
+    );
+    require!(
+        (0..market.collaterals()).all(|c| market.mints[underlying(c)] != mint),
+        ProtocolError::InvalidAsset
+    );
+    let exponent = decimals
+        .checked_sub(market.terms.share_decimals)
+        .filter(|e| *e <= MAX_SCALE_EXPONENT)
+        .ok_or_else(|| error!(ProtocolError::InvalidTerms))?;
+    let scale = 10u64.pow(exponent as u32);
+    let state = token_policy::validate_admitted(
+        &ctx.accounts.mint.to_account_info(),
+        ctx.accounts.pool.admitted,
+    )?;
+    require!(!state.paused, ProtocolError::IssuerPaused);
+    // Every admissible order converts without overflow, rounding up, at any
+    // multiplier inside the band (the smallest is 4/5 of the listing value).
+    checked(rules::base_raw(
+        market.terms.max_quantity,
+        scale,
+        state.multiplier,
+        true,
+    ))?
+    .checked_mul(5)
+    .ok_or_else(|| error!(ProtocolError::InvalidTerms))?;
+    // One step still delivers at least one raw unit at the top of the band.
+    require!(
+        checked(rules::base_raw(
+            market.terms.step,
+            scale,
+            state.multiplier,
+            false
+        ))? >= 2,
+        ProtocolError::InvalidTerms
+    );
+    require!(!ctx.accounts.vault.is_frozen(), ProtocolError::LegHalted);
+    require!(
+        ctx.accounts.vault.amount >= ctx.accounts.pool.liability,
+        ProtocolError::Insolvent
+    );
+    let collateral = market.bases as usize + 1;
+    market.mints[underlying(collateral)] = mint;
+    market.decimals[collateral] = decimals;
+    market.pool_bumps[collateral] = ctx.accounts.pool.bump;
+    market.legs[collateral - 1] = BaseLeg {
+        scale,
+        multiplier: state.multiplier,
+        active: true,
+    };
+    market.vaults_initialized |= 1 << underlying(collateral);
+    market.bases += 1;
+    emit!(Change {
+        market: market.key(),
+        account: ctx.accounts.admin.key(),
+        kind: 15,
+        amount: scale,
+        asset: collateral as u8
+    });
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct SetBase<'info> {
+    pub actor: Signer<'info>,
+    #[account(seeds = [b"config", config.seed_authority.as_ref()], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    #[account(mut, has_one = config, seeds = [b"market", config.key().as_ref(), &market.id], bump = market.bump)]
+    pub market: Box<Account<'info, Market>>,
+}
+
+/// Delist (guardian or market admin) or relist (market admin) a base leg.
+/// A delisted leg accepts no new exposure; its resting asks become publicly
+/// releasable. Existing claims always remain mergeable and redeemable.
+pub fn set_base(ctx: Context<SetBase>, collateral: u8, active: bool) -> Result<()> {
+    let actor = ctx.accounts.actor.key();
+    let roles = &ctx.accounts.config.roles;
+    require!(
+        actor == roles.market_admin || (!active && actor == roles.guardian),
+        ProtocolError::Unauthorized
+    );
+    let market = &mut ctx.accounts.market;
+    let c = usize::from(collateral);
+    market.leg(c)?;
+    require!(
+        market.legs[c - 1].active != active,
+        ProtocolError::InvalidState
+    );
+    market.legs[c - 1].active = active;
+    emit!(Change {
+        market: market.key(),
+        account: actor,
+        kind: 16,
+        amount: u64::from(active),
+        asset: collateral
     });
     Ok(())
 }
@@ -192,7 +343,7 @@ pub fn lifecycle(ctx: Context<Lifecycle>, action: u8, commitment: [u8; 32]) -> R
             require_keys_eq!(actor, roles.market_admin, ProtocolError::Unauthorized);
             require!(
                 market.state == rules::SCHEDULED
-                    && market.vaults_initialized == 63
+                    && market.openable()
                     && now >= market.terms.trading_open
                     && now < market.terms.trading_cutoff,
                 ProtocolError::InvalidState
@@ -266,8 +417,24 @@ pub fn resolution_hash(
     .to_bytes()
 }
 
+/// Resolution grows the market by exactly the evidence URI; the resolution
+/// admin pays its rent.
+#[derive(Accounts)]
+#[instruction(yes: u8, no: u8, evidence: [u8; 32], uri: String)]
+pub struct Resolve<'info> {
+    #[account(mut)]
+    pub actor: Signer<'info>,
+    #[account(seeds = [b"config", config.seed_authority.as_ref()], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    #[account(mut, has_one = config, seeds = [b"market", config.key().as_ref(), &market.id], bump = market.bump,
+        realloc = Market::allocation_size(market.terms.metadata_uri.len(), uri.len()),
+        realloc::payer = actor, realloc::zero = false)]
+    pub market: Box<Account<'info, Market>>,
+    pub system_program: Program<'info, System>,
+}
+
 pub fn resolve(
-    ctx: Context<Lifecycle>,
+    ctx: Context<Resolve>,
     yes: u8,
     no: u8,
     evidence: [u8; 32],

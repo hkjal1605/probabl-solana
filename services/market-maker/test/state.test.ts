@@ -31,6 +31,7 @@ test("corrupt or wrong-domain risk state never silently resets", () => {
     { lastSlot: NaN },
     { scope: "different" },
     { markets: { m: { halted: "false" } } },
+    { markets: { m: { priceUnit: "raw" } } },
     { pending: { signature: "bad", lastValidBlockHeight: 1 } },
   ])
     expect(() => validateState({ ...initialState("test"), ...patch }, "test")).toThrow();

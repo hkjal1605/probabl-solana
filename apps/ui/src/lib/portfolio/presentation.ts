@@ -1,4 +1,5 @@
-import { formatPriceRawX18, formatTokenAmount } from "@conditional-stocks/domain";
+import { formatPriceRawX18, formatShareAmount } from "@conditional-stocks/domain";
+import { legByCollateral, maskLabel, orderLeg } from "@/lib/markets/legs";
 import type { IndexedOrder, MarketView, TradeView } from "@/types/api";
 
 export interface WalletTradeRow {
@@ -45,14 +46,26 @@ export function walletTradeRows(
 
 export function tradeHistoryCsv(rows: WalletTradeRow[]) {
   return [
-    ["Trade ID", "Market", "Asset", "Side", "Branch", "Quantity", "Price", "Time", "Transaction"],
+    [
+      "Trade ID",
+      "Market",
+      "Asset",
+      "Issuer",
+      "Side",
+      "Branch",
+      "Quantity",
+      "Price",
+      "Time",
+      "Transaction",
+    ],
     ...rows.map(({ market, side, trade }) => [
       trade.id,
       market.question,
       market.ticker,
+      trade.base === undefined ? "" : (legByCollateral(market, trade.base)?.symbol ?? ""),
       side,
       trade.branch === 0 ? "YES" : "NO",
-      formatTokenAmount(BigInt(trade.fillQuantity), market.baseTokenDecimals),
+      formatShareAmount(BigInt(trade.fillQuantity), market),
       formatPriceRawX18(BigInt(trade.executionPriceRawX18), market),
       new Date(Number(trade.blockTimestamp) * 1000).toISOString(),
       trade.transactionHash,
@@ -68,7 +81,13 @@ export function wholeReserved(token: string, orders: IndexedOrder[], markets: Ma
     if (order.status !== "open" || order.fundingKind !== 0) return total;
     const market = byId.get(order.marketId);
     if (!market) return total;
-    const fundingToken = order.side === 0 ? market.quoteToken : market.baseToken;
+    const leg = orderLeg(order);
+    const fundingToken =
+      order.side === 0
+        ? market.quoteToken
+        : leg === null
+          ? null
+          : legByCollateral(market, leg)?.mint;
     return fundingToken === token ? total + BigInt(order.reserved) : total;
   }, 0n);
 }
@@ -87,9 +106,10 @@ export function orderHistoryCsv(orders: IndexedOrder[], markets: MarketView[]) {
       m?.ticker ?? "",
       o.side === 0 ? "Buy" : "Sell",
       o.branch === 0 ? "YES" : "NO",
+      m ? maskLabel(m, o.bases ?? 0) : "",
       o.status,
-      m ? formatTokenAmount(BigInt(o.quantity), m.baseTokenDecimals) : "",
-      m ? formatTokenAmount(BigInt(o.filled), m.baseTokenDecimals) : "",
+      m ? formatShareAmount(BigInt(o.quantity), m) : "",
+      m ? formatShareAmount(BigInt(o.filled), m) : "",
       m ? formatPriceRawX18(BigInt(o.limitPriceRawX18), m) : "",
       o.updatedBlock,
     ];
@@ -101,6 +121,7 @@ export function orderHistoryCsv(orders: IndexedOrder[], markets: MarketView[]) {
       "Asset",
       "Side",
       "Branch",
+      "Issuers",
       "Status",
       "Quantity",
       "Filled",

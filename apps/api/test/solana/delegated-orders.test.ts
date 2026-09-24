@@ -81,6 +81,7 @@ test("delegated submission waits for the index and replans an explicitly stale s
     side: 0,
     fundingKind: 0,
     tif: 1,
+    bases: 1,
   };
   let simulations = 0;
   let sends = 0;
@@ -179,8 +180,10 @@ test("delegated submission waits for the index and replans an explicitly stale s
       snapshotReads++;
       return snapshotReads === 1 ? s : { ...s, slot: 105 };
     },
-    prepare: async (_candidate, snapshot) => {
+    prepare: async (_candidate, snapshot, prefix) => {
       expect(snapshot?.slot === 100 || snapshot?.slot === 105).toBe(true);
+      // The wallet exists, so the placement carries no initializer to size for.
+      expect(prefix).toEqual([]);
       return { plan: {} as never };
     },
   });

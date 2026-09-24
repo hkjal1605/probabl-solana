@@ -19,5 +19,6 @@ process.env.MM_SOLANA_CONFIG = CONFIG;
 process.env.MM_PROGRAM_ID = PROGRAM;
 process.env.MM_API_ORIGIN = "https://api-solana.probabl.trade";
 process.env.MM_CONFIG_PATH = resolve(ROOT, ".local/devnet/market-maker-all.json");
-process.env.MM_STATE_PATH = resolve(ROOT, ".local/devnet/market-maker-v2-state.json");
+// Multi-issuer policies (baseMints per market) never reuse single-base v2 state.
+process.env.MM_STATE_PATH = resolve(ROOT, ".local/devnet/market-maker-v3-state.json");
 await import("../../services/market-maker/src/main.ts");

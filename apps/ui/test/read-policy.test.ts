@@ -122,7 +122,19 @@ test("partial book refresh retains rows only for identical assets, without makin
   expect(merged.bookQuality).toBe("unavailable");
   expect(() => marketPriceBound(merged, "YES", "buy")).toThrow("fresh order book");
   expect(
-    retainBookDisplays({ markets: [market] }, { markets: [{ ...next, baseToken: "different" }] })
+    retainBookDisplays(
+      { markets: [market] },
+      { markets: [{ ...next, bases: [{ ...next.bases[0]!, mint: "different" }] }] },
+    ).markets[0]!.yes,
+  ).toBe(next.yes);
+  expect(
+    retainBookDisplays(
+      { markets: [market] },
+      { markets: [{ ...next, bases: next.bases.slice(0, 2) }] },
+    ).markets[0]!.yes,
+  ).toBe(next.yes);
+  expect(
+    retainBookDisplays({ markets: [market] }, { markets: [{ ...next, shareDecimals: 8 }] })
       .markets[0]!.yes,
   ).toBe(next.yes);
 });

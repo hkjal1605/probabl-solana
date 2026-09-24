@@ -1,4 +1,4 @@
-import { big, key, walletAddress } from "@conditional-stocks/solana-client";
+import { big, claimAsset, key, underlyingAsset, walletAddress } from "@conditional-stocks/solana-client";
 import type { Snapshot } from "./projection";
 
 export function payoutCredits(s: Snapshot, owner: string) {
@@ -19,6 +19,7 @@ export function payoutCredits(s: Snapshot, owner: string) {
       decimals: pool.decimals,
       branch: null,
       kind: pool.mint.equals(s.config.quote_mint) ? "quote" : "stock",
+      collateral: null,
       marketId: null,
       confirmation: "finalized",
     });
@@ -26,26 +27,29 @@ export function payoutCredits(s: Snapshot, owner: string) {
   for (const [id, market] of s.markets) {
     const wallet = s.wallets.get(String(walletAddress(key(id), key(owner), s.program)));
     if (!wallet) continue;
-    for (let asset = 2; asset < 6; asset++) {
-      const amount = big(wallet.balances[asset]!);
-      if (!amount) continue;
-      const collateral = Math.floor((asset - 2) / 2);
-      payouts.push({
-        id: id + ":" + asset,
-        scope: "market",
-        pool: null,
-        beneficiary: owner,
-        asset: String(market.mints[asset]),
-        tokenId: String(asset),
-        amount: String(amount),
-        collateralToken: String(market.mints[collateral]),
-        decimals: market.decimals[collateral],
-        branch: asset % 2 === 0 ? "YES" : "NO",
-        kind: collateral === 0 ? "stock" : "quote",
-        marketId: id,
-        confirmation: "finalized",
-      });
-    }
+    for (let collateral = 0; collateral <= market.bases; collateral++)
+      for (const branch of [0, 1]) {
+        const asset = claimAsset(collateral, branch);
+        const amount = big(wallet.balances[asset]!);
+        if (!amount) continue;
+        payouts.push({
+          id: id + ":" + asset,
+          scope: "market",
+          pool: null,
+          beneficiary: owner,
+          asset: String(market.mints[asset]),
+          tokenId: String(asset),
+          amount: String(amount),
+          collateralToken: String(market.mints[underlyingAsset(collateral)]),
+          decimals: market.decimals[collateral],
+          branch: branch === 0 ? "YES" : "NO",
+          kind: collateral === 0 ? "quote" : "stock",
+          /** 0 = quote, 1.. = issuer leg. */
+          collateral,
+          marketId: id,
+          confirmation: "finalized",
+        });
+      }
   }
   return payouts;
 }

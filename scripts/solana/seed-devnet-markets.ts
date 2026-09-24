@@ -9,7 +9,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { assertSignInChallenge, key, SolanaClient } from "@conditional-stocks/solana-client";
+import {
+  assertSignInChallenge,
+  envelope,
+  key,
+  MAX_BASES,
+  poolAddress,
+  SolanaClient,
+} from "@conditional-stocks/solana-client";
 import {
   type AdminPreview,
   type AdminTransaction,
@@ -26,9 +33,11 @@ import {
   defaultMarketCaps,
   loadBatchMints,
   type MarketSource,
+  resolveRows,
 } from "../../apps/admin-ui/src/lib/market-batch.ts";
+import { DEFAULT_SHARE_DECIMALS } from "../../apps/admin-ui/src/lib/issuer-mints.ts";
 import { canonicalStringify } from "../../packages/market-data/src/index.ts";
-import { parseDeployer } from "./devnet-policy.ts";
+import { issuerLegs, MARKET_TICKERS, parseDeployer } from "./devnet-policy.ts";
 import { DEVNET_MARKET_SEED, validateMarketSeed } from "./seed-markets-policy.ts";
 
 const PROGRAM = "8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg";
@@ -117,7 +126,11 @@ const asset = (symbol: string) => {
   if (!match) throw new Error(`Missing ${symbol} fixture mint`);
   return match.mint;
 };
-const baseMints = [asset("TSLA"), asset("NVDA"), asset("SPY")];
+// One market per underlying asset and event; its base legs are that asset's
+// mock issuer tokens (xStocks / Ondo / Remora replicas) in policy order.
+const assetRows = MARKET_TICKERS.map((ticker) => issuerLegs(ticker).map((leg) => asset(leg.symbol)));
+if (assetRows.some((row) => row.length < 1 || row.length > MAX_BASES))
+  throw new Error("Every seeded asset market lists 1-3 issuer tokens");
 if (config.quote_mint.toBase58() !== asset("USDC")) throw new Error("Unexpected quote mint");
 
 mkdirSync(dirname(statePath), { recursive: true, mode: 0o700 });
@@ -348,9 +361,35 @@ for (const [marketId, record] of Object.entries(state.records)) {
 }
 save();
 
-const verified = await loadBatchMints(client, baseMints);
+const verified = await loadBatchMints(client, assetRows);
 if (verified.deployment.marketAdmin !== wallet.publicKey.toBase58())
   throw new Error("Verified market administrator changed");
+const resolved = resolveRows(
+  verified,
+  assetRows.map((mints) => ({
+    mints,
+    shareDecimals: String(DEFAULT_SHARE_DECIMALS),
+    caps: defaultMarketCaps(DEFAULT_SHARE_DECIMALS, verified.quote.decimals),
+  })),
+);
+if (resolved.problems.some((list) => list.length))
+  throw new Error(`Issuer legs are not listable: ${JSON.stringify(resolved.problems)}`);
+
+// create_market requires the deployment's quote custody pool (admits no
+// issuer controls). Base-leg pools are created by initializeMarketVaults.
+const quoteMint = config.quote_mint;
+if (!(await client.connection.getAccountInfo(poolAddress(client.config, quoteMint, client.program), "confirmed"))) {
+  const quoteProgram = (await client.connection.getAccountInfo(quoteMint, "confirmed"))?.owner;
+  if (!quoteProgram) throw new Error("Quote mint is missing");
+  await sendReviewed(
+    {
+      ...envelope([client.initializePool(quoteMint, wallet.publicKey, quoteProgram, 0)], client.program),
+      from: wallet.publicKey.toBase58(),
+      chainId: 1,
+    },
+    "quote-pool",
+  );
+}
 const reviewChecklist = {
   "stock-and-quote": true,
   "condition-id": true,
@@ -412,10 +451,7 @@ for (const [eventIndex, seed] of DEVNET_MARKET_SEED.entries()) {
   }
   save();
   const plans = buildBatchPlans({
-    rows: verified.bases.map((mint) => ({
-      mint,
-      caps: defaultMarketCaps(mint.decimals, verified.quote.decimals),
-    })),
+    rows: resolved.rows,
     quote: verified.quote,
     source,
     shared: {
@@ -487,15 +523,20 @@ for (const [eventIndex, seed] of DEVNET_MARKET_SEED.entries()) {
       record.reconciled = true;
       save();
     }
+    // List every issuer leg (custody pool with exact admission, add_base), then
+    // create every claim mint. Each step is one reviewed, journaled transaction;
+    // the remaining steps are recomputed from chain state after each one.
     while (true) {
-      const market = await client.market(key(id));
-      const missing = Array.from({ length: 6 }, (_, index) => index).find(
-        (index) => !(market.vaults_initialized & (1 << index)),
+      const transactions = await initializeMarketVaults(
+        client,
+        id,
+        wallet.publicKey.toBase58(),
+        plan.baseTokens,
       );
-      if (missing === undefined) break;
-      const transactions = await initializeMarketVaults(client, id, wallet.publicKey.toBase58());
-      if (!transactions[0]) throw new Error(`Missing vault transaction ${id}:${missing}`);
-      await sendReviewed(transactions[0], `${id}:vault:${missing}`);
+      const next = transactions[0];
+      if (!next) break;
+      const market = await client.market(key(id));
+      await sendReviewed(next, `${id}:vaults:${market.bases}:${market.vaults_initialized}`);
     }
     const market = await client.market(key(id));
     if (market.state === 1)
@@ -523,7 +564,10 @@ console.log(
   JSON.stringify({
     complete: true,
     events: DEVNET_MARKET_SEED.length,
-    markets: DEVNET_MARKET_SEED.length * baseMints.length,
-    assets: ["TSLA", "NVDA", "SPY"],
+    markets: DEVNET_MARKET_SEED.length * assetRows.length,
+    assets: MARKET_TICKERS,
+    legs: Object.fromEntries(
+      MARKET_TICKERS.map((ticker) => [ticker, issuerLegs(ticker).map((leg) => leg.symbol)]),
+    ),
   }),
 );

@@ -3,6 +3,19 @@ import type { MarketView } from "@/types/api";
 const hasProbability = (market: MarketView) =>
   market.probability.value !== null && Number.isFinite(market.probability.value);
 
+/** Same listed issuer legs (mint, decimals, scale); a book of other legs is never retained. */
+const sameLegs = (a: MarketView, b: MarketView) =>
+  a.bases.length === b.bases.length &&
+  a.bases.every((leg, index) => {
+    const other = b.bases[index];
+    return (
+      other !== undefined &&
+      leg.mint === other.mint &&
+      leg.decimals === other.decimals &&
+      leg.scale === other.scale
+    );
+  });
+
 /** Retain durable display data across partial upstream failures. Book retention never
  * makes an unavailable snapshot executable; metadata/probability are informational. */
 export function retainBookDisplays(previous: unknown, next: { markets: MarketView[] }) {
@@ -15,9 +28,9 @@ export function retainBookDisplays(previous: unknown, next: { markets: MarketVie
       const stable =
         m.bookQuality === "unavailable" &&
         prior &&
-        prior.baseToken === m.baseToken &&
+        sameLegs(prior, m) &&
         prior.quoteToken === m.quoteToken &&
-        prior.baseTokenDecimals === m.baseTokenDecimals &&
+        prior.shareDecimals === m.shareDecimals &&
         prior.quoteTokenDecimals === m.quoteTokenDecimals &&
         prior.protocolVersion === m.protocolVersion &&
         prior.priceFormat === m.priceFormat

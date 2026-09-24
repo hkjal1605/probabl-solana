@@ -3,9 +3,11 @@
 import { formatTokenAmount, parseTokenAmount } from "@conditional-stocks/domain";
 import {
   claimAddress,
+  claimAsset,
   envelope,
   key,
   type SolanaClient,
+  underlyingAsset,
   verifyEnvelope,
 } from "@conditional-stocks/solana-client";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
@@ -30,6 +32,7 @@ import { toast } from "@/components/ui/toast";
 import { useAsyncAction } from "@/hooks/useAsyncAction";
 import { useConfirmation } from "@/hooks/useConfirmation";
 import { usePositions } from "@/hooks/useProtocolData";
+import { assetMint, legStatus } from "@/lib/markets/legs";
 import { readClaimMarket, solana, transactionReceipt } from "@/lib/trading/rpc";
 import { api } from "@/services/protocol-api-service";
 import { refreshStores } from "@/stores/createResourceStore";
@@ -40,10 +43,13 @@ type RecoveryTransaction = Awaited<ReturnType<SolanaClient["redemptionTransactio
 export function PositionActions({
   position,
   market,
+  collateral: initialCollateral,
   disabled = false,
 }: {
   position: PositionView;
   market: MarketView;
+  /** Initially selected collateral: 0 = quote claims, 1..=3 = an issuer leg's claims. */
+  collateral?: number;
   disabled?: boolean;
 }) {
   const wallet = useWallet();
@@ -52,7 +58,24 @@ export function PositionActions({
     [kind, setKind] = useState<"Deposit" | "Split" | "Merge" | "Redeem">(
       position.redeemable ? "Redeem" : "Merge",
     );
-  const [collateral, setCollateral] = useState<"Stock" | "Cash">("Stock"),
+  // Claims are segregated per issuer: every action works on one collateral.
+  const options = [
+    { collateral: 0, label: market.quoteTokenMetadata?.symbol ?? "USDC" },
+    ...market.bases.map((leg) => ({ collateral: leg.collateral, label: leg.symbol })),
+  ];
+  const held = (c: number) =>
+    c === 0
+      ? BigInt(position.quoteYes) + BigInt(position.quoteNo)
+      : position.bases
+          .filter((leg) => leg.collateral === c)
+          .reduce((sum, leg) => sum + BigInt(leg.yes) + BigInt(leg.no), 0n);
+  const [collateral, setCollateral] = useState<number>(
+      () =>
+        initialCollateral ??
+        options.find((option) => option.collateral > 0 && held(option.collateral) > 0n)
+          ?.collateral ??
+        (held(0) > 0n ? 0 : (options[1]?.collateral ?? 0)),
+    ),
     [branch, setBranch] = useState<"All" | "YES" | "NO">("All"),
     [amount, setAmount] = useState("");
   const [review, setReview] = useState<{
@@ -63,10 +86,14 @@ export function PositionActions({
   const { busy, run } = useAsyncAction(scope);
   const { confirm, confirmation } = useConfirmation(scope);
   const reviewed = review?.scope === scope ? review : null;
-  const decimals = collateral === "Stock" ? market.baseTokenDecimals : market.quoteTokenDecimals,
-    symbol = collateral === "Stock" ? market.ticker : "USDC";
+  const leg = market.bases.find((item) => item.collateral === collateral) ?? null;
+  const status = leg ? legStatus(leg) : null;
+  const decimals = leg ? leg.decimals : market.quoteTokenDecimals,
+    symbol = options.find((option) => option.collateral === collateral)?.label ?? "USDC";
+  const claimMint = (asset: number) =>
+    assetMint(market, asset) ?? String(claimAddress(key(market.id), asset, solana().program));
   const vaultClaim = (asset: number) => {
-    const mint = String(claimAddress(key(market.id), asset, solana().program));
+    const mint = claimMint(asset);
     return BigInt(
       walletData.data?.owner === wallet.account
         ? (walletData.data.balances[mint]?.creditBalances?.[market.id] ?? "0")
@@ -74,16 +101,16 @@ export function PositionActions({
     );
   };
   const externalClaim = (asset: number) => {
-    const mint = String(claimAddress(key(market.id), asset, solana().program));
+    const mint = claimMint(asset);
     return BigInt(
       walletData.data?.owner === wallet.account
         ? (walletData.data.balances[mint]?.canonicalBalance ?? "0")
         : "0",
     );
   };
-  const yes = vaultClaim(collateral === "Stock" ? 2 : 4),
-    no = vaultClaim(collateral === "Stock" ? 3 : 5);
-  const wholeMint = collateral === "Stock" ? market.baseToken : market.quoteToken;
+  const yes = vaultClaim(claimAsset(collateral, 0)),
+    no = vaultClaim(claimAsset(collateral, 1));
+  const wholeMint = assetMint(market, underlyingAsset(collateral)) ?? market.quoteToken;
   const wholeAvailable = BigInt(
     walletData.data?.owner === wallet.account
       ? (walletData.data.balances[wholeMint]?.vaultAvailable ?? "0")
@@ -95,9 +122,7 @@ export function PositionActions({
         ? yes
         : no
       : kind === "Deposit"
-        ? externalClaim(
-            collateral === "Stock" ? (branch === "YES" ? 2 : 3) : branch === "YES" ? 4 : 5,
-          )
+        ? externalClaim(claimAsset(collateral, branch === "YES" ? 0 : 1))
         : branch === "YES"
           ? yes
           : no;
@@ -117,7 +142,7 @@ export function PositionActions({
       : raw > 0n &&
         raw < 1n << 64n &&
         (kind === "Split"
-          ? market.lifecycle === "open" && raw <= wholeAvailable
+          ? market.lifecycle === "open" && (!status || status.tradable) && raw <= wholeAvailable
           : kind === "Deposit"
             ? branch !== "All" && raw <= available
             : raw <= available)) &&
@@ -141,7 +166,7 @@ export function PositionActions({
       const transaction = await solana().redemptionTransaction(
         key(market.id),
         key(wallet.account),
-        collateral === "Stock" ? 0 : 1,
+        collateral,
         allClaims ? yes : branch === "YES" ? raw : 0n,
         allClaims ? no : branch === "NO" ? raw : 0n,
       );
@@ -174,8 +199,7 @@ export function PositionActions({
           ? reviewed.transaction!
           : kind === "Deposit"
             ? await (async () => {
-                const asset =
-                  collateral === "Stock" ? (branch === "YES" ? 2 : 3) : branch === "YES" ? 4 : 5;
+                const asset = claimAsset(collateral, branch === "YES" ? 0 : 1);
                 const client = solana(),
                   owner = key(wallet.account!),
                   marketKey = key(market.id),
@@ -217,13 +241,15 @@ export function PositionActions({
               ? (() => {
                   const client = solana();
                   client.rememberMarket(key(market.id), canonical);
+                  // Split consumes pool credit; the idempotent credit initializer must precede it.
                   return envelope(
                     [
+                      client.positionCredit(key(market.id), key(wallet.account!), collateral),
                       client.position(
                         "split",
                         key(market.id),
                         key(wallet.account!),
-                        collateral === "Stock" ? 0 : 1,
+                        collateral,
                         raw,
                       ),
                     ],
@@ -234,7 +260,7 @@ export function PositionActions({
                   "merge",
                   key(market.id),
                   key(wallet.account),
-                  collateral === "Stock" ? 0 : 1,
+                  collateral,
                   raw,
                   branch === "YES" ? 0 : 1,
                 );
@@ -334,11 +360,22 @@ export function PositionActions({
             <Segmented
               disabled={busy}
               label="Claim collateral"
-              value={collateral}
-              options={["Stock", "Cash"]}
-              onChange={(value) => edit(() => setCollateral(value))}
+              value={symbol}
+              options={options.map((option) => option.label)}
+              onChange={(value) =>
+                edit(() =>
+                  setCollateral(
+                    options.find((option) => option.label === value)?.collateral ?? collateral,
+                  ),
+                )
+              }
               className="w-full"
             />
+            {kind === "Split" && status && !status.tradable && (
+              <p role="status" className="text-sm text-warning">
+                {symbol} cannot be split: {status.reason}.
+              </p>
+            )}
             <p className="text-sm font-medium leading-6 text-muted-foreground">
               {kind === "Deposit"
                 ? `Move external ${symbol}-${branch} claims into this market vault before trading or redeeming them. Available in wallet: ${formatTokenAmount(available, decimals)} ${symbol}.`

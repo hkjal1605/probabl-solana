@@ -13,11 +13,11 @@ export function searchMarkets(markets: MarketView[], query: string) {
       [
         market.question,
         market.ticker,
-        market.baseTokenMetadata?.name,
-        market.baseTokenMetadata?.symbol,
+        market.assetMetadata?.name,
+        market.assetMetadata?.symbol,
         market.quoteTokenMetadata?.name,
         market.quoteTokenMetadata?.symbol,
-        market.baseToken,
+        ...market.bases.flatMap((leg) => [leg.mint, leg.symbol, leg.issuer]),
         market.quoteToken,
         market.id,
       ]
@@ -28,7 +28,9 @@ export function searchMarkets(markets: MarketView[], query: string) {
   });
   const score = (market: MarketView) =>
     (normalized &&
-    [market.id, market.baseToken, market.quoteToken].some((v) => normalizeSearch(v) === normalized)
+    [market.id, ...market.bases.map((leg) => leg.mint), market.quoteToken].some(
+      (v) => normalizeSearch(v) === normalized,
+    )
       ? 4
       : 0) +
     (normalized && normalizeSearch(market.ticker) === normalized ? 2 : 0) +

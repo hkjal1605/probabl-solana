@@ -18,6 +18,7 @@ const order = {
   side: 0,
   fundingKind: 0,
   tif: 0,
+  bases: 3,
 };
 
 test("order review accepts an unsigned request without a session", async () => {
@@ -51,6 +52,9 @@ test("public review rejects invalid orders before performing RPC work", async ()
     { order: { ...order, maker: "invalid" } },
     { order: { ...order, quantity: "-1" } },
     { order: { ...order, branch: 2 } },
+    { order: { ...order, bases: 0 } },
+    { order: { ...order, bases: 8 } },
+    { order: { ...order, side: 1, bases: 3 } },
   ]) {
     const response = await app.request("/v1/orders/prepare", {
       method: "POST",

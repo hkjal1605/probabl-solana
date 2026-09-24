@@ -3,6 +3,7 @@ import {
   formatPriceRawX18,
   MAX_ORDER_UINT128,
   parsePriceRawX18,
+  parseShareAmount,
   parseTokenAmount,
   quoteForReservation,
 } from "@conditional-stocks/domain";
@@ -121,18 +122,18 @@ describe("canonical order windows", () => {
     });
   });
 });
-describe("raw-unit amount entry", () => {
-  for (const [baseTokenDecimals, quoteTokenDecimals] of [
+describe("share-unit amount entry", () => {
+  for (const [shareDecimals, quoteTokenDecimals] of [
     [18, 6],
     [8, 6],
     [6, 18],
     [6, 6],
     [0, 6],
   ] as const) {
-    test(`spend rounds inward for ${baseTokenDecimals}/${quoteTokenDecimals} decimal tokens`, () => {
+    test(`spend rounds inward for ${shareDecimals}/${quoteTokenDecimals} share/quote decimals`, () => {
       const m = {
         ...market,
-        baseTokenDecimals,
+        shareDecimals,
         quoteTokenDecimals,
         baseStep: "1",
       };
@@ -144,7 +145,7 @@ describe("raw-unit amount entry", () => {
           continue;
         }
         const quantity = quantityForSpend(spend, "0.37", m),
-          raw = parseTokenAmount(quantity, m.baseTokenDecimals);
+          raw = parseShareAmount(quantity, m);
         const price = parsePriceRawX18("0.37", m),
           budget = parseTokenAmount(spend, m.quoteTokenDecimals);
         expect(raw > 0n).toBe(true);
@@ -154,12 +155,13 @@ describe("raw-unit amount entry", () => {
     });
   }
   test("quantity step and dust fail before a signature", () => {
-    const m = { ...market, baseStep: "1000000000000000" };
+    const m = { ...market, baseStep: "1000" };
     expect(previewOrder("0.001", "100", m).valid).toBe(true);
     expect(previewOrder("0.0001", "100", m).valid).toBe(false);
     expect(previewOrder("1", "0.000001", { ...m, baseStep: "0" }).valid).toBe(false);
-    expect(previewOrder("0.000000000000000001", "1", { ...m, baseStep: "1" }).valid).toBe(false);
-    expect(parseTokenAmount(quantityForSpend("1", "3", m), 18) % BigInt(m.baseStep)).toBe(0n);
+    expect(previewOrder("0.000001", "0.000001", { ...m, baseStep: "1" }).valid).toBe(false);
+    expect(previewOrder("0.0000001", "1", { ...m, baseStep: "1" }).valid).toBe(false);
+    expect(parseShareAmount(quantityForSpend("1", "3", m), m) % BigInt(m.baseStep)).toBe(0n);
   });
   test("invalid input, uint128 overflow, and insufficient budgets are rejected", () => {
     for (const spend of [
@@ -174,8 +176,7 @@ describe("raw-unit amount entry", () => {
       expect(() => quantityForSpend(spend, "100", market)).toThrow();
     expect(() => quantityForSpend("0.000001", "100", market)).toThrow();
     expect(
-      previewOrder((MAX_ORDER_UINT128 + 1n).toString(), "1", { ...market, baseTokenDecimals: 0 })
-        .valid,
+      previewOrder((MAX_ORDER_UINT128 + 1n).toString(), "1", { ...market, shareDecimals: 0 }).valid,
     ).toBe(false);
   });
   test("market IOC bounds align with the tick grid without widening the 1% bound", () => {
@@ -314,6 +315,25 @@ describe("honest market, portfolio and evidence presentation", () => {
     const frozen = { ...market, lifecycle: "frozen" as const };
     expect(groupMarkets([frozen, retry])[0]?.[0]?.id).toBe(retry.id);
   });
+  test("whole-asset reservations follow the delivered issuer token of each sell", () => {
+    const order = {
+      ...required(state.orders[0]),
+      marketId: market.id,
+      status: "open",
+      fundingKind: 0,
+      side: 1,
+      reserved: "9",
+    };
+    const legX = market.bases[0]!.mint,
+      legOn = market.bases[1]!.mint;
+    const orders = [
+      { ...order, bases: 1 },
+      { ...order, id: "b", bases: 2, reserved: "4" },
+      { ...order, id: "c", bases: 2, baseCollateral: 1, reserved: "1" },
+    ];
+    expect(wholeReserved(legX, orders, [market])).toBe(10n);
+    expect(wholeReserved(legOn, orders, [market])).toBe(4n);
+  });
   test("whole-asset reservations exclude claim collateral and closed orders", () => {
     const order = {
       ...required(state.orders[0]),
@@ -342,7 +362,7 @@ describe("honest market, portfolio and evidence presentation", () => {
     const secondMarket = {
       ...market,
       id: `0x${"31".repeat(32)}`,
-      baseToken: `0x${"32".repeat(20)}`,
+      assetKey: "asset:SPY",
       ticker: "SPY",
     };
     const rows = conditionalPositionRows(
@@ -373,6 +393,7 @@ describe("honest market, portfolio and evidence presentation", () => {
           status: "open",
           fundingKind: 1,
           side: 1,
+          bases: 2,
           branch: 0,
           reserved: "55",
         },
@@ -388,7 +409,16 @@ describe("honest market, portfolio and evidence presentation", () => {
     ]);
     expect(quoteRows[0]?.reserved).toBe(123n);
     expect(quoteRows[2]?.reserved).toBe(77n);
-    expect(rows.find((row) => row.key === `stock-${market.id}-0`)?.reserved).toBe(55n);
+    // Claim reservations stay with the delivered issuer's own claims.
+    expect(rows.find((row) => row.key === `stock-${market.id}-2-0`)?.reserved).toBe(55n);
+    expect(rows.find((row) => row.key === `stock-${market.id}-1-0`)?.reserved).toBe(0n);
+    const stock = rows.filter((row) => row.kind === "stock" && row.market.id === market.id);
+    expect(stock.map((row) => `${row.symbol}-${row.branch === 0 ? "YES" : "NO"}`)).toEqual([
+      "NVDAx-YES",
+      "NVDAx-NO",
+      "NVDAon-YES",
+    ]);
+    expect(stock.map((row) => row.decimals)).toEqual([8, 8, 9]);
   });
   test("invalid payout is not incorrectly reported YES merely because numerator is one", () => {
     const r = {
@@ -422,13 +452,14 @@ describe("honest market, portfolio and evidence presentation", () => {
     const order = {
       ...required(state.orders[0]),
       marketId: market.id,
-      quantity: "1000000000000000001",
+      quantity: "1000001",
       filled: "1",
       limitPriceRawX18: "123456789",
     };
     const csv = orderHistoryCsv([order], [market]);
     expect(csv.split("\r\n")[0]).toContain('"Limit (USDC)"');
-    expect(csv).toContain("1.000000000000000001");
+    expect(csv).toContain("1.000001");
+    expect(csv).toContain('"Any issuer"');
     expect(csv).toContain(formatPriceRawX18(123456789n, market));
     expect(csv).toContain("Updated block");
   });

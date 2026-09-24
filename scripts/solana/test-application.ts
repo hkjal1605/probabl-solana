@@ -61,8 +61,19 @@ try {
   const blockhash = await connection.getLatestBlockhash("confirmed");
   const funded = await connection.confirmTransaction({ signature: airdrop, ...blockhash }, "confirmed");
   if (funded.value.err) throw new Error("Generated trading delegate could not be funded");
+  // Lookup-table keeper authority for the indexer (appends resting makers' PDAs).
+  const keeper = Keypair.generate();
+  const keeperAirdrop = await connection.requestAirdrop(keeper.publicKey, 2_000_000_000);
+  const keeperFunded = await connection.confirmTransaction(
+    { signature: keeperAirdrop, ...(await connection.getLatestBlockhash("confirmed")) },
+    "confirmed",
+  );
+  if (keeperFunded.value.err) throw new Error("Lookup keeper could not be funded");
+  const keeperPath = join(fixtures, "lookup-keeper.json");
+  await Bun.write(keeperPath, JSON.stringify([...keeper.secretKey]));
   const apiProbe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() }),
-    indexerProbe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+    indexerProbe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() }),
+    relayProbe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
   const apiUrl = apiProbe.url.origin,
     indexerUrl = indexerProbe.url.origin;
   const env = {
@@ -77,11 +88,15 @@ try {
     INDEXER_PORT: String(indexerProbe.port),
     API_URL: apiUrl,
     INDEXER_URL: indexerUrl,
+    // The API reads the indexer's loopback relay: one upstream stream.
+    INDEXER_RELAY_PORT: String(relayProbe.port),
+    INDEXER_RELAY_URL: relayProbe.url.origin,
+    SOLANA_LOOKUP_KEEPER_KEYPAIR: keeperPath,
     LOG_LEVEL: "warn",
   };
   await apiProbe.stop(true);
   await indexerProbe.stop(true);
-  await run(["run", "--filter", "@conditional-stocks/db", "migrate"], env);
+  await relayProbe.stop(true);
   await run(["run", "--filter", "@conditional-stocks/db", "migrate:solana"], env);
   for (const file of ["services/solana-indexer/src/main.ts", "apps/api/src/solana.ts"])
     processes.push(
@@ -101,7 +116,12 @@ try {
   }
   if (!ready) throw new Error("Fresh test stack did not become ready");
   await run(
-    ["test", "packages/solana-client/test/application-e2e.test.ts", "apps/api/test/solana/admin.test.ts"],
+    [
+      "test",
+      "packages/solana-client/test/application-e2e.test.ts",
+      "apps/api/test/solana/admin.test.ts",
+      "services/solana-indexer/test/live-validator.test.ts",
+    ],
     env,
   );
 } finally {

@@ -3,16 +3,18 @@ import { readFileSync } from "node:fs";
 import {
   assetCreditAddress,
   claimAddress,
+  claimAsset,
   delegationAddress,
   key,
   poolAddress,
   poolVaultAddress,
   SolanaClient,
   traderAddress,
+  underlyingAsset,
   vaultAddress,
   walletAddress,
 } from "@conditional-stocks/solana-client";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   AddressLookupTableProgram,
   ComputeBudgetProgram,
@@ -67,20 +69,25 @@ const addresses = [
   client.program,
   SystemProgram.programId,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
   ComputeBudgetProgram.programId,
 ];
 for (const [index, market] of markets.entries()) {
   addresses.push(market);
   const marketAccount = marketAccounts[index];
   if (!marketAccount) throw new Error("Missing fetched market account");
-  for (const mint of marketAccount.mints.slice(0, 2)) {
+  // Quote (collateral 0) and every listed issuer leg: its custody pool, pool
+  // vault and mint (placement reads them per touched leg), plus both claim
+  // mints/vaults of the collateral.
+  for (let collateral = 0; collateral <= marketAccount.bases; collateral++) {
+    const mint = marketAccount.mints[underlyingAsset(collateral)]!;
     const pool = poolAddress(client.config, mint, client.program);
     addresses.push(mint, pool, poolVaultAddress(pool, client.program));
     for (const owner of owners) addresses.push(assetCreditAddress(pool, owner, client.program));
-  }
-  for (let i = 2; i < 6; i++) {
-    addresses.push(vaultAddress(market, i, client.program));
-    if (i >= 2) addresses.push(claimAddress(market, i, client.program));
+    for (const branch of [0, 1]) {
+      const asset = claimAsset(collateral, branch);
+      addresses.push(claimAddress(market, asset, client.program), vaultAddress(market, asset, client.program));
+    }
   }
   for (const owner of owners) addresses.push(walletAddress(market, owner, client.program));
 }
@@ -108,6 +115,7 @@ async function send(instruction: import("@solana/web3.js").TransactionInstructio
   });
   const result = await client.connection.confirmTransaction({ ...latest, signature }, "confirmed");
   if (result.value.err) throw new Error("Lookup table operation failed");
+  return result.context.slot;
 }
 const [create, table] = AddressLookupTableProgram.createLookupTable({
   authority: payer.publicKey,
@@ -129,9 +137,12 @@ for (let i = 0; i < unique.length; i += 20) {
 }
 // Freezing is intentional and irreversible: immutable entries can be safely
 // cached without per-trade RPC, but this table's rent cannot later be reclaimed.
-await send(
+const frozenAt = await send(
   AddressLookupTableProgram.freezeLookupTable({ lookupTable: table, authority: payer.publicKey }),
 );
+// RPC send services resolve tables against the rooted bank and silently drop
+// transactions using entries that are not finalized yet: publish only then.
+while ((await client.connection.getSlot("finalized")) <= frozenAt) await Bun.sleep(500);
 console.log(
   JSON.stringify({
     event: "lookup-table-frozen",

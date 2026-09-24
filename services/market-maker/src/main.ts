@@ -63,11 +63,32 @@ async function main() {
   const state = file?.state ?? initialState(scope),
     save = () => file?.save();
   const executor = wallet ? new Executor(client, wallet, config, state, save) : undefined;
+  const origin = apiOrigin(env.MM_API_ORIGIN ?? "https://api-solana.probabl.trade");
+  // Keeper lookup tables let a crossing placement carry every maker; without
+  // them the frozen deployment tables still apply (fewer makers per fill).
+  const refreshLookupTables = async () => {
+    try {
+      const response = await fetch(`${origin}/v1/lookup-tables`, {
+        redirect: "error",
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const body = (await response.json()) as { tables?: unknown };
+      if (!Array.isArray(body.tables) || body.tables.some((t) => typeof t !== "string"))
+        throw new Error("Invalid lookup table list");
+      client.useLookupTables((body.tables as string[]).map((t) => address(t)));
+    } catch (error) {
+      log("lookup-tables-unavailable", { error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+  await refreshLookupTables();
+  const lookupTimer = setInterval(() => void refreshLookupTables(), 30_000);
+  lookupTimer.unref?.();
   const engine = new Engine(
     client,
     owner,
     config,
-    apiOrigin(env.MM_API_ORIGIN ?? "https://api-solana.probabl.trade"),
+    origin,
     state,
     save,
     executor,

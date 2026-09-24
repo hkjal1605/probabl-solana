@@ -33,7 +33,9 @@ export function headerPortfolioSummary(
   }
 
   for (const row of conditionalPositionRows(markets, positions, orders)) {
-    const quantity = tokenAmount(row.total.toString(), row.decimals);
+    // Issuer claims are raw token units; the book marks economic shares, which
+    // the leg's live multiplier converts (1 for quote claims).
+    const quantity = tokenAmount(row.total.toString(), row.decimals) * row.multiplier;
     const probability = row.market.probability.value;
     const quoteMark =
       probability !== null && Number.isFinite(probability) && probability >= 0 && probability <= 1

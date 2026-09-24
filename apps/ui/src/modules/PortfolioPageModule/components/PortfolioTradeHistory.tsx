@@ -4,7 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
-import { displayPrice, formatNumber, formatTime, tokenAmount } from "@/lib/format/display";
+import {
+  displayPrice,
+  formatNumber,
+  formatTime,
+  shareAmount,
+  tokenAmount,
+} from "@/lib/format/display";
+import { legByCollateral } from "@/lib/markets/legs";
 import { tradeHistoryCsv, type WalletTradeRow } from "@/lib/portfolio/presentation";
 import { cn } from "@/lib/utils";
 
@@ -51,7 +58,9 @@ export function PortfolioTradeHistory({
         ) : (
           <ol className="list-none">
             {rows.slice(0, 20).map(({ market, order, side, trade }) => {
-              const quantity = tokenAmount(trade.fillQuantity, market.baseTokenDecimals);
+              const quantity = shareAmount(trade.fillQuantity, market);
+              const leg =
+                trade.base === undefined ? undefined : legByCollateral(market, trade.base);
               const price = displayPrice(trade.executionPriceRawX18, market);
               const quote = trade.executionQuote
                 ? tokenAmount(trade.executionQuote, market.quoteTokenDecimals)
@@ -71,7 +80,7 @@ export function PortfolioTradeHistory({
                   />
                   <p className="font-medium">
                     {side} <span className="tabular-nums">{formatNumber(quantity, 4)}</span>{" "}
-                    {market.ticker}-{trade.branch === 0 ? "YES" : "NO"}
+                    {leg?.symbol ?? market.ticker}-{trade.branch === 0 ? "YES" : "NO"}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground tabular-nums">
                     @ {formatNumber(price)} · {formatNumber(quote, 2)} USDC

@@ -16,10 +16,13 @@ export function MarketLifecycleAction({
   marketId,
   action,
   reason,
+  baseTokens = [],
 }: {
   marketId: string;
   action: "openMarket" | "freezeAtCutoff" | "freezeMarket";
   reason?: string;
+  /** Evidence-ordered issuer tokens; any still unlisted are listed before opening. */
+  baseTokens?: readonly string[];
 }) {
   const admin = useAdmin(),
     cache = useQueryClient();
@@ -51,6 +54,7 @@ export function MarketLifecycleAction({
           new SolanaClient(adminConfig),
           marketId,
           transaction.from,
+          baseTokens,
         );
         for (const step of setup) await admin.sendTransaction(step);
       }
@@ -72,9 +76,10 @@ export function MarketLifecycleAction({
       {reviewed && (
         <div className="rounded-lg bg-secondary p-3 text-xs leading-6">
           <p>
-            {label} on {adminConfig.chainName}. This costs SOL. Opening a new market first
-            initializes its six vaults in separate transactions. The live program checks timing and
-            wallet roles before the wallet request.
+            {label} on {adminConfig.chainName}. This costs SOL. Opening first submits any missing
+            issuer listing and claim-mint transactions separately. The program requires the quote
+            claims, every listed leg initialized and at least one active leg. The live program
+            checks timing and wallet roles before the wallet request.
           </p>
           <p className="break-all font-mono">Registry: {transaction.to}</p>
           <p className="break-all font-mono">Market: {marketId}</p>

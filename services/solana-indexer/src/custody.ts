@@ -1,11 +1,16 @@
 import {
+  ASSETS,
+  COLLATERALS,
   big,
   key,
   poolAddress,
   assetCreditAddress,
   walletAddress,
   fundingAsset,
+  isClaimAsset,
+  orderCollateral,
   orderWire,
+  underlyingAsset,
 } from "@conditional-stocks/solana-client";
 import type { Snapshot } from "./projection";
 
@@ -20,7 +25,9 @@ export function globalAvailable(s: Snapshot, owner: string, mint: string): bigin
 }
 
 /** Reservations stay locked even when an order expires or its key is revoked.
- * Only an on-chain cancellation/fill releases them. Never use liveOrder here. */
+ * Only an on-chain cancellation/fill releases them. Never use liveOrder here.
+ * A pool-funded bid reserves the quote; a pool-funded ask reserves raw units of
+ * its own issuer leg (at the placement-time multiplier, rounded up). */
 export function reservedUnderlying(s: Snapshot, owner: string, mint: string): bigint {
   let total = 0n;
   for (const order of s.orders.values()) {
@@ -28,11 +35,14 @@ export function reservedUnderlying(s: Snapshot, owner: string, mint: string): bi
       continue;
     const market = s.markets.get(order.market.toBase58());
     if (!market) throw new Error("Reservation has no market");
-    if (market.mints[order.terms.side === 0 ? 1 : 0]!.toBase58() === mint)
+    const collateral = orderCollateral({ side: order.terms.side, bases: order.terms.bases });
+    if (market.mints[underlyingAsset(collateral)]!.toBase58() === mint)
       total += big(order.reserved);
   }
   return total;
 }
+
+const ledger = () => Array<bigint>(ASSETS).fill(0n);
 
 /** Exact ledger proof from ONE getProgramAccounts bank image. External custody
  * is audited separately with each pool/market and its token accounts in one bank. */
@@ -45,16 +55,28 @@ export function reconcileLedger(s: Snapshot) {
   for (const credit of s.credits.values()) add(credit.pool.toBase58(), big(credit.available));
   const walletTotals = new Map<string, bigint[]>();
   const escrowTotals = new Map<string, bigint[]>();
-  for (const [id] of s.markets) {
-    walletTotals.set(id, Array<bigint>(6).fill(0n));
-    escrowTotals.set(id, Array<bigint>(6).fill(0n));
+  for (const [id, market] of s.markets) {
+    if (
+      market.mints.length !== ASSETS ||
+      market.credits.length !== ASSETS ||
+      market.escrow.length !== ASSETS ||
+      market.fees.length !== ASSETS
+    )
+      throw new Error("Malformed market ledgers");
+    walletTotals.set(id, ledger());
+    escrowTotals.set(id, ledger());
   }
   for (const wallet of s.wallets.values()) {
-    if (big(wallet.balances[0]!) || big(wallet.balances[1]!))
-      throw new Error("Market wallet contains global underlying credit");
     const totals = walletTotals.get(wallet.market.toBase58());
     if (!totals) throw new Error("Orphan market wallet");
-    for (let a = 2; a < 6; a++) totals[a]! += big(wallet.balances[a]!);
+    for (let a = 0; a < ASSETS; a++) {
+      const amount = big(wallet.balances[a]!);
+      if (!isClaimAsset(a)) {
+        if (amount) throw new Error("Market wallet contains global underlying credit");
+        continue;
+      }
+      totals[a]! += amount;
+    }
   }
   for (const order of s.orders.values()) {
     if (order.status !== 1) {
@@ -68,19 +90,23 @@ export function reconcileLedger(s: Snapshot) {
     totals[fundingAsset(orderWire(order))]! += big(order.reserved);
   }
   for (const [id, market] of s.markets) {
-    if (big(market.credits[0]!) || big(market.credits[1]!))
-      throw new Error("Market contains global underlying credit");
-    for (let a = 0; a < 6; a++) {
+    for (let a = 0; a < ASSETS; a++) {
+      if (!isClaimAsset(a) && big(market.credits[a]!))
+        throw new Error("Market contains global underlying credit");
       if (walletTotals.get(id)![a] !== big(market.credits[a]!))
         throw new Error("Market claim credit ledger mismatch");
       if (escrowTotals.get(id)![a] !== big(market.escrow[a]!))
         throw new Error("Market reservation ledger mismatch");
     }
-    for (let a = 0; a < 2; a++) {
-      const liability = big(market.backing[a]!) + big(market.escrow[a]!);
-      if (market.vaults_initialized & (1 << a))
-        add(poolAddress(market.config, market.mints[a]!, s.program).toBase58(), liability);
-      else if (liability) throw new Error("Uninitialized collateral has liabilities");
+    // Each listed collateral's backing and pool-funded reservations are a
+    // liability of that collateral's protocol-wide pool.
+    for (let c = 0; c < COLLATERALS; c++) {
+      const asset = underlyingAsset(c);
+      const liability = big(market.backing[c]!) + big(market.escrow[asset]!);
+      if (market.vaults_initialized & (1 << asset)) {
+        if (c > market.bases) throw new Error("Unlisted collateral is initialized");
+        add(poolAddress(market.config, market.mints[asset]!, s.program).toBase58(), liability);
+      } else if (liability) throw new Error("Uninitialized collateral has liabilities");
     }
   }
   for (const [id, pool] of s.pools)

@@ -56,8 +56,8 @@ test("vault preparation isolates owners, market claims and globally reserved fun
   const claim = {
     scope: "market",
     marketId: id,
-    asset: String(market.mints[2]),
-    tokenId: "2",
+    asset: String(market.mints[4]),
+    tokenId: "4",
     amount: "20",
   };
   await prepareVaultTransfer(client, s, String(owner), claim, "withdraw");
@@ -80,7 +80,7 @@ test("vault preparation isolates owners, market claims and globally reserved fun
   const redeposit = await prepareVaultTransfer(client, s, String(owner), claim, "deposit");
   expect(unwrap(redeposit.transaction, client.program)).toHaveLength(1);
   const direct = envelope(
-    [client.deposit(new PublicKey(id), owner, market.mints[2]!, 2, 20n)],
+    [client.deposit(new PublicKey(id), owner, market.mints[4]!, 4, 20n)],
     client.program,
   );
   verifyEnvelope(direct, redeposit);
@@ -99,4 +99,63 @@ test("vault preparation isolates owners, market claims and globally reserved fun
     ),
   ).rejects.toThrow("Invalid market claim transfer");
   expect(reads).toBe(1);
+});
+
+test("market claim transfers accept only claim assets of listed, initialized collaterals", async () => {
+  const { s, owner, bases, config } = custodyFixture(2);
+  const client = new SolanaClient({
+    rpcUrl: "http://127.0.0.1:8899",
+    genesisHash: "test",
+    config: String(config),
+    programId: String(s.program),
+  });
+  const [id, market] = [...s.markets][0]!;
+  const claim = (tokenId: string, asset = market.mints[Number(tokenId)] ?? PublicKey.default) => ({
+    scope: "market",
+    marketId: id,
+    asset: String(asset),
+    tokenId,
+    amount: "5",
+  });
+  // Quote claims and both legs' YES/NO claims are market-wallet assets.
+  for (const tokenId of ["1", "2", "4", "5", "7", "8"]) {
+    const prepared = await prepareVaultTransfer(client, s, String(owner), claim(tokenId), "deposit");
+    expect(unwrap(prepared.transaction, client.program)).toHaveLength(1);
+  }
+  // Underlying (quote 0, legs 3/6) is global pool credit; 10/11 are unlisted;
+  // malformed indexes never coerce into a claim asset.
+  for (const body of [
+    claim("0"),
+    claim("3", bases[0]),
+    claim("6", bases[1]),
+    claim("10", market.mints[4]),
+    claim("11", market.mints[5]),
+    claim("12", market.mints[4]),
+    claim("4.0", market.mints[4]),
+    claim(" 4", market.mints[4]),
+    claim("7", market.mints[4]),
+  ])
+    await expect(
+      prepareVaultTransfer(client, s, String(owner), body, "deposit"),
+    ).rejects.toThrow("does not belong");
+  // A listed leg whose claim vaults are not initialized cannot take claims yet.
+  market.vaults_initialized &= ~(1 << 8);
+  await expect(
+    prepareVaultTransfer(client, s, String(owner), claim("8"), "deposit"),
+  ).rejects.toThrow("does not belong");
+  // Global scope is unchanged: every issuer pool is addressed by its mint.
+  client.withdrawalQuote = async (_mint, amount) => ({
+    program: TOKEN_PROGRAM_ID,
+    gross: amount,
+    received: amount,
+    fee: 0n,
+  });
+  const global = await prepareVaultTransfer(
+    client,
+    s,
+    String(owner),
+    { scope: "global", asset: String(bases[1]), amount: "100" },
+    "withdraw",
+  );
+  expect(global.scope).toBe("global");
 });

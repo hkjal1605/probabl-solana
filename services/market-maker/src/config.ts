@@ -1,4 +1,4 @@
-import { address, U64_MAX, unsigned } from "@conditional-stocks/solana-client";
+import { address, MAX_BASES, U64_MAX, unsigned } from "@conditional-stocks/solana-client";
 
 export const BPS = 10_000n;
 export const PROB = 1_000_000n;
@@ -26,16 +26,34 @@ export function units(value: string, decimals: number) {
   if (amount <= 0n || amount > U64_MAX) throw new Error("Token allocation exceeds u64");
   return amount;
 }
+/** Seed amounts may be zero (e.g. a quote-only maker); otherwise exact token units. */
+export function seedUnits(value: string, decimals: number) {
+  return /^0(\.0+)?$/.test(value) ? 0n : units(value, decimals);
+}
+/** Legs that price the market: `referenceMints`, or every leg by default. */
+export const referenceMints = (p: MarketPolicy) => p.referenceMints ?? p.baseMints;
 export interface MarketPolicy {
   market: string;
-  baseMint: string;
+  /** Whitelisted issuer tokens of the market, in on-chain leg order
+   * (collateral 1..=bases). Must equal the market's listed legs exactly. */
+  baseMints: string[];
+  /** Legs whose Jupiter price feeds the spot (a subset of `baseMints`; default all).
+   * Illiquid issuer tokens can price several percent apart: reference the most
+   * liquid issuer. Other legs never affect the price or pause quoting. */
+  referenceMints?: string[];
   quoteMint: string;
-  baseInventory: string;
+  /** One-time seed per leg in whole issuer tokens (raw / 10^decimals, before any
+   * ScaledUiAmount multiplier). "0" seeds nothing for that leg. */
+  baseInventories: string[];
+  /** Reference branch position across every leg, in economic shares. Bids stop at
+   * twice this. Defaults to the seeded legs at their live multipliers. */
+  targetShares?: string;
   quoteInventory: string;
   orderQuote: string;
   gapBps: number;
-  /** Explicit raw-token unit review. Required because stock display units can be scaled. */
-  basePriceMultiplier: string;
+  /** Explicit raw-token unit review per leg: reference-price unit to one raw token
+   * divided by 10^decimals. The live ScaledUiAmount multiplier is applied separately. */
+  basePriceMultipliers: string[];
   quotePriceMultiplier: string;
 }
 export interface Settings {
@@ -58,6 +76,8 @@ export interface Settings {
   cooldownMs: number;
   maxDrawdownBps: number;
   maxTransferFeeBps: number;
+  /** Maximum disagreement between issuer legs' per-share reference prices. */
+  maxLegDispersionBps: number;
   minSolLamports: string;
   dailySolBudgetLamports: string;
 }
@@ -84,6 +104,7 @@ export function settings(input: unknown): Settings {
     cooldownMs: 60000,
     maxDrawdownBps: 1000,
     maxTransferFeeBps: 100,
+    maxLegDispersionBps: 300,
     minSolLamports: "100000000",
     dailySolBudgetLamports: "100000000",
     ...raw,
@@ -107,6 +128,7 @@ export function settings(input: unknown): Settings {
     cooldownMs: [1000, 3600000],
     maxDrawdownBps: [1, 5000],
     maxTransferFeeBps: [0, 1000],
+    maxLegDispersionBps: [1, 5000],
   };
   for (const [field, [low, high]] of Object.entries(ranges)) {
     const value = result[field as keyof Settings];
@@ -126,24 +148,52 @@ export function settings(input: unknown): Settings {
   if (!unsigned(result.minSolLamports) || !unsigned(result.dailySolBudgetLamports))
     throw new Error("Positive SOL reserve and spending limit required");
   const seen = new Set<string>();
+  const positive = (value: unknown) => typeof value === "string" && decimal(value, 18) > 0n;
   for (const m of result.markets) {
     address(m.market);
-    address(m.baseMint);
     address(m.quoteMint);
-    if (seen.has(m.market) || m.baseMint === m.quoteMint)
+    if (
+      !Array.isArray(m.baseMints) ||
+      m.baseMints.length < 1 ||
+      m.baseMints.length > MAX_BASES ||
+      !Array.isArray(m.baseInventories) ||
+      m.baseInventories.length !== m.baseMints.length ||
+      !Array.isArray(m.basePriceMultipliers) ||
+      m.basePriceMultipliers.length !== m.baseMints.length
+    )
+      throw new Error("Configure 1-3 issuer legs, each with a seed and reviewed price multiplier");
+    for (const mint of m.baseMints) address(mint);
+    if (
+      m.referenceMints !== undefined &&
+      (!Array.isArray(m.referenceMints) ||
+        m.referenceMints.length < 1 ||
+        new Set(m.referenceMints).size !== m.referenceMints.length ||
+        m.referenceMints.some((mint) => !m.baseMints.includes(mint)))
+    )
+      throw new Error("referenceMints must be a non-empty, distinct subset of baseMints");
+    if (
+      seen.has(m.market) ||
+      m.baseMints.includes(m.quoteMint) ||
+      new Set(m.baseMints).size !== m.baseMints.length
+    )
       throw new Error("Duplicate/invalid market allocation");
     seen.add(m.market);
     if (!Number.isInteger(m.gapBps) || Math.abs(m.gapBps) > 7500)
       throw new Error("Invalid conditional gap");
     for (const value of [
-      m.baseInventory,
       m.quoteInventory,
       m.orderQuote,
-      m.basePriceMultiplier,
       m.quotePriceMultiplier,
+      ...m.basePriceMultipliers,
     ])
-      if (typeof value !== "string" || decimal(value, 18) <= 0n)
-        throw new Error("Positive allocation/unit conversion required");
+      if (!positive(value)) throw new Error("Positive allocation/unit conversion required");
+    for (const value of m.baseInventories)
+      if (typeof value !== "string" || decimal(value, 18) < 0n)
+        throw new Error("Invalid issuer seed");
+    if (m.targetShares !== undefined && !positive(m.targetShares))
+      throw new Error("Invalid target share position");
+    if (m.targetShares === undefined && m.baseInventories.every((v) => decimal(v, 18) === 0n))
+      throw new Error("A quote-only allocation needs an explicit targetShares");
     if (decimal(m.orderQuote, 18) > decimal(m.quoteInventory, 18) / 4n)
       throw new Error("One quote may use at most 25% of branch quote inventory");
   }

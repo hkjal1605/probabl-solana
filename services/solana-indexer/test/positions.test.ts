@@ -3,10 +3,11 @@ import { Keypair, PublicKey, type AccountInfo } from "@solana/web3.js";
 import { AccountLayout, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import {
   bn,
-  coder,
-  type MarketAccount,
+  claimAsset,
+  encodeAccount,
   type SolanaClient,
 } from "@conditional-stocks/solana-client";
+import { marketFixture } from "./custody-fixture";
 import type { Snapshot } from "../src/projection";
 import { readPositions } from "../src/positions";
 
@@ -18,22 +19,24 @@ const info = (owner: PublicKey, data: Buffer): AccountInfo<Buffer> => ({
   lamports: 1000,
   rentEpoch: 0,
 });
-function fixture(count: number) {
+function fixture(count: number, legs = 1) {
   const owner = pk(),
-    program = pk();
-  const markets = Array.from(
-    { length: count },
-    () =>
-      [
-        pk().toBase58(),
-        {
-          vaults_initialized: 63,
-          mints: Array.from({ length: 6 }, pk),
-          decimals: [8, 6],
-          state: 2,
-        } as MarketAccount,
-      ] as const,
-  );
+    program = pk(),
+    config = pk();
+  const markets = Array.from({ length: count }, () => {
+    const market = pk();
+    return [
+      market.toBase58(),
+      marketFixture({
+        config,
+        market,
+        program,
+        quote: pk(),
+        bases: Array.from({ length: legs }, pk),
+        decimals: [6, 8, 9, 9],
+      }),
+    ] as const;
+  });
   const snapshot = { markets: new Map(markets), slot: 100 } as Snapshot;
   const calls: { keys: PublicKey[]; config: { commitment: string; minContextSlot: number } }[] = [];
   let index = 0;
@@ -108,19 +111,24 @@ test("batching never exceeds 100 accounts, including the last partial market bat
 test("credit and external claims sum exactly beyond JS safe integers; incomplete vaults are skipped", async () => {
   const f = fixture(2),
     [id, m] = f.markets[0]!;
-  f.markets[1]![1].vaults_initialized = 3;
+  f.markets[1]![1].vaults_initialized = 1;
   const credit = 9007199254740993n,
     external = 23n;
-  const wallet = await coder.accounts.encode("Wallet", {
+  const balances = Array.from({ length: 12 }, () => bn(0));
+  balances[1] = bn(3);
+  balances[2] = bn(4);
+  balances[4] = bn(credit);
+  balances[5] = bn(2);
+  const wallet = encodeAccount("Wallet", {
     market: new PublicKey(id),
     owner: f.owner,
-    balances: [bn(0), bn(0), bn(credit), bn(2), bn(3), bn(4)],
+    balances,
     open_notional: bn(0),
     bump: 0,
   });
   f.set(() => ({
     context: { slot: 102 },
-    value: [info(f.program, wallet), token(m.mints[2]!, f.owner, external), null, null, null],
+    value: [info(f.program, wallet), null, null, token(m.mints[4]!, f.owner, external), null],
   }));
   const result = await readPositions(f.client, f.snapshot, f.owner);
   expect(f.calls[0]!.keys).toHaveLength(5);
@@ -128,15 +136,66 @@ test("credit and external claims sum exactly beyond JS safe integers; incomplete
     {
       marketId: id,
       conditionId: id,
-      stockYes: (credit + external).toString(),
-      stockNo: "2",
+      redeemable: false,
+      shareDecimals: 6,
+      quoteTokenDecimals: 6,
       quoteYes: "3",
       quoteNo: "4",
+      bases: [
+        {
+          collateral: 1,
+          mint: m.mints[3]!.toBase58(),
+          decimals: 8,
+          yes: (credit + external).toString(),
+          no: "2",
+        },
+      ],
+      protocolVersion: 3,
+    },
+  ]);
+});
+test("multi-leg positions report each issuer's claims separately and skip legs without claims", async () => {
+  const f = fixture(1, 3),
+    [id, m] = f.markets[0]!;
+  // Leg 3 is listed, but its claim mints are not initialized yet.
+  m.vaults_initialized &= ~((1 << claimAsset(3, 0)) | (1 << claimAsset(3, 1)));
+  const balances = Array.from({ length: 12 }, () => bn(0));
+  balances[claimAsset(2, 1)] = bn(70);
+  const wallet = encodeAccount("Wallet", {
+    market: new PublicKey(id),
+    owner: f.owner,
+    balances,
+    open_notional: bn(0),
+    bump: 0,
+  });
+  f.set(() => ({
+    context: { slot: 101 },
+    value: [
+      info(f.program, wallet),
+      null,
+      null,
+      token(m.mints[claimAsset(1, 0)]!, f.owner, 5n),
+      null,
+      null,
+      token(m.mints[claimAsset(2, 1)]!, f.owner, 30n),
+    ],
+  }));
+  const result = await readPositions(f.client, f.snapshot, f.owner);
+  expect(f.calls[0]!.keys).toHaveLength(7);
+  expect(result.positions).toEqual([
+    {
+      marketId: id,
+      conditionId: id,
       redeemable: false,
-      baseTokenDecimals: 8,
+      shareDecimals: 6,
       quoteTokenDecimals: 6,
-      protocolVersion: 2,
-      priceFormat: "raw-unit-ratio-x18",
+      quoteYes: "0",
+      quoteNo: "0",
+      bases: [
+        { collateral: 1, mint: m.mints[3]!.toBase58(), decimals: 8, yes: "5", no: "0" },
+        { collateral: 2, mint: m.mints[6]!.toBase58(), decimals: 9, yes: "0", no: "100" },
+      ],
+      protocolVersion: 3,
     },
   ]);
 });
@@ -164,15 +223,15 @@ test("substituted wallet owners, markets, programs and external token identities
   ] as const) {
     const f = fixture(1),
       [id, m] = f.markets[0]!;
-    const wallet = await coder.accounts.encode("Wallet", {
+    const wallet = encodeAccount("Wallet", {
       market: mode === "wallet-market" ? pk() : new PublicKey(id),
       owner: mode === "wallet-owner" ? pk() : f.owner,
-      balances: Array.from({ length: 6 }, () => bn(0)),
+      balances: Array.from({ length: 12 }, () => bn(0)),
       open_notional: bn(0),
       bump: 0,
     });
     const external = token(
-      mode === "token-mint" ? pk() : m.mints[2]!,
+      mode === "token-mint" ? pk() : m.mints[1]!,
       mode === "token-owner" ? pk() : f.owner,
       1n,
     );

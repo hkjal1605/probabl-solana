@@ -8,8 +8,9 @@ import {
 } from "@solana/web3.js";
 import { SolanaClient, coder, BN } from "@conditional-stocks/solana-client";
 import { solanaDatabase } from "@conditional-stocks/db/solana";
-import { decodeHistory, replayHistory as replay, eventInDeployment } from "../src/history.ts";
+import { decodeHistory, replayHistory as replay, eventInDeployment, persistStreamedHistory } from "../src/history.ts";
 import type { Snapshot } from "../src/projection";
+import { legEvent } from "../src/stream";
 import idl from "../../../packages/solana-client/src/idl.json";
 
 const config = Keypair.generate().publicKey,
@@ -101,6 +102,74 @@ test("global pool and delegate events have no invented market and are deployment
       ),
     ).toBe(false);
   }
+});
+test("trades carry the delivered issuer leg; leg listings and toggles decode as market events", () => {
+  const encode = (name: string, data: Record<string, unknown>) =>
+    Buffer.concat([
+      Buffer.from(idl.events.find((e) => e.name === name)!.discriminator),
+      coder.types.encode(name, data),
+    ]).toString("base64");
+  const trade = encode("Trade", {
+    market,
+    taker: actor,
+    maker: config,
+    branch: 1,
+    base: 2,
+    quantity: new BN(5_000_000),
+    base_amount: new BN("4991508"),
+    price: new BN("600000000000000000"),
+    quote: new BN(3_000_000),
+    buyer_fee: new BN(0),
+    seller_fee: new BN(0),
+  });
+  const listed = encode("Change", {
+    market,
+    account: actor,
+    kind: 15,
+    amount: new BN(1000),
+    asset: 3,
+  });
+  const toggled = encode("Change", { market, account: actor, kind: 16, amount: new BN(0), asset: 2 });
+  const events = decodeHistory(
+    client,
+    transaction([
+      `Program ${client.program} invoke [1]`,
+      `Program data: ${trade}`,
+      `Program data: ${listed}`,
+      `Program data: ${toggled}`,
+      `Program ${client.program} success`,
+    ]),
+  ).events;
+  expect(events[0]).toMatchObject({
+    name: "Trade",
+    market: String(market),
+    data: { base: 2, quantity: "5000000", base_amount: "4991508" },
+  });
+  expect(
+    events.slice(1).map((e) => legEvent("sig", e.index, "1000", JSON.parse(JSON.stringify(e.data)))),
+  ).toEqual([
+    {
+      id: "sig:1",
+      marketId: String(market),
+      collateral: 3,
+      blockTimestamp: "1000",
+      transactionHash: "sig",
+      confirmation: "finalized",
+      kind: "base-listed",
+      scale: "1000",
+    },
+    {
+      id: "sig:2",
+      marketId: String(market),
+      collateral: 2,
+      blockTimestamp: "1000",
+      transactionHash: "sig",
+      confirmation: "finalized",
+      kind: "base-active",
+      active: false,
+    },
+  ]);
+  expect(() => legEvent("sig", 0, "1", { market: String(market), kind: 4, asset: 0, amount: "1" })).toThrow();
 });
 function eventData() {
   const event = coder.types.encode("Change", {
@@ -350,5 +419,64 @@ describe("finalized history integrity", () => {
     await replayHistory(db.db, source.client, "domain", 101);
     expect(db.calls.at(-1)?.sql).toBe("COMMIT");
     expect(db.calls.some((c) => c.sql.startsWith("INSERT"))).toBe(false);
+  });
+});
+
+describe("streamed finalized history", () => {
+  const streamed = (signature: string, slot: number, logs: string[], blockTime: number | null = 1000, failed = false) => ({
+    signature,
+    slot,
+    blockTime,
+    response: transaction(logs, false, failed),
+  });
+  const inserts = (calls: { sql: string; args?: unknown[] }[]) =>
+    calls.filter((c) => c.sql.startsWith("INSERT INTO solana_events")).map((c) => c.args);
+
+  test("deployment events of finalized stream transactions commit with the cursor", async () => {
+    const db = database({ signature: "a", slot: "90", snapshot_slot: "100" });
+    const foreign = Keypair.generate().publicKey;
+    const foreignEvent = Buffer.concat([
+      Buffer.from(idl.events.find((e) => e.name === "Change")!.discriminator),
+      coder.types.encode("Change", { market: foreign, account: actor, kind: 4, amount: new BN(1), asset: 0 }),
+    ]).toString("base64");
+    const count = await persistStreamedHistory(db.db, client, "domain", 105, deployment, [
+      streamed("late", 104, invocation(eventData())),
+      streamed("early", 102, invocation(eventData()), null),
+      streamed("failed", 103, invocation(eventData()), 1000, true),
+      streamed("quiet", 103, invocation()),
+      streamed("foreign", 103, invocation(foreignEvent)),
+    ], async (slot) => 2000 + slot);
+    expect(count).toBe(2);
+    const rows = inserts(db.calls);
+    // Ordered by slot; a missing stream block time falls back to RPC.
+    expect(rows.map((r) => [r![1], r![3], r![4]])).toEqual([
+      ["early", 102, 2102],
+      ["late", 104, 1000],
+    ]);
+    expect(db.calls.find((c) => c.sql.startsWith("INSERT INTO solana_history_cursors"))?.args).toEqual(["domain", "late", "104", "105"]);
+    expect(db.calls.at(-1)?.sql).toBe("COMMIT");
+  });
+
+  test("a quiet pass only advances the snapshot slot; overlaps and gaps are safe", async () => {
+    const db = database({ signature: "a", slot: "90", snapshot_slot: "100" });
+    expect(await persistStreamedHistory(db.db, client, "domain", 101, deployment, [])).toBe(0);
+    expect(db.calls.find((c) => c.sql.startsWith("INSERT INTO solana_history_cursors"))?.args).toEqual(["domain", "a", "90", "101"]);
+    // Already covered by an RPC replay: nothing is written twice.
+    const overlap = database({ signature: "a", slot: "90", snapshot_slot: "110" });
+    expect(await persistStreamedHistory(overlap.db, client, "domain", 105, deployment, [streamed("x", 104, invocation(eventData()))])).toBe(0);
+    expect(inserts(overlap.calls)).toEqual([]);
+    // Never backfilled: the stream cannot stand in for history.
+    const empty = database();
+    await expect(persistStreamedHistory(empty.db, client, "domain", 105, deployment, [])).rejects.toThrow("has not been backfilled");
+    expect(empty.calls.at(-1)?.sql).toBe("ROLLBACK");
+    // No timestamp anywhere: fail rather than invent one.
+    const untimed = database({ signature: "a", slot: "90", snapshot_slot: "100" });
+    await expect(
+      persistStreamedHistory(untimed.db, client, "domain", 105, deployment, [streamed("x", 104, invocation(eventData()), null)], async () => null),
+    ).rejects.toThrow("timestamp unavailable: x");
+    // Truncated logs are a gap, never an empty history.
+    await expect(
+      persistStreamedHistory(untimed.db, client, "domain", 105, deployment, [streamed("x", 104, [`Program ${client.program} invoke [1]`, "Log truncated"])]),
+    ).rejects.toThrow("truncated");
   });
 });

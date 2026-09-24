@@ -14,11 +14,37 @@ const book = (bid: number | null, ask: number | null): BranchBook => ({
   spread: bid !== null && ask !== null ? ask - bid : null,
 });
 
+const leg = (collateral: number, decimals: number, multiplierValue = 1) =>
+  ({
+    collateral,
+    bit: 1 << (collateral - 1),
+    mint: `SPY${collateral}`,
+    decimals,
+    scale: String(10 ** (decimals - 6)),
+    listingMultiplier: "4607182418800017408",
+    active: true,
+    ready: true,
+    claimMints: { yes: "y", no: "n" },
+    ...(multiplierValue === 1
+      ? {}
+      : {
+          live: {
+            multiplier: "4611686018427387904",
+            multiplierValue,
+            paused: false,
+            vaultFrozen: false,
+            tradable: false,
+            halt: "corporate-action" as const,
+          },
+        }),
+    symbol: `SPY${collateral}`,
+    issuer: null,
+  }) as MarketView["bases"][number];
 const market = {
   id: "market",
-  baseToken: "SPY",
+  bases: [leg(1, 6), leg(2, 9)],
   quoteToken: "USDC",
-  baseTokenDecimals: 6,
+  shareDecimals: 6,
   quoteTokenDecimals: 6,
   ticker: "SPY",
   yes: book(590, 610),
@@ -51,8 +77,7 @@ const balance = (
 const position = {
   marketId: "market",
   conditionId: "market",
-  stockYes: "1000000",
-  stockNo: "0",
+  bases: [{ collateral: 1, mint: "SPY1", decimals: 6, yes: "1000000", no: "0" }],
   quoteYes: "0",
   quoteNo: "10000000",
   redeemable: false,
@@ -79,4 +104,25 @@ test("header portfolio withholds net value instead of valuing an unmarked claim 
   );
   expect(result.cashAvailable).toBe(100);
   expect(result.netPortfolioValue).toBeNull();
+});
+
+test("issuer claims of different decimals and multipliers are marked as economic shares", () => {
+  const multi = { ...market, bases: [leg(1, 6), leg(2, 9, 2)] } as MarketView;
+  const result = headerPortfolioSummary(
+    [multi],
+    [],
+    [
+      {
+        ...position,
+        quoteNo: "0",
+        bases: [
+          { collateral: 1, mint: "SPY1", decimals: 6, yes: "1000000", no: "0" },
+          // 0.5 tokens at a x2 multiplier are one economic share.
+          { collateral: 2, mint: "SPY2", decimals: 9, yes: "500000000", no: "0" },
+        ],
+      },
+    ],
+    [],
+  );
+  expect(result.netPortfolioValue).toBe(1200);
 });

@@ -10,7 +10,10 @@ export type DiscoveryFilters = {
 export type OrderPrefill = {
   marketId: string;
   branch: "YES" | "NO";
+  /** Share quantity. */
   quantity: string;
+  /** Issuer leg (collateral) whose claims are being closed. */
+  collateral?: number;
   nonce: number;
 };
 export const defaultFilters: DiscoveryFilters = {

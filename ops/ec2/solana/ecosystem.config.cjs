@@ -28,7 +28,6 @@ function service(name, entry, memory) {
       DO_NOT_TRACK: "1",
       ...(name === "api"
         ? {
-            INDEXER_SNAPSHOT_SCHEMA: "solana_indexer",
             EVIDENCE_PUBLIC_BASE_URL:
               "https://api-solana.probabl.trade/v1/attachments",
           }

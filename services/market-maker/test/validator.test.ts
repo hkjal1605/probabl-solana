@@ -11,18 +11,23 @@ import {
   hex,
   planOrder,
   supportedMint,
+  baseRaw,
+  claimAsset,
+  liveLegs,
+  singleBase,
+  underlyingAsset,
   type Envelope,
   type OrderWire,
 } from "@conditional-stocks/solana-client";
 import { snapshot } from "@conditional-stocks/solana-indexer/projection";
 import { reconcileVaults } from "../../solana-indexer/src/reconcile";
-import { settings } from "../src/config";
+import { settings, units } from "../src/config";
 import { Engine, owned, inventory } from "../src/engine";
 import { Executor } from "../src/execution";
 import { initialState } from "../src/state";
 
 test.skipIf(!process.env.MM_VALIDATOR_FIXTURE)(
-  "real local program: bounded SPL/Token-2022 funding, four quotes, maker fill, atomic replace, stale-feed cancellation",
+  "real local program: per-issuer funding, consolidated bids, per-issuer asks, maker fill, atomic replace, stale-feed cancellation",
   async () => {
     const directory = process.env.MM_VALIDATOR_FIXTURE!;
     const deployment = await Bun.file(directory + "/deployment.json").json();
@@ -41,7 +46,13 @@ test.skipIf(!process.env.MM_VALIDATOR_FIXTURE)(
       await client.connection.requestAirdrop(maker.publicKey, 10_000_000_000),
       "confirmed",
     );
-    for (const mint of [key(deployment.baseMint), key(deployment.quoteMint)]) {
+    // Issuer legs come from the listed market, in leg order.
+    const listed = (await snapshot(client, "confirmed")).markets.get(id)!,
+      baseMints = Array.from({ length: listed.bases }, (_, i) =>
+        listed.mints[underlyingAsset(i + 1)]!.toBase58(),
+      ),
+      quoteMint = listed.mints[0]!.toBase58();
+    for (const mint of [...baseMints, quoteMint].map(key)) {
       const metadata = await supportedMint(client.connection, mint);
       const ata = await getOrCreateAssociatedTokenAccount(
         client.connection,
@@ -59,7 +70,8 @@ test.skipIf(!process.env.MM_VALIDATOR_FIXTURE)(
         mint,
         ata.address,
         admin,
-        1_000_000_000n,
+        // Headroom for issuer transfer fees (the Token-2022 fixture's fee-bearing leg charges 2.5%).
+        100_000_000_000n,
         [],
         undefined,
         metadata.program,
@@ -80,13 +92,13 @@ test.skipIf(!process.env.MM_VALIDATOR_FIXTURE)(
       markets: [
         {
           market: id,
-          baseMint: deployment.baseMint,
-          quoteMint: deployment.quoteMint,
-          baseInventory: "1",
+          baseMints,
+          quoteMint,
+          baseInventories: baseMints.map(() => "1"),
           quoteInventory: "10",
           orderQuote: "1",
           gapBps: 2000,
-          basePriceMultiplier: "1",
+          basePriceMultipliers: baseMints.map(() => "1"),
           quotePriceMultiplier: "1",
         },
       ],
@@ -111,24 +123,28 @@ test.skipIf(!process.env.MM_VALIDATOR_FIXTURE)(
       },
     );
     await engine.fund();
-    expect((await client.wallet(key(id), maker.publicKey))?.balances.map(big)).toEqual([
-      0n,
-      0n,
-      1000000n,
-      1000000n,
-      10000000n,
-      10000000n,
-    ]);
+    const funded = Array<bigint>(12).fill(0n);
+    funded[claimAsset(0, 0)] = funded[claimAsset(0, 1)] = units("10", listed.decimals[0]!);
+    for (let c = 1; c <= listed.bases; c++)
+      funded[claimAsset(c, 0)] = funded[claimAsset(c, 1)] = units("1", listed.decimals[c]!);
+    expect((await client.wallet(key(id), maker.publicKey))?.balances.map(big)).toEqual(funded);
     const spend = state.spent;
     await engine.fund();
     expect(state.spent).toBe(spend); // No repeated deposits.
     await engine.cycle();
+    // Two consolidated bids plus one ask per issuer per branch.
+    const quoted = 2 + 2 * listed.bases;
     let s = await snapshot(client, "confirmed"),
       orders = owned(s, maker.publicKey, id);
-    expect(orders).toHaveLength(4);
+    expect(orders).toHaveLength(quoted);
+    expect(
+      orders.filter(([, o]) => o.terms.side === 0).map(([, o]) => o.terms.bases),
+    ).toEqual([(1 << listed.bases) - 1, (1 << listed.bases) - 1]);
     const ask = orders.find(([, o]) => o.terms.branch === 0 && o.terms.side === 1)!;
     const before = inventory(s, maker.publicKey, id),
-      m = s.markets.get(id)!;
+      m = s.markets.get(id)!,
+      leg = singleBase(ask[1].terms.bases)!,
+      legs = await liveLegs(client.connection, m, client.config, client.program);
     const taker: OrderWire = {
       ...orderWire(ask[1]),
       maker: alice.publicKey.toBase58(),
@@ -139,6 +155,7 @@ test.skipIf(!process.env.MM_VALIDATOR_FIXTURE)(
       tif: 1,
       nonce: "0",
       quantity: ask[1].remaining.toString(),
+      bases: ask[1].terms.bases,
     };
     const funding = await client.funding(taker);
     if (funding.approvalCall) await send(funding.approvalCall);
@@ -150,6 +167,7 @@ test.skipIf(!process.env.MM_VALIDATOR_FIXTURE)(
           orderHash: ask[0],
           remaining: big(ask[1].remaining),
           sequence: big(ask[1].sequence),
+          reserved: big(ask[1].reserved),
         },
       ],
       now: BigInt(Math.floor(Date.now() / 1000)),
@@ -158,19 +176,24 @@ test.skipIf(!process.env.MM_VALIDATOR_FIXTURE)(
       makerFeeBps: s.config.maker_bps,
       takerFeeBps: s.config.taker_bps,
       program: client.program,
+      legs,
     });
-    await send(envelope([client.placement(taker, plan)], client.program));
+    await send(envelope([client.placement(taker, plan, m)], client.program));
     s = await snapshot(client, "confirmed");
-    expect(inventory(s, maker.publicKey, id)[2]).toBe(before[2]! - big(ask[1].remaining));
+    // The seller delivers the rounded-down conversion; the surplus returns to its claims.
+    const delivered = baseRaw(big(ask[1].remaining), legs[leg]!.scale, legs[leg]!.multiplier);
+    expect(inventory(s, maker.publicKey, id)[claimAsset(leg, 0)]).toBe(
+      before[claimAsset(leg, 0)]! - delivered,
+    );
     await engine.cycle();
-    expect(owned(await snapshot(client, "confirmed"), maker.publicKey, id)).toHaveLength(4);
+    expect(owned(await snapshot(client, "confirmed"), maker.publicKey, id)).toHaveLength(quoted);
     const priorIds = new Set(
       owned(await snapshot(client, "confirmed"), maker.publicKey, id).map(([id]) => id),
     );
     spot = (spot * 101n) / 100n;
     await engine.cycle();
     orders = owned(await snapshot(client, "confirmed"), maker.publicKey, id);
-    expect(orders).toHaveLength(4);
+    expect(orders).toHaveLength(quoted);
     expect(orders.every(([id]) => !priorIds.has(id))).toBe(true);
     failFeed = true;
     await engine.cycle();

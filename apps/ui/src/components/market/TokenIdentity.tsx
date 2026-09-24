@@ -17,7 +17,11 @@ export function TokenIdentity({
 }) {
   return (
     <InfoTooltip
-      content={metadata ? `${metadata.name} (${metadata.symbol}) · Devnet test asset` : symbol}
+      content={
+        metadata
+          ? `${metadata.name} (${metadata.symbol}) · ${metadata.devnet ? "Devnet test asset" : (metadata.issuer ?? "Issuer token")}`
+          : symbol
+      }
     >
       <span className="inline-flex min-w-0 max-w-full items-center gap-2 align-middle">
         {metadata && (

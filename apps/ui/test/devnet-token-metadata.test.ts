@@ -8,27 +8,30 @@ import { groupMarkets } from "../src/lib/markets/presentation";
 import {
   DEVNET_TOKEN_METADATA,
   devnetTokenMetadata,
+  ISSUER_TOKEN_METADATA,
+  issuerFromSymbol,
   marketTokenDisplay,
   SOLANA_DEVNET_GENESIS,
+  tokenMetadata,
 } from "../src/lib/tokens/devnet";
 import { fixtureMarkets } from "./fixtures/protocol";
 
 // Public addresses from the completed Devnet deployment; no private fixture/env imports.
 const deployed = [
-  ["iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDD", "USDC", "USD Coin"],
-  ["DhC4rpPyVJRHJmNqhMXchqET2o87b6JV6ebfkqA5Ufv4", "BTC", "Bitcoin"],
-  ["H2RuZ1p2KBtKesz6kcnLvXhtVK74LAbTrWbH5phyeMkY", "ETH", "Ethereum"],
-  ["So11111111111111111111111111111111111111112", "SOL", "Wrapped SOL"],
-  ["DdVCyyE4uWbG69K1SCXhauM9hRoMZrs7xG81DUCqebTC", "TSLA", "Tesla"],
-  ["8GmgkFJYZShkt9ixssZmSQb4GPc7JcPK2EQKqAQCgb6u", "NVDA", "NVIDIA"],
-  ["8gASFJiYjt7LCt9Ycs3DzhEWjVSsy44AzVaT33fjPmq3", "SPY", "SPDR S&P 500 ETF Trust"],
+  ["iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDD", "USDC", "USD Coin", undefined],
+  ["DhC4rpPyVJRHJmNqhMXchqET2o87b6JV6ebfkqA5Ufv4", "BTC", "Bitcoin", undefined],
+  ["H2RuZ1p2KBtKesz6kcnLvXhtVK74LAbTrWbH5phyeMkY", "ETH", "Ethereum", undefined],
+  ["So11111111111111111111111111111111111111112", "SOL", "Wrapped SOL", undefined],
+  ["DdVCyyE4uWbG69K1SCXhauM9hRoMZrs7xG81DUCqebTC", "TSLA", "Tesla", "TSLA"],
+  ["8GmgkFJYZShkt9ixssZmSQb4GPc7JcPK2EQKqAQCgb6u", "NVDA", "NVIDIA", "NVDA"],
+  ["8gASFJiYjt7LCt9Ycs3DzhEWjVSsy44AzVaT33fjPmq3", "SPY", "SPDR S&P 500 ETF Trust", "SPY"],
 ] as const;
 const quote = deployed[0][0];
 
 test("every deployed test mint has its own immutable name, symbol and bundled image", async () => {
   expect(Object.keys(DEVNET_TOKEN_METADATA).sort()).toEqual(deployed.map(([mint]) => mint).sort());
   expect(Object.isFrozen(DEVNET_TOKEN_METADATA)).toBe(true);
-  for (const [mint, symbol, name] of deployed) {
+  for (const [mint, symbol, name, asset] of deployed) {
     expect(new PublicKey(mint).toBase58()).toBe(mint);
     const metadata = devnetTokenMetadata(mint, SOLANA_DEVNET_GENESIS);
     expect(metadata).toEqual({
@@ -36,6 +39,7 @@ test("every deployed test mint has its own immutable name, symbol and bundled im
       symbol,
       image: `/tokens/devnet/${symbol.toLowerCase()}.svg`,
       devnet: true,
+      ...(asset ? { asset } : {}),
     });
     expect(Object.isFrozen(metadata)).toBe(true);
     const svg = await readFile(
@@ -59,7 +63,11 @@ test("the map never applies outside Devnet, even for the shared wrapped-SOL mint
   ]) {
     for (const [mint] of deployed) {
       expect(devnetTokenMetadata(mint, genesis)).toBeUndefined();
-      expect(marketTokenDisplay(mint, quote, genesis, "EXISTING")).toEqual({ ticker: "EXISTING" });
+      expect(marketTokenDisplay([mint], quote, genesis, "EXISTING")).toEqual({
+        ticker: "EXISTING",
+        assetKey: `mints:${mint}`,
+        legs: [{ symbol: "EXISTING", issuer: null }],
+      });
     }
   }
 });
@@ -76,20 +84,22 @@ test("unknown, differently cased, malformed and object-prototype keys keep the e
     ` ${deployed[1][0]}`,
   ]) {
     expect(devnetTokenMetadata(mint, SOLANA_DEVNET_GENESIS)).toBeUndefined();
-    expect(marketTokenDisplay(mint, mint, SOLANA_DEVNET_GENESIS, "STOCK")).toEqual({
+    expect(marketTokenDisplay([mint], mint, SOLANA_DEVNET_GENESIS, "STOCK")).toEqual({
       ticker: "STOCK",
+      assetKey: `mints:${mint}`,
+      legs: [{ symbol: "STOCK", issuer: null }],
     });
   }
 });
 
 test("base-mint identity overrides unrelated Polymarket asset hints; quote metadata is independent", () => {
-  const display = marketTokenDisplay(deployed[1][0], quote, SOLANA_DEVNET_GENESIS, "NVDA");
+  const display = marketTokenDisplay([deployed[1][0]], quote, SOLANA_DEVNET_GENESIS, "NVDA");
   expect(display.ticker).toBe("BTC");
-  expect(display.baseTokenMetadata?.name).toBe("Bitcoin");
+  expect(display.assetMetadata?.name).toBe("Bitcoin");
   expect(display.quoteTokenMetadata?.symbol).toBe("USDC");
-  const fallback = marketTokenDisplay("unknown", quote, SOLANA_DEVNET_GENESIS, "ORIGINAL");
+  const fallback = marketTokenDisplay(["unknown"], quote, SOLANA_DEVNET_GENESIS, "ORIGINAL");
   expect(fallback.ticker).toBe("ORIGINAL");
-  expect(fallback.baseTokenMetadata).toBeUndefined();
+  expect(fallback.assetMetadata).toBeUndefined();
   expect(fallback.quoteTokenMetadata).toEqual(DEVNET_TOKEN_METADATA[quote]);
 });
 
@@ -100,22 +110,26 @@ test("three assets retain their shared event and exact trading fields, with dist
     const source = {
       ...fixture,
       id: `market-${i}`,
-      baseToken: mint,
+      bases: [{ ...fixture.bases[0]!, mint }],
       quoteToken: quote,
       ticker: "STOCK",
     };
+    const { legs: _legs, ...display } = marketTokenDisplay(
+      [mint],
+      quote,
+      SOLANA_DEVNET_GENESIS,
+      source.ticker,
+    );
     const {
       ticker: _ticker,
-      baseTokenMetadata: _base,
+      assetKey: _key,
+      assetMetadata: _asset,
       quoteTokenMetadata: _quote,
       ...unchanged
-    } = {
-      ...source,
-      ...marketTokenDisplay(mint, quote, SOLANA_DEVNET_GENESIS, source.ticker),
-    };
-    const { ticker: _originalTicker, ...original } = source;
+    } = { ...source, ...display };
+    const { ticker: _originalTicker, assetKey: _originalKey, ...original } = source;
     expect(unchanged).toEqual(original);
-    return { ...source, ...marketTokenDisplay(mint, quote, SOLANA_DEVNET_GENESIS, source.ticker) };
+    return { ...source, ...display };
   });
   expect(groupMarkets(markets)).toHaveLength(1);
   expect(markets.map((m) => m.ticker)).toEqual(["SPY", "BTC", "ETH"]);
@@ -125,13 +139,13 @@ test("three assets retain their shared event and exact trading fields, with dist
       renderToStaticMarkup(
         createElement(TokenIdentity, {
           symbol: m.ticker,
-          metadata: m.baseTokenMetadata,
+          metadata: m.assetMetadata,
         }),
       ),
     )
     .join("");
   for (const symbol of ["SPY", "BTC", "ETH"]) {
-    expect(markets.find((m) => m.ticker === symbol)?.baseTokenMetadata?.image).toBe(
+    expect(markets.find((m) => m.ticker === symbol)?.assetMetadata?.image).toBe(
       `/tokens/devnet/${symbol.toLowerCase()}.svg`,
     );
     expect(html).toContain(`>${symbol}</strong>`);
@@ -159,4 +173,49 @@ test("unmapped token rendering remains usable without an image; compact mode ret
   expect(compact).toContain('data-slot="avatar-fallback"');
   expect(compact).toContain(">BT</span>");
   expect(compact).not.toContain(">Bitcoin</span>");
+});
+
+const NVDAx = "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh";
+const NVDAon = "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo";
+const NVDAr = "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu";
+
+test("issuer tokens of one stock display their own symbols and issuers under one asset", () => {
+  for (const mint of [NVDAx, NVDAon, NVDAr]) {
+    expect(new PublicKey(mint).toBase58()).toBe(mint);
+    expect(Object.isFrozen(ISSUER_TOKEN_METADATA[mint])).toBe(true);
+    // Issuer mints are exact addresses; they resolve on any cluster.
+    expect(tokenMetadata(mint, "")?.asset).toBe("NVDA");
+  }
+  const display = marketTokenDisplay([NVDAx, NVDAon, NVDAr], quote, SOLANA_DEVNET_GENESIS, "X");
+  expect(display.ticker).toBe("NVDA");
+  expect(display.assetKey).toBe("asset:NVDA");
+  expect(display.assetMetadata).toMatchObject({ symbol: "NVDA", name: "NVIDIA", devnet: false });
+  expect(display.legs.map((leg) => [leg.symbol, leg.issuer])).toEqual([
+    ["NVDAx", "xStocks"],
+    ["NVDAon", "Ondo Global Markets"],
+    ["NVDAr", "Remora"],
+  ]);
+  // A different subset of the same stock's issuers is still the same asset.
+  expect(marketTokenDisplay([NVDAon], quote, "", "X").assetKey).toBe("asset:NVDA");
+  // A devnet asset mixed with its issuer tokens keeps the devnet asset icon.
+  const mixed = marketTokenDisplay([deployed[5][0], NVDAx], quote, SOLANA_DEVNET_GENESIS, "X");
+  expect(mixed.assetKey).toBe("asset:NVDA");
+  expect(mixed.assetMetadata?.devnet).toBe(true);
+  expect(issuerFromSymbol("NVDAx")).toBe("xStocks");
+  expect(issuerFromSymbol("NVDAon")).toBe("Ondo Global Markets");
+  expect(issuerFromSymbol("NVDAr")).toBe("Remora");
+  expect(issuerFromSymbol("NVDA")).toBeNull();
+  const tooltip = renderToStaticMarkup(
+    createElement(TokenIdentity, { symbol: "NVDAon", metadata: tokenMetadata(NVDAon, "") }),
+  );
+  expect(tooltip).toContain("Ondo Global Markets");
+  expect(tooltip).not.toContain("Devnet test asset");
+});
+
+test("unknown legs get distinct synthetic labels and group by their exact mint set", () => {
+  const a = marketTokenDisplay(["m2", "m1"], quote, "", "NVDA");
+  const b = marketTokenDisplay(["m1", "m2"], quote, "", "NVDA");
+  expect(a.legs.map((leg) => leg.symbol)).toEqual(["NVDA·1", "NVDA·2"]);
+  expect(a.assetKey).toBe(b.assetKey);
+  expect(a.assetKey).not.toBe(marketTokenDisplay(["m3"], quote, "", "NVDA").assetKey);
 });
