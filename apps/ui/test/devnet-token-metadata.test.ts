@@ -240,7 +240,7 @@ test("mainnet issuer tokens and their devnet replicas show the issuer's exact id
     if (token.logo.endsWith(".svg")) expect(bytes.toString("utf8")).not.toMatch(/<script|\bonload=/i);
   }
   // Devnet replicas (as exported by the deployment scripts) display exactly as mainnet.
-  const replicaOpenAi = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+  const replicaOpenAi = "GabWBUhfxUmqFhTEi3ZkchcmFT9Sg5DhEbdzxPLQKyyS",
     replicaTOpenAi = "iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDE";
   const replicas = replicaTokenMetadata(`OPENAI=${replicaOpenAi},tOpenAI=${replicaTOpenAi}`);
   expect(tokenMetadata(replicaOpenAi, SOLANA_DEVNET_GENESIS, replicas)).toEqual(
@@ -255,6 +255,16 @@ test("mainnet issuer tokens and their devnet replicas show the issuer's exact id
   ]);
   // Without that deployment configuration (or with a malformed one) nothing is guessed.
   expect(tokenMetadata(replicaOpenAi, SOLANA_DEVNET_GENESIS)).toBeUndefined();
+  // Adopting the deployment's replicas also teaches spot-price validation the
+  // mainnet source the API prices each replica from.
+  const { adoptReplicaMints } = await import("../src/lib/tokens/devnet");
+  const { spotMapping } = await import("@conditional-stocks/shared/spot-prices");
+  expect(spotMapping(SOLANA_DEVNET_GENESIS, replicaOpenAi).sourceMint).toBeNull();
+  expect(adoptReplicaMints({ OPENAI: replicaOpenAi })[replicaOpenAi]?.symbol).toBe("OPENAI");
+  expect(spotMapping(SOLANA_DEVNET_GENESIS, replicaOpenAi).sourceMint).toBe(
+    "PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF",
+  );
+  adoptReplicaMints({});
   // The API's published mapping (an object) is equivalent to the env list.
   expect(replicaTokenMetadata({ OPENAI: replicaOpenAi, tOpenAI: replicaTOpenAi })).toEqual(replicas);
   expect(replicaTokenMetadata("OPENAI=bad")).toEqual({});

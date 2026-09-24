@@ -14,9 +14,9 @@ import {
   underlyingAsset,
 } from "@conditional-stocks/solana-client";
 import {
+  adoptReplicaMints,
   marketTokenDisplay,
   REPLICA_TOKEN_METADATA,
-  replicaTokenMetadata,
   type TokenDisplayMetadata,
 } from "../lib/tokens/devnet";
 import type {
@@ -284,7 +284,7 @@ function replicaMetadata() {
   const read: NonNullable<typeof replicaRead> = {
     at: Date.now(),
     value: requestJson<{ replicas?: Record<string, string> }>("/v1/tokens/replicas").then(
-      (body) => ({ ...REPLICA_TOKEN_METADATA, ...replicaTokenMetadata(body.replicas ?? {}) }),
+      (body) => adoptReplicaMints(body.replicas ?? {}),
       () => {
         if (replicaRead === read) replicaRead = undefined;
         return REPLICA_TOKEN_METADATA;

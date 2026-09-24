@@ -1,7 +1,11 @@
 // Temporary display-only aliases for the public mints in .local/devnet/plan.json,
 // plus the issuer-published mainnet stock tokens a multi-issuer market can list.
 // Never derive trading precision, issuer support, prices, or balances from this map.
-import { DEVNET_ASSET_MINTS, SOLANA_DEVNET_GENESIS } from "@conditional-stocks/shared/spot-prices";
+import {
+  configureDevnetIssuerReplicas,
+  DEVNET_ASSET_MINTS,
+  SOLANA_DEVNET_GENESIS,
+} from "@conditional-stocks/shared/spot-prices";
 import {
   assetDisplayName,
   type CatalogToken,
@@ -126,6 +130,37 @@ export function replicaTokenMetadata(
 export const REPLICA_TOKEN_METADATA = replicaTokenMetadata(
   process.env.NEXT_PUBLIC_SOLANA_ISSUER_REPLICA_MINTS,
 );
+const envReplicaMints = (() => {
+  try {
+    return parseReplicaMints(process.env.NEXT_PUBLIC_SOLANA_ISSUER_REPLICA_MINTS);
+  } catch {
+    return {};
+  }
+})();
+configureDevnetIssuerReplicas(envReplicaMints);
+
+/**
+ * Adopt the deployment's published replica mints (SYMBOL -> mint, from the API):
+ * spot-price validation then expects exactly the mainnet source the API prices each
+ * replica from, and the replicas display as their mainnet tokens. The API's list
+ * wins over the build-time one for the same symbol.
+ */
+export function adoptReplicaMints(
+  mints: Readonly<Record<string, string>>,
+): Readonly<Record<string, TokenDisplayMetadata>> {
+  let valid: Record<string, string>;
+  try {
+    valid = parseReplicaMints(
+      Object.entries({ ...envReplicaMints, ...mints })
+        .map(([symbol, mint]) => `${symbol}=${mint}`)
+        .join(","),
+    );
+  } catch {
+    return REPLICA_TOKEN_METADATA;
+  }
+  configureDevnetIssuerReplicas(valid);
+  return replicaTokenMetadata(valid);
+}
 
 export function devnetTokenMetadata(mint: string, genesisHash: string) {
   // chainId=1 is a compatibility key shared by all Solana environments, not a network check.
