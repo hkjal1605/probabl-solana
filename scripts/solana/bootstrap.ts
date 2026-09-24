@@ -56,6 +56,7 @@ import {
 } from "@solana/web3.js";
 import { createInitializeInstruction, pack } from "@solana/spl-token-metadata";
 import { type IssuerProfile, issueInstructions, mockIssuerInstructions } from "./mock-issuers.ts";
+import { catalogToken, formatReplicaMints } from "../../packages/shared/src/token-catalog.ts";
 
 const rpc = process.env.SOLANA_RPC_URL ?? "http://127.0.0.1:8899";
 if (!["127.0.0.1", "localhost"].includes(new URL(rpc).hostname))
@@ -138,8 +139,8 @@ await send(
 // mainnet Token-2022 configurations. The admin is the mock issuer authority
 // (mint, freeze, pause, multiplier). With SOLANA_TEST_TOKEN_2022=1 a fourth,
 // fee-bearing Token-2022 leg (generic 2.5% transfer fee, no issuer controls) is
-// listed as well: real issuer mints use ConfidentialTransferMint, which
-// Token-2022 does not combine with a plain transfer fee.
+// listed as well; the devnet deployment adds the PreStocks and Tessera
+// fee-bearing replicas.
 interface Issuer {
   profile: IssuerProfile | "fee-bearing";
   symbol: string;
@@ -456,6 +457,11 @@ for (const [name, pair] of [
   await Bun.write(new URL(name + ".json", destination), JSON.stringify([...pair.secretKey]), {
     mode: 0o600,
   });
+const replicaMints = formatReplicaMints(
+  Object.fromEntries(
+    issuers.filter((issuer) => catalogToken(issuer.symbol)).map((issuer) => [issuer.symbol, issuer.mint.toBase58()]),
+  ),
+);
 const env = {
   SOLANA_RPC_URL: rpc,
   SOLANA_ADDRESS_LOOKUP_TABLES: String(table),
@@ -468,6 +474,9 @@ const env = {
   YELLOWSTONE_GRPC_URL: process.env.YELLOWSTONE_GRPC_URL ?? "http://127.0.0.1:10000",
   // The API reads the indexer's loopback relay instead of its own stream.
   INDEXER_RELAY_URL: "http://127.0.0.1:42070",
+  // Local replicas of mainnet issuer tokens display and price as those tokens.
+  SOLANA_ISSUER_REPLICA_MINTS: replicaMints,
+  NEXT_PUBLIC_SOLANA_ISSUER_REPLICA_MINTS: replicaMints,
   NEXT_PUBLIC_SOLANA_RPC_URL: rpc,
   NEXT_PUBLIC_SOLANA_CONFIG: client.config.toBase58(),
   NEXT_PUBLIC_SOLANA_PROGRAM_ID: client.program.toBase58(),

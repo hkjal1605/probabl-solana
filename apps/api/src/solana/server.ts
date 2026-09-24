@@ -1,5 +1,7 @@
 import { createSolanaDatabase } from "@conditional-stocks/db/solana";
 import { requestLogging } from "@conditional-stocks/shared/http";
+import { configureDevnetIssuerReplicas } from "@conditional-stocks/shared/spot-prices";
+import { parseReplicaMints } from "@conditional-stocks/shared/token-catalog";
 import { SolanaClient, underlyingAsset } from "@conditional-stocks/solana-client";
 import { LiveIndex, relayClientFactory, type GeyserClient } from "@conditional-stocks/solana-indexer/live";
 import YellowstoneClient from "@triton-one/yellowstone-grpc";
@@ -90,6 +92,8 @@ lookupTimer.unref?.();
 const app = new Hono();
 app.use("*", browserCors(origins));
 app.use("*", requestLogging(logger));
+// Devnet replicas of mainnet issuer tokens price as the token they replicate.
+configureDevnetIssuerReplicas(parseReplicaMints(process.env.SOLANA_ISSUER_REPLICA_MINTS));
 const spotPrices = new JupiterSpotPrices(
   client.deployment.genesisHash,
   jupiterEnvironment(process.env),

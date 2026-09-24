@@ -71,6 +71,9 @@ fn mainnet_issuer_mints_are_admitted_exactly_at_their_controls() {
         (NVDAON, 9, 62, NVDAON_M),
         (NVDAR, 9, 47, 1.0),
         (SPCX, 6, 63, 1.0),
+        // PreStocks: every control, a 5-for-1 split already applied to SpaceX.
+        (PRESTOCKS_OPENAI, 9, 63, 1.4861347),
+        (PRESTOCKS_SPACEX, 9, 63, 5.0),
     ] {
         let data = mainnet(address);
         let mint = StateWithExtensions::<Mint>::unpack(&data).unwrap();
@@ -422,7 +425,6 @@ fn unsupported_extensions_reject_even_with_every_control_admitted() {
         ExtensionType::InterestBearingConfig,
         ExtensionType::ConfidentialMintBurn,
         ExtensionType::MintCloseAuthority,
-        ExtensionType::ConfidentialTransferFeeConfig,
     ] {
         assert!(!allowed_extension(kind) && issuer_control(kind).is_none());
         for (issuer, controls) in [(nvdax(), 63u16), (nvdaon(), 62), (nvdar(), 47)] {
@@ -466,7 +468,8 @@ fn issuer_control_mapping_is_exhaustive() {
             ExtensionType::DefaultAccountState => Some(DEFAULT_ACCOUNT_STATE),
             ExtensionType::ScaledUiAmount => Some(SCALED_UI_AMOUNT),
             ExtensionType::TransferHook => Some(TRANSFER_HOOK),
-            ExtensionType::ConfidentialTransferMint => Some(CONFIDENTIAL_TRANSFER),
+            ExtensionType::ConfidentialTransferMint
+            | ExtensionType::ConfidentialTransferFeeConfig => Some(CONFIDENTIAL_TRANSFER),
             _ => None,
         };
         assert_eq!(issuer_control(kind), expected, "{kind:?}");
@@ -497,4 +500,36 @@ fn owner_and_data_are_validated_before_extensions() {
     let mut wrong_type = data.clone();
     wrong_type[165] = 2;
     assert!(check(&wrong_type, 63, NOW).is_err());
+}
+
+#[test]
+fn prestocks_confidential_fee_config_is_part_of_the_confidential_transfer_control() {
+    let data = mainnet(PRESTOCKS_OPENAI);
+    let kinds = types(&data);
+    assert!(kinds.contains(&ExtensionType::ConfidentialTransferFeeConfig));
+    assert!(kinds.contains(&ExtensionType::TransferFeeConfig));
+    // Without the confidential-transfer admission the fee config alone rejects.
+    assert_eq!(
+        check(&data, ISSUER_CONTROLS & !CONFIDENTIAL_TRANSFER, NOW),
+        Err(err(ProtocolError::UnsupportedTokenExtension))
+    );
+    assert_eq!(check(&data, ISSUER_CONTROLS, NOW).unwrap().controls, 63);
+}
+
+#[test]
+fn tessera_mints_are_generic_fee_tokens() {
+    let data = mainnet(TESSERA_OPENAI);
+    let mint = StateWithExtensions::<Mint>::unpack(&data).unwrap();
+    assert_eq!(mint.base.decimals, 9);
+    assert_eq!(
+        types(&data),
+        vec![
+            ExtensionType::TransferFeeConfig,
+            ExtensionType::MetadataPointer,
+            ExtensionType::TokenMetadata
+        ]
+    );
+    // No issuer controls: accepted on the generic tier and at admission 0.
+    assert_eq!(generic(&data), Ok(()));
+    assert_eq!(check(&data, 0, NOW), Ok(state(0, false, 1.0)));
 }

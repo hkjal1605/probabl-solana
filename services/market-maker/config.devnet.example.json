@@ -3,7 +3,7 @@
     {
       "market": "4WhQLaVbDA4U6UXaxnedZYD7rNtBeMtxjcT5tRwSu6TW",
       "baseMints": ["8gASFJiYjt7LCt9Ycs3DzhEWjVSsy44AzVaT33fjPmq3"],
-      "quoteMint": "iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDD",
+      "quoteMint": "827noEu9yuV2HXiqFJhESUREcfkvA8RKXMxNKdVqxuvb",
       "baseInventories": ["2"],
       "quoteInventory": "2000",
       "orderQuote": "250",
@@ -13,8 +13,8 @@
     },
     {
       "market": "GuQ1HadwNPjcc2svc6xN3GJVaZ72wfrEKT5zU2CTeXg4",
-      "baseMints": ["DhC4rpPyVJRHJmNqhMXchqET2o87b6JV6ebfkqA5Ufv4"],
-      "quoteMint": "iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDD",
+      "baseMints": ["9Lq6s3X22MTefov2hi9VtTRUbMaCahNpaQXmxtcu6H1S"],
+      "quoteMint": "827noEu9yuV2HXiqFJhESUREcfkvA8RKXMxNKdVqxuvb",
       "baseInventories": ["0.02"],
       "quoteInventory": "2000",
       "orderQuote": "250",
@@ -24,8 +24,8 @@
     },
     {
       "market": "HkUYQf4XavKJ7BJHTMsMvn15LZL7etfhyCNCpvkuSeEE",
-      "baseMints": ["H2RuZ1p2KBtKesz6kcnLvXhtVK74LAbTrWbH5phyeMkY"],
-      "quoteMint": "iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDD",
+      "baseMints": ["AxkdvS81zeZB62C6uWSUm2K5BUKeKvhR6upt1FnU6Hmi"],
+      "quoteMint": "827noEu9yuV2HXiqFJhESUREcfkvA8RKXMxNKdVqxuvb",
       "baseInventories": ["0.5"],
       "quoteInventory": "2000",
       "orderQuote": "250",

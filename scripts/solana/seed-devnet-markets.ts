@@ -40,8 +40,8 @@ import { canonicalStringify } from "../../packages/market-data/src/index.ts";
 import { issuerLegs, MARKET_TICKERS, parseDeployer } from "./devnet-policy.ts";
 import { DEVNET_MARKET_SEED, validateMarketSeed } from "./seed-markets-policy.ts";
 
-const PROGRAM = "8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg";
-const CONFIG = "6buYkVtSJjaoozCDsPFYrPhp5g1q1oLg2eLp7FpsZ1tF";
+const PROGRAM = "53gtyz9nYzS7vwSbx2v7GeGLrMTas7vCATkjiKvAG1ra";
+const CONFIG = "EfXom6mQxuw5gsHG4AujCgo1dQ3qWg5pN85RvY1ysn23";
 const GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
 const AUTH_ORIGIN = "http://localhost:3001";
 const ROOT = resolve(import.meta.dir, "../..");

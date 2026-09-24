@@ -1,8 +1,9 @@
 # Solana Devnet deployment
 
 This pipeline deploys the Rust program, creates the mock quote/crypto mints and
-eight mock issuer tokens (replicas of the mainnet xStocks, Ondo and Remora
-Token-2022 configurations for NVDA, TSLA and SPY), wraps Devnet SOL, allocates
+thirteen mock issuer tokens (replicas of the mainnet xStocks and Ondo tokenized
+stocks for NVDA, TSLA and SPY, and of the PreStocks and Tessera pre-IPO tokens for
+OpenAI, SpaceX, Kalshi and Anthropic), wraps Devnet SOL, allocates
 every asset to the deployer's associated token accounts, and initializes the
 protocol configuration. It does **not** create markets, deposit
 wallet balances into protocol custody, deploy EC2 services, or approve production
@@ -46,7 +47,7 @@ bun run devnet:rehearse
 Keep `target/deploy/conditional_stocks-keypair.json` securely backed up and private
 (`chmod 600`); its public key must match the compiled program ID:
 
-`8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg`
+`53gtyz9nYzS7vwSbx2v7GeGLrMTas7vCATkjiKvAG1ra`
 
 This is a **different key** from the wallet you put in `.env.devnet`. The program
 signer establishes the program address; your wallet pays fees and becomes its
@@ -137,12 +138,17 @@ rejected by the public deployment CLI. Every network mutation requires
 | SOL    | Canonical wrapped Devnet SOL, classic SPL             |        9 |                    0.1 |
 | NVDAx  | Token-2022 xStocks replica (issuer controls 63)       |        8 |                 10,000 |
 | NVDAon | Token-2022 Ondo replica (issuer controls 62)          |        9 |                 10,000 |
-| NVDAr  | Token-2022 Remora replica (issuer controls 47)        |        9 |                 10,000 |
 | TSLAx  | Token-2022 xStocks replica                            |        8 |                 10,000 |
 | TSLAon | Token-2022 Ondo replica                               |        9 |                 10,000 |
-| TSLAr  | Token-2022 Remora replica                             |        9 |                 10,000 |
 | SPYx   | Token-2022 xStocks replica                            |        8 |                 10,000 |
 | SPYon  | Token-2022 Ondo replica                               |        9 |                 10,000 |
+| OPENAI | Token-2022 PreStocks replica (63, 3% transfer fee)    |        9 |                 10,000 |
+| SPACEX | Token-2022 PreStocks replica (63, 1% fee, 5.0 multiplier) |    9 |                 10,000 |
+| KALSHI | Token-2022 PreStocks replica (63, 3% transfer fee)    |        9 |                 10,000 |
+| ANTHROPIC | Token-2022 PreStocks replica (63, 3% transfer fee) |        9 |                 10,000 |
+| tOpenAI | Token-2022 Tessera replica (generic, 0.2% fee)       |        9 |                 10,000 |
+| tSpaceX | Token-2022 Tessera replica (generic, 0.2% fee)       |        9 |                 10,000 |
+| tKalshi | Token-2022 Tessera replica (generic, 0.2% fee)       |        9 |                 10,000 |
 
 SOL cannot be minted like a mock token. The pipeline transfers 0.1 Devnet SOL
 into its canonical wrapped-native associated account and calls `SyncNative`.
@@ -151,18 +157,25 @@ Native fee SOL remains in the same wallet separately. The mint address is
 normal for native SOL and is not a record of wrapped-account balances.
 
 Issuer mocks are built by `scripts/solana/mock-issuers.ts` with the real Token-2022
-instructions, in the mainnet extension order: MetadataPointer/TokenMetadata,
+instructions, in each issuer's mainnet extension order: MetadataPointer/TokenMetadata,
 PermanentDelegate (not Ondo), DefaultAccountState (initialized), ScaledUiAmount
 (realistic multipliers, e.g. ≈1.0017 for xStocks), Pausable, ConfidentialTransferMint
-(no auto-approve) and an unset TransferHook (not Remora). The deployer is the mock
-issuer authority (mint, freeze, pause, multiplier, metadata) so pause, dividend and
-corporate-action behaviour can be rehearsed. There is no fee-bearing stock mock on
-Devnet: Token-2022 rejects a transfer fee next to ConfidentialTransferMint. Each
-pool admits exactly its mock's issuer controls (see
+(no auto-approve) and an unset TransferHook; PreStocks adds its transfer fee and
+ConfidentialTransferFeeConfig, and Tessera is a plain fee-bearing mint without issuer
+controls. Each replica's on-chain TokenMetadata carries the mainnet token's exact
+name, symbol and metadata URI (`packages/shared/src/token-catalog.ts`, sourced from
+the issuers' mainnet mints), so wallets and explorers show the issuer's own image and
+description. The deployer is the mock issuer authority (mint, freeze, pause,
+multiplier, metadata) so pause, dividend and corporate-action behaviour can be
+rehearsed. Each pool admits exactly its mock's issuer controls (see
 [the compatibility matrix](../TOKEN_COMPATIBILITY.md)). These are development
-choices, not issuer or production policies. Their public mint addresses belong in
-`DEVNET_ISSUER_MOCK_MINTS` (`packages/shared/src/spot-prices.ts`) once prepared, so
-the UI can show the mainnet counterpart's reference price.
+choices, not issuer or production policies.
+
+`devnet:verify` exports the replicas' public mint addresses as
+`SOLANA_ISSUER_REPLICA_MINTS` (`backend.env`: API spot prices and the market maker
+reference the mainnet token) and `NEXT_PUBLIC_SOLANA_ISSUER_REPLICA_MINTS` (`ui.env`:
+the UI shows the mainnet token's name, symbol, logo and description). Both use
+`SYMBOL=mint,...`; unknown symbols or duplicate mints are rejected at startup.
 
 Classic USDC/BTC/ETH labels are recorded in the manifest; they do not have
 Metaplex metadata. Some wallets will show only their mint addresses. Import the
@@ -176,8 +189,8 @@ market admin, guardian and resolution admin; protocol maker/taker fees start at
 zero. There are no automatically listed markets or manufactured resolution
 conditions. Create reviewed Devnet markets through the native admin workflow
 after the API/indexer are configured. `scripts/solana/seed-devnet-markets.ts --execute`
-seeds one market per asset (NVDA, TSLA, SPY) per pinned event, each listing that
-asset's issuer mocks as base legs (creation evidence → `initializeMarketVaults`
+seeds one market per asset (NVDA, TSLA, SPY, OPENAI, SPACEX, KALSHI, ANTHROPIC) per
+pinned event, each listing that asset's issuer mocks as base legs (creation evidence → `initializeMarketVaults`
 with the ordered issuer list → open).
 
 ## Records, retries and recovery

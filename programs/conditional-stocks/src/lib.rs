@@ -1,7 +1,7 @@
 #![allow(ambiguous_glob_reexports)]
 use anchor_lang::prelude::*;
 
-declare_id!("8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg");
+declare_id!("53gtyz9nYzS7vwSbx2v7GeGLrMTas7vCATkjiKvAG1ra");
 
 pub mod custody;
 pub mod delegation;

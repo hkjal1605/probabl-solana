@@ -181,9 +181,9 @@ A pool's `admitted` bitmask admits issuer controls. The generic extensions
 | 4 | DefaultAccountState | a frozen pool vault cannot be listed or traded (`LegHalted`) until the issuer thaws it |
 | 8 | ScaledUiAmount | live multiplier conversion and dividend band |
 | 16 | TransferHook | accepted only while `program_id` is unset. Setting a hook ⇒ `TransferHookEnabled` everywhere |
-| 32 | ConfidentialTransferMint | mint config only. Protocol vaults never enable confidential balances |
+| 32 | ConfidentialTransferMint, ConfidentialTransferFeeConfig | mint config only. Protocol vaults never enable confidential balances or harvest confidential withheld fees |
 
-Mainnet configurations, read on 2026-09-23:
+Mainnet configurations, read on 2026-09-23 (PreStocks and Tessera on 2026-09-25):
 
 | issuer | example | decimals | admitted |
 |---|---|---|---|
@@ -191,6 +191,8 @@ Mainnet configurations, read on 2026-09-23:
 | Ondo Global Markets | NVDAon `gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo` | 9 | 62 (no PermanentDelegate) |
 | Remora | NVDAr `ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu` | 9 | 47 (no TransferHook) |
 | Backpack Securities | SPCX `SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb` | 6 | 63 (no NVDA listed) |
+| PreStocks | OPENAI `PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF` | 9 | 63 (plus a 1–3% transfer fee and its confidential fee config) |
+| Tessera | tOpenAI `oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ` | 9 | 0 (generic fee token, 0.2% transfer fee) |
 
 - Accepted mint default account state is `initialized` for all of these.
 - Securitize (SECZ) and Superstate (GLXY) default to frozen. Their pool vaults

@@ -1,3 +1,4 @@
+import { formatReplicaMints, parseReplicaMints } from "../../../packages/shared/src/token-catalog.ts";
 import { describe, expect, test } from "bun:test";
 import { chmod, lstat, mkdtemp, readFile, rmdir, symlink, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -387,7 +388,8 @@ describe("private durable deployment state", () => {
     const directory = await temp(),
       secret = bs58.encode(owner.secretKey),
       rpc = "https://rpc.example/?api-key=private";
-    await exportEnvironment(directory, plan(), rpc, {
+    const prepared = plan();
+    await exportEnvironment(directory, prepared, rpc, {
       DEVNET_DEPLOYER_PRIVATE_KEY: secret,
       DEVNET_API_URL: "https://api.example",
       JUPITER_API_KEY: "private-jupiter-test-key",
@@ -411,6 +413,16 @@ describe("private durable deployment state", () => {
       expect(ui).toContain(`${key}=${JSON.stringify(owner.publicKey.toBase58())}\n`);
     expect(ui).toContain(`NEXT_PUBLIC_SOLANA_CONFIG=${JSON.stringify(plan().config)}\n`);
     expect(ui).toContain(`NEXT_PUBLIC_SOLANA_GENESIS_HASH=${JSON.stringify(DEVNET_GENESIS)}\n`);
+    // Every issuer replica is exported (public mints only) so the UI shows, and
+    // the API prices, it as the mainnet token it replicates.
+    const replicas = prepared.assets
+      .filter((asset) => !["USDC", "BTC", "ETH", "SOL"].includes(asset.symbol))
+      .map((asset) => `${asset.symbol}=${asset.mint}`);
+    expect(replicas).toHaveLength(13);
+    const ordered = parseReplicaMints(replicas.join(","));
+    const line = JSON.stringify(formatReplicaMints(ordered));
+    expect(ui).toContain(`NEXT_PUBLIC_SOLANA_ISSUER_REPLICA_MINTS=${line}\n`);
+    expect(backend).toContain(`SOLANA_ISSUER_REPLICA_MINTS=${line}\n`);
     for (const name of ["ui.env", "backend.env"]) {
       expect((await lstat(join(directory, name))).mode & 0o777).toBe(0o600);
       await unlink(join(directory, name));
@@ -570,7 +582,7 @@ describe("fixture construction and transaction journal", () => {
       getBalance: async () => 200_000_015,
     } as unknown as Connection;
     const result = await fundingPlan(connection, plan());
-    expect(result.conservativeRequiredLamports).toBe("200000026");
+    expect(result.conservativeRequiredLamports).toBe("200000036");
     expect(result.sufficient).toBe(false);
   });
   test("resuming reuses owned buffer funding without consuming Program-account rent or fee reserves", async () => {
@@ -589,19 +601,19 @@ describe("fixture construction and transaction journal", () => {
           : space === prepared.artifactBytes + 37
             ? 1_000_000_000
             : 1,
-      getBalance: async () => 200_000_033,
+      getBalance: async () => 200_000_043,
     } as unknown as Connection;
     const initial = await fundingPlan(connection, prepared);
-    expect(initial.conservativeRequiredLamports).toBe("1200000033");
+    expect(initial.conservativeRequiredLamports).toBe("1200000043");
     expect(initial.sufficient).toBe(false);
     const resumed = await fundingPlan(connection, prepared, buffer);
     expect(resumed.prepaidBufferLamports).toBe("1000000000");
-    expect(resumed.conservativeRequiredLamports).toBe("200000033");
+    expect(resumed.conservativeRequiredLamports).toBe("200000043");
     expect(resumed.sufficient).toBe(true);
     connection.getAccountInfo = async (key) =>
       key.equals(buffer) ? account(data, { lamports: 9_000_000_000 }) : null;
     expect((await fundingPlan(connection, prepared, buffer)).conservativeRequiredLamports).toBe(
-      "200000025",
+      "200000035",
     );
     connection.getAccountInfo = async (key) =>
       key.equals(buffer) ? account(data, { owner: SystemProgram.programId }) : null;

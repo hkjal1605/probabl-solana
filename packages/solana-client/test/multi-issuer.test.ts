@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Keypair, PublicKey } from "@solana/web3.js";
-import { unpackMint, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
+import { getTransferFeeConfig, unpackMint, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import {
   COLLATERALS,
   LEG_ACCOUNTS,
@@ -61,6 +61,9 @@ const NVDAX = "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh";
 const NVDAON = "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo";
 const NVDAR = "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu";
 const SPCX = "SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb";
+const PRESTOCKS_OPENAI = "PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF";
+const PRESTOCKS_SPACEX = "PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh";
+const TESSERA_OPENAI = "oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ";
 
 test("asset layout: quote collateral 0, three issuer legs, underlying/YES/NO per collateral", () => {
   expect(COLLATERALS).toBe(4);
@@ -134,6 +137,8 @@ test("real mainnet issuer mints decode with their exact issuer controls", () => 
     [NVDAON]: { controls: 62, decimals: 9, multiplier: 1.0017152487959897 },
     [NVDAR]: { controls: 47, decimals: 9, multiplier: 1 },
     [SPCX]: { controls: 63, decimals: 6, multiplier: 1 },
+    [PRESTOCKS_OPENAI]: { controls: 63, decimals: 9, multiplier: 1.4861347 },
+    [PRESTOCKS_SPACEX]: { controls: 63, decimals: 9, multiplier: 5 },
   };
   for (const [address, want] of Object.entries(expected)) {
     const { address: key, info } = fixture(address);
@@ -151,6 +156,18 @@ test("real mainnet issuer mints decode with their exact issuer controls", () => 
       if (want.controls & bit) expect(() => decodeSupportedMint(key, info, want.controls & ~bit, now)).toThrow("Unsupported");
     expect(() => decodeSupportedMint(key, info, 0, now)).toThrow("Unsupported");
   }
+  // PreStocks: the confidential transfer fee config (16) rides on the
+  // confidential transfer control beside a generic transfer fee.
+  const prestocks = fixture(PRESTOCKS_OPENAI);
+  const openai = decodeSupportedMint(prestocks.address, prestocks.info, 63, now);
+  expect(openai.extensions).toContain(16);
+  expect(getTransferFeeConfig(openai)?.newerTransferFee.transferFeeBasisPoints).toBe(300);
+  // Tessera: generic-tier fee token without issuer controls.
+  const tessera = fixture(TESSERA_OPENAI);
+  const tOpenAI = decodeSupportedMint(tessera.address, tessera.info, 0, now);
+  expect(tOpenAI.issuer.controls).toBe(0);
+  expect(tOpenAI.decimals).toBe(9);
+  expect(getTransferFeeConfig(tOpenAI)?.newerTransferFee.transferFeeBasisPoints).toBe(20);
   // NVDAx's scheduled multiplier applies only from its timestamp (2026-09-10 00:30 UTC).
   const { address, info } = fixture(NVDAX);
   const before = issuerState(unpackMint(address, info, TOKEN_2022_PROGRAM_ID).tlvData, 1_789_000_199n);

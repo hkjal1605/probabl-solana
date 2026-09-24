@@ -11,7 +11,7 @@ import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import idlJson from "./idl.json";
 
 export { BN, PublicKey, SystemProgram, TOKEN_PROGRAM_ID };
-export const PROGRAM_ID = new PublicKey("8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg");
+export const PROGRAM_ID = new PublicKey("53gtyz9nYzS7vwSbx2v7GeGLrMTas7vCATkjiKvAG1ra");
 export const coder = new BorshCoder(idlJson as Idl);
 /** Account encoding with an adequately sized buffer. Anchor's
  * `coder.accounts.encode` writes into a fixed 1000-byte buffer, smaller than a

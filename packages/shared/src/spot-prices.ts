@@ -1,3 +1,5 @@
+import { ISSUER_TOKEN_CATALOG, type IssuerName } from "./token-catalog.ts";
+
 /** Product reference prices, never execution guarantees or contract funding/settlement
  * authority. The opt-in market maker separately reviews units and risk before using
  * these indicative observations to choose its own quotes. */
@@ -10,9 +12,9 @@ export const SPOT_BATCH_SIZE = 50;
 
 // Public mints in .local/devnet/plan.json. Never infer mappings from ticker metadata.
 export const DEVNET_ASSET_MINTS = Object.freeze({
-  USDC: "iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDD",
-  BTC: "DhC4rpPyVJRHJmNqhMXchqET2o87b6JV6ebfkqA5Ufv4",
-  ETH: "H2RuZ1p2KBtKesz6kcnLvXhtVK74LAbTrWbH5phyeMkY",
+  USDC: "827noEu9yuV2HXiqFJhESUREcfkvA8RKXMxNKdVqxuvb",
+  BTC: "9Lq6s3X22MTefov2hi9VtTRUbMaCahNpaQXmxtcu6H1S",
+  ETH: "AxkdvS81zeZB62C6uWSUm2K5BUKeKvhR6upt1FnU6Hmi",
   SOL: "So11111111111111111111111111111111111111112",
   TSLA: "DdVCyyE4uWbG69K1SCXhauM9hRoMZrs7xG81DUCqebTC",
   NVDA: "8GmgkFJYZShkt9ixssZmSQb4GPc7JcPK2EQKqAQCgb6u",
@@ -29,35 +31,44 @@ export const MAINNET_REFERENCE_MINTS = Object.freeze({
   NVDA: "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
   SPY: "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
 });
-/** Whitelisted mainnet issuer tokens (base legs) per economic asset. A
- * multi-issuer market trades several of these for one asset in one order book;
- * every one is a Token-2022 ScaledUiAmount mint whose UI amount is
- * `raw / 10^decimals * multiplier` economic shares. Issuer metadata here is
- * display and valuation identity only, never custody or listing authority
- * (that is the market's on-chain leg list). */
+/** Whitelisted mainnet issuer tokens (base legs) per economic asset: the token
+ * catalog (xStocks, Ondo, PreStocks, Tessera; packages/shared/src/token-catalog.ts)
+ * plus Remora's NVDAr. A multi-issuer market trades several of these for one
+ * asset in one order book. Scaled tokens carry a Token-2022 ScaledUiAmount
+ * multiplier whose UI amount is `raw / 10^decimals * multiplier` economic
+ * shares. Issuer metadata here is display and valuation identity only, never
+ * custody or listing authority (that is the market's on-chain leg list). */
 export interface IssuerToken {
   mint: string;
-  /** Issuer ticker, e.g. "NVDAx". */
+  /** Issuer ticker, e.g. "NVDAx", "OPENAI", "tOpenAI". */
   symbol: string;
-  issuer: "xStocks" | "Ondo Global Markets" | "Remora";
-  /** Economic asset the token tracks, e.g. "NVDA". */
+  issuer: IssuerName | "Remora";
+  /** Economic asset the token tracks, e.g. "NVDA" or "OPENAI". */
   asset: string;
   decimals: number;
-  /** Carries a ScaledUiAmount multiplier (dividends/corporate actions). */
+  /** Carries a ScaledUiAmount multiplier (dividends/corporate actions/splits). */
   scaledUiAmount: boolean;
 }
 export const MAINNET_ISSUER_TOKENS: readonly IssuerToken[] = Object.freeze(
-  (
-    [
-      ["XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB", "TSLAx", "xStocks", "TSLA", 8],
-      ["XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W", "SPYx", "xStocks", "SPY", 8],
-      ["Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh", "NVDAx", "xStocks", "NVDA", 8],
-      ["gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo", "NVDAon", "Ondo Global Markets", "NVDA", 9],
-      ["ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu", "NVDAr", "Remora", "NVDA", 9],
-    ] as const
-  ).map(([mint, symbol, issuer, asset, decimals]) =>
-    Object.freeze({ mint, symbol, issuer, asset, decimals, scaledUiAmount: true }),
-  ),
+  [
+    ...ISSUER_TOKEN_CATALOG.map((token) => ({
+      mint: token.mint,
+      symbol: token.symbol,
+      issuer: token.issuer as IssuerToken["issuer"],
+      asset: token.asset,
+      decimals: token.decimals,
+      // Tessera mints have no ScaledUiAmount extension.
+      scaledUiAmount: token.issuer !== "Tessera",
+    })),
+    {
+      mint: "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu",
+      symbol: "NVDAr",
+      issuer: "Remora" as const,
+      asset: "NVDA",
+      decimals: 9,
+      scaledUiAmount: true,
+    },
+  ].map((token) => Object.freeze(token)),
 );
 const issuerTokens = new Map(MAINNET_ISSUER_TOKENS.map((token) => [token.mint, token]));
 /** Mainnet issuer token identity of a (mainnet) mint, if whitelisted here. */
@@ -68,35 +79,28 @@ export function issuerToken(mint: string): IssuerToken | undefined {
 export function issuerTokensForAsset(asset: string): IssuerToken[] {
   return MAINNET_ISSUER_TOKENS.filter((token) => token.asset === asset);
 }
-/** Devnet mock issuer tokens (scripts/solana/mock-issuers.ts replicas) and the
- * mainnet token each one stands in for. Ondo/Remora TSLA/SPY counterparts are
- * not whitelisted above, so those mocks reference the asset's xStocks token
- * (same economic asset; still never valuation-compatible, as all are scaled). */
-export const DEVNET_ISSUER_MOCK_SOURCES = Object.freeze({
-  NVDAx: "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh",
-  NVDAon: "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo",
-  NVDAr: "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu",
-  TSLAx: "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
-  TSLAon: "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
-  TSLAr: "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
-  SPYx: "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
-  SPYon: "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W",
-});
-export type DevnetIssuerMock = keyof typeof DEVNET_ISSUER_MOCK_SOURCES;
-/** Public mock issuer mints from `.local/devnet/plan.json` once `devnet:prepare`
- * has generated them. Explicit entries only; never inferred from metadata. */
-export const DEVNET_ISSUER_MOCK_MINTS: Readonly<Partial<Record<DevnetIssuerMock, string>>> =
-  Object.freeze({});
-/** Mock issuer mint -> mainnet source mint, for a given set of mock mints. */
+/** Devnet issuer replicas (scripts/solana/mock-issuers.ts) by symbol and the
+ * mainnet token each one replicates exactly. */
+export const DEVNET_ISSUER_MOCK_SOURCES: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(ISSUER_TOKEN_CATALOG.map((token) => [token.symbol, token.mint])),
+);
+export type DevnetIssuerMock = string;
+/** Replica mint -> mainnet source mint, for a given set of replica mints. */
 export function devnetIssuerAliases(
-  mints: Readonly<Partial<Record<DevnetIssuerMock, string>>> = DEVNET_ISSUER_MOCK_MINTS,
+  mints: Readonly<Record<string, string | undefined>>,
 ): Map<string, string> {
   const result = new Map<string, string>();
-  for (const [symbol, mint] of Object.entries(mints) as [DevnetIssuerMock, string | undefined][])
+  for (const [symbol, mint] of Object.entries(mints))
     if (mint && DEVNET_ISSUER_MOCK_SOURCES[symbol]) result.set(mint, DEVNET_ISSUER_MOCK_SOURCES[symbol]);
   return result;
 }
-const issuerAliases = devnetIssuerAliases();
+let issuerAliases = new Map<string, string>();
+/** Registers this deployment's devnet replica mints (symbol -> devnet mint),
+ * as exported by the deployment scripts (`SOLANA_ISSUER_REPLICA_MINTS`, parsed
+ * with `parseReplicaMints`). Explicit entries only; never inferred from metadata. */
+export function configureDevnetIssuerReplicas(mints: Readonly<Record<string, string>>) {
+  issuerAliases = devnetIssuerAliases(mints);
+}
 type Symbol = keyof typeof DEVNET_ASSET_MINTS;
 const aliases = new Map<string, Symbol>(
   Object.entries(DEVNET_ASSET_MINTS).map(([s, m]) => [m, s as Symbol]),

@@ -71,6 +71,7 @@ export function assetPlan(spec: AssetSpec, mint: PublicKey, owner: PublicKey): A
           ? issuerMetadata(spec.profile, spec.ticker).name
           : "Devnet Mock " + spec.symbol,
     metadataSymbol: spec.kind === "native" ? "SOL" : isIssuer(spec) ? spec.symbol : "d" + spec.symbol,
+    metadataUri: isIssuer(spec) ? issuerMetadata(spec.profile, spec.ticker).uri : "",
     feeBps: spec.feeBps,
   };
 }
@@ -109,7 +110,13 @@ export async function assetInstructions(ctx: ChainContext, spec: AssetSpec, mint
       ticker: spec.ticker,
       mint,
     });
-    if (issuer.symbol !== asset.metadataSymbol || issuer.decimals !== spec.decimals)
+    const identity = issuerMetadata(spec.profile, spec.ticker);
+    if (
+      issuer.symbol !== asset.metadataSymbol ||
+      issuer.decimals !== spec.decimals ||
+      identity.feeBps !== spec.feeBps ||
+      identity.uri !== asset.metadataUri
+    )
       throw new Error("Issuer fixture differs from the asset policy");
     return {
       asset,
@@ -143,15 +150,16 @@ export async function assetInstructions(ctx: ChainContext, spec: AssetSpec, mint
       programId: program,
     }),
   ];
+  const feeBps: number = spec.feeBps;
   if (extensions.length) {
     instructions.push(createInitializeMetadataPointerInstruction(mintKey, owner, mintKey, program));
-    if (spec.feeBps)
+    if (feeBps)
       instructions.push(
         createInitializeTransferFeeConfigInstruction(
           mintKey,
           owner,
           owner,
-          spec.feeBps,
+          feeBps,
           10n ** BigInt(spec.decimals),
           program,
         ),
@@ -289,7 +297,7 @@ export async function verifyAsset(ctx: ChainContext, asset: AssetPlan, reuseExis
       !metadata.updateAuthority?.equals(owner) ||
       metadata.name !== asset.name ||
       metadata.symbol !== asset.metadataSymbol ||
-      metadata.uri !== "" ||
+      metadata.uri !== asset.metadataUri ||
       metadata.additionalMetadata.length
     )
       throw new Error("Mock Token-2022 metadata mismatch");
@@ -302,7 +310,8 @@ export async function verifyAsset(ctx: ChainContext, asset: AssetPlan, reuseExis
           [fees.olderTransferFee, fees.newerTransferFee].some(
             (f) =>
               f.transferFeeBasisPoints !== spec.feeBps ||
-              f.maximumFee !== 10n ** BigInt(spec.decimals),
+              // Replicas copy the issuers' uncapped fee (PreStocks, Tessera).
+              f.maximumFee !== (1n << 64n) - 1n,
           )
         : !!fees
     )

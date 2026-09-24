@@ -296,6 +296,12 @@ pub const NVDAX: &str = "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh";
 pub const NVDAON: &str = "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo";
 pub const NVDAR: &str = "ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu";
 pub const SPCX: &str = "SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb";
+/// PreStocks (pre-IPO; transfer fee next to confidential transfers, hence
+/// ConfidentialTransferFeeConfig), read on 2026-09-25.
+pub const PRESTOCKS_OPENAI: &str = "PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF";
+pub const PRESTOCKS_SPACEX: &str = "PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh";
+/// Tessera (pre-IPO loan participation token; transfer fee and metadata only).
+pub const TESSERA_OPENAI: &str = "oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ";
 
 /// NVDAx (xStocks), mainnet configuration read on 2026-09-23. Admitted 63.
 pub fn nvdax() -> Issuer {
@@ -442,6 +448,15 @@ pub fn mainnet(address: &str) -> Vec<u8> {
         ),
         SPCX => include_str!(
             "../../../../packages/solana-client/test/fixtures/mint-SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb.json"
+        ),
+        PRESTOCKS_OPENAI => include_str!(
+            "../../../../packages/solana-client/test/fixtures/mint-PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF.json"
+        ),
+        PRESTOCKS_SPACEX => include_str!(
+            "../../../../packages/solana-client/test/fixtures/mint-PreANxuXjsy2pvisWWMNB6YaJNzr7681wJJr2rHsfTh.json"
+        ),
+        TESSERA_OPENAI => include_str!(
+            "../../../../packages/solana-client/test/fixtures/mint-oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ.json"
         ),
         other => panic!("no fixture for {other}"),
     };

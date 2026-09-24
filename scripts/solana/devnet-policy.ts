@@ -11,9 +11,11 @@ export const LOADER = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111
 export const sha256 = (data: Uint8Array | string) =>
   createHash("sha256").update(data).digest("hex");
 /** Devnet fixtures: the USDC quote, generic mocks, and per underlying asset
- * several mock issuer tokens replicating the mainnet xStocks / Ondo / Remora
- * Token-2022 configurations (scripts/solana/mock-issuers.ts). Each asset gets
- * one market per event listing its issuer tokens as base legs, in this order. */
+ * replicas of the real mainnet issuer tokens (scripts/solana/mock-issuers.ts):
+ * tokenized stocks (xStocks, Ondo) and pre-IPO tokens (PreStocks, Tessera),
+ * each with its mainnet name, symbol, metadata uri, extension layout, decimals,
+ * multiplier and transfer fee (packages/shared/src/token-catalog.ts). Each asset
+ * gets one market per event listing its issuer tokens as base legs, in this order. */
 export const ASSETS = [
   { symbol: "USDC", decimals: 6, units: "1000000", kind: "spl", feeBps: 0 },
   { symbol: "BTC", decimals: 8, units: "1000", kind: "spl", feeBps: 0 },
@@ -21,12 +23,17 @@ export const ASSETS = [
   { symbol: "SOL", decimals: 9, units: "0.1", kind: "native", feeBps: 0 },
   { symbol: "NVDAx", ticker: "NVDA", profile: "xstocks", decimals: 8, units: "10000", kind: "issuer", feeBps: 0 },
   { symbol: "NVDAon", ticker: "NVDA", profile: "ondo", decimals: 9, units: "10000", kind: "issuer", feeBps: 0 },
-  { symbol: "NVDAr", ticker: "NVDA", profile: "remora", decimals: 9, units: "10000", kind: "issuer", feeBps: 0 },
   { symbol: "TSLAx", ticker: "TSLA", profile: "xstocks", decimals: 8, units: "10000", kind: "issuer", feeBps: 0 },
   { symbol: "TSLAon", ticker: "TSLA", profile: "ondo", decimals: 9, units: "10000", kind: "issuer", feeBps: 0 },
-  { symbol: "TSLAr", ticker: "TSLA", profile: "remora", decimals: 9, units: "10000", kind: "issuer", feeBps: 0 },
   { symbol: "SPYx", ticker: "SPY", profile: "xstocks", decimals: 8, units: "10000", kind: "issuer", feeBps: 0 },
   { symbol: "SPYon", ticker: "SPY", profile: "ondo", decimals: 9, units: "10000", kind: "issuer", feeBps: 0 },
+  { symbol: "OPENAI", ticker: "OPENAI", profile: "prestocks", decimals: 9, units: "10000", kind: "issuer", feeBps: 300 },
+  { symbol: "tOpenAI", ticker: "OPENAI", profile: "tessera", decimals: 9, units: "10000", kind: "issuer", feeBps: 20 },
+  { symbol: "SPACEX", ticker: "SPACEX", profile: "prestocks", decimals: 9, units: "10000", kind: "issuer", feeBps: 100 },
+  { symbol: "tSpaceX", ticker: "SPACEX", profile: "tessera", decimals: 9, units: "10000", kind: "issuer", feeBps: 20 },
+  { symbol: "KALSHI", ticker: "KALSHI", profile: "prestocks", decimals: 9, units: "10000", kind: "issuer", feeBps: 300 },
+  { symbol: "tKalshi", ticker: "KALSHI", profile: "tessera", decimals: 9, units: "10000", kind: "issuer", feeBps: 20 },
+  { symbol: "ANTHROPIC", ticker: "ANTHROPIC", profile: "prestocks", decimals: 9, units: "10000", kind: "issuer", feeBps: 300 },
 ] as const;
 export type AssetSpec = (typeof ASSETS)[number];
 export function rawAmount(units: string, decimals: number): bigint {
@@ -46,8 +53,9 @@ export function rawAmount(units: string, decimals: number): bigint {
 }
 export type IssuerAssetSpec = Extract<AssetSpec, { kind: "issuer" }>;
 export const isIssuer = (asset: AssetSpec): asset is IssuerAssetSpec => asset.kind === "issuer";
-/** Underlying tickers with devnet markets, and their issuer legs in listing order. */
-export const MARKET_TICKERS = ["NVDA", "TSLA", "SPY"] as const;
+/** Underlying tickers with devnet markets, and their issuer legs in listing
+ * order: tokenized stocks, then pre-IPO companies. */
+export const MARKET_TICKERS = ["NVDA", "TSLA", "SPY", "OPENAI", "SPACEX", "KALSHI", "ANTHROPIC"] as const;
 export const issuerLegs = (ticker: string) =>
   ASSETS.filter(isIssuer).filter((asset) => asset.ticker === ticker);
 export const tokenProgram = (asset: AssetSpec) =>
@@ -160,6 +168,8 @@ export interface AssetPlan {
   initialRaw: string;
   name: string;
   metadataSymbol: string;
+  /** On-chain metadata uri: the mainnet token's issuer-hosted JSON ("" for generic mocks). */
+  metadataUri: string;
   feeBps: number;
 }
 export interface DeploymentPlan {

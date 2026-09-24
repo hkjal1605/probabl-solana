@@ -43,8 +43,8 @@ for (const name of [
 if (
   common.SOLANA_GENESIS_HASH !==
     "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" ||
-  common.SOLANA_CONFIG !== "6buYkVtSJjaoozCDsPFYrPhp5g1q1oLg2eLp7FpsZ1tF" ||
-  common.SOLANA_PROGRAM_ID !== "8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg"
+  common.SOLANA_CONFIG !== "EfXom6mQxuw5gsHG4AujCgo1dQ3qWg5pN85RvY1ysn23" ||
+  common.SOLANA_PROGRAM_ID !== "53gtyz9nYzS7vwSbx2v7GeGLrMTas7vCATkjiKvAG1ra"
 )
   throw new Error("Unexpected Solana devnet deployment");
 
@@ -53,6 +53,10 @@ const stream: Record<string, string> = {
   YELLOWSTONE_GRPC_URL: source.DEVNET_YELLOWSTONE_GRPC_URL ?? "",
   ...(source.DEVNET_YELLOWSTONE_X_TOKEN
     ? { YELLOWSTONE_X_TOKEN: source.DEVNET_YELLOWSTONE_X_TOKEN }
+    : {}),
+  // Alchemy rejects compressed gRPC requests (gzip and zstd): set "none" there.
+  ...(source.DEVNET_YELLOWSTONE_COMPRESSION
+    ? { YELLOWSTONE_COMPRESSION: source.DEVNET_YELLOWSTONE_COMPRESSION }
     : {}),
 };
 if (!/^https?:\/\//.test(stream.YELLOWSTONE_GRPC_URL!))
@@ -86,6 +90,8 @@ Object.assign(files["api.env"]!, {
   POLYMARKET_INGESTOR_URL: "http://127.0.0.1:42073",
   POLYMARKET_INTERNAL_TOKEN: internalToken,
   REDIS_URL: source.REDIS_URL ?? "redis://127.0.0.1:6379",
+  // Devnet replicas of mainnet issuer tokens price as those tokens.
+  SOLANA_ISSUER_REPLICA_MINTS: deployed.SOLANA_ISSUER_REPLICA_MINTS ?? "",
   // Pricing provider credentials belong only to the API, never UI/indexer/ingestor.
   ...(source.JUPITER_API_KEY ? { JUPITER_API_KEY: source.JUPITER_API_KEY } : {}),
   ...(source.JUPITER_PRICE_RPC_URL ? { JUPITER_PRICE_RPC_URL: source.JUPITER_PRICE_RPC_URL } : {}),

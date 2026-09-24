@@ -11,6 +11,11 @@ prices continue to come from the existing verified chain/indexer paths. Images
 are served locally and require no external image service or metadata RPC calls.
 Unknown mints and other genesis hashes retain the existing display fallback.
 
+Issuer replicas (xStocks, Ondo, PreStocks and Tessera stand-ins) are not in the
+hardcoded registry: they display with their mainnet token's name, symbol, logo
+(`../issuers/`) and description via `NEXT_PUBLIC_SOLANA_ISSUER_REPLICA_MINTS`.
+
 When redeploying test mints, update the hardcoded registry and its regression
-tests from the new public deployment manifest. Never import `.local/` or an env
+tests from the new public deployment manifest, and copy the replica mapping from
+the generated `ui.env`. Never import `.local/` or an env
 file containing private keys into the browser bundle.

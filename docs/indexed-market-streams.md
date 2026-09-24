@@ -71,7 +71,9 @@ Measured with the market-maker flow on a local validator:
 - **zstd compression** is requested by default and cuts wire bytes by about
   40% (large account images and logs compress well). If an endpoint rejects
   compressed requests the stream reconnects uncompressed automatically;
-  `YELLOWSTONE_COMPRESSION=none` disables it.
+  `YELLOWSTONE_COMPRESSION=none` disables it. Alchemy's streaming endpoint
+  (checked 2026-09-25) rejects both gzip and zstd requests, so the devnet
+  indexer sets `none` and its stream is billed uncompressed.
 - **One upstream subscription per host.** The indexer relays the account and
   slot events it receives on loopback (`INDEXER_RELAY_PORT`, default 42070,
   bound to 127.0.0.1). The API reads them there (`INDEXER_RELAY_URL`), with

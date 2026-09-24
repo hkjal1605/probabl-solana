@@ -30,7 +30,7 @@ const tlv = (type: number, length = 0) => {
 };
 test("mint policy explicitly classifies every extension and fails closed on unknown TLV", () => {
   // Generic extensions always; issuer controls only when admitted (all by default).
-  const issuer = new Map([[12, 1], [26, 2], [6, 4], [25, 8], [14, 16], [4, 32]]);
+  const issuer = new Map([[12, 1], [26, 2], [6, 4], [25, 8], [14, 16], [4, 32], [16, 32]]);
   for (let id = 0; id < 100; id++) {
     if ([1, 18, 19, 20, 21, 22, 23].includes(id)) {
       expect(mintExtensions(tlv(id))).toEqual([id]);

@@ -42,6 +42,7 @@ import {
   writePrivate,
 } from "./devnet-store.ts";
 import { pacedUpload } from "./devnet-upload.ts";
+import { catalogToken, formatReplicaMints } from "../../packages/shared/src/token-catalog.ts";
 
 const ARTIFACT = "target/deploy/conditional_stocks.so";
 type Event = Record<string, unknown> & { step: string; at: string };
@@ -436,6 +437,12 @@ export async function exportEnvironment(
     .split(",")
     .map(serviceOrigin)
     .join(",");
+  // Public replica mints of the plan's issuer tokens, SYMBOL=mint.
+  const replicaMints = formatReplicaMints(
+    Object.fromEntries(
+      plan.assets.filter((asset) => catalogToken(asset.symbol)).map((asset) => [asset.symbol, asset.mint]),
+    ),
+  );
   const lines = (values: Record<string, string>) =>
     Object.entries(values)
       .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
@@ -455,6 +462,8 @@ export async function exportEnvironment(
       INDEXER_URL: indexer,
       API_URL: api,
       MARKET_ADMIN: plan.deployer,
+      // Devnet replicas of mainnet issuer tokens price as those tokens.
+      SOLANA_ISSUER_REPLICA_MINTS: replicaMints,
     }),
   );
   await writePrivate(
@@ -473,6 +482,8 @@ export async function exportEnvironment(
       NEXT_PUBLIC_SOLANA_MARKET_ADMIN: plan.deployer,
       NEXT_PUBLIC_SOLANA_RESOLUTION_ADMIN: plan.deployer,
       NEXT_PUBLIC_APP_URL: "http://localhost:3001",
+      // ...and display with the issuers' own names, symbols and logos.
+      NEXT_PUBLIC_SOLANA_ISSUER_REPLICA_MINTS: replicaMints,
     }),
   );
 }

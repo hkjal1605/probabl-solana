@@ -101,7 +101,7 @@ if (process.argv.includes("--auth")) {
     message: string;
   };
   assert(message.includes("EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"));
-  assert(message.includes("6buYkVtSJjaoozCDsPFYrPhp5g1q1oLg2eLp7FpsZ1tF"));
+  assert(message.includes("EfXom6mQxuw5gsHG4AujCgo1dQ3qWg5pN85RvY1ysn23"));
   const signingKey = createPrivateKey({
     key: Buffer.concat([
       Buffer.from("302e020100300506032b657004220420", "hex"),

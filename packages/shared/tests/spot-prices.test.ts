@@ -6,6 +6,7 @@ import {
   MAINNET_REFERENCE_MINTS,
   DEVNET_ASSET_MINTS,
   DEVNET_ISSUER_MOCK_SOURCES,
+  configureDevnetIssuerReplicas,
   devnetIssuerAliases,
   SOLANA_DEVNET_GENESIS,
   SOLANA_MAINNET_GENESIS,
@@ -27,8 +28,15 @@ test("one economic asset maps to every whitelisted issuer token", () => {
     ["NVDAon", "Ondo Global Markets", 9],
     ["NVDAr", "Remora", 9],
   ]);
-  expect(issuerTokensForAsset("TSLA").map((t) => t.mint)).toEqual([MAINNET_REFERENCE_MINTS.TSLA]);
-  expect(issuerTokensForAsset("SPY").map((t) => t.mint)).toEqual([MAINNET_REFERENCE_MINTS.SPY]);
+  expect(issuerTokensForAsset("TSLA").map((t) => t.symbol)).toEqual(["TSLAx", "TSLAon"]);
+  expect(issuerTokensForAsset("TSLA")[0]!.mint).toBe(MAINNET_REFERENCE_MINTS.TSLA);
+  expect(issuerTokensForAsset("SPY").map((t) => t.symbol)).toEqual(["SPYx", "SPYon"]);
+  // Pre-IPO companies: PreStocks (scaled) and Tessera (unscaled) tokens of one asset.
+  expect(issuerTokensForAsset("OPENAI").map((t) => [t.symbol, t.issuer, t.decimals, t.scaledUiAmount])).toEqual([
+    ["OPENAI", "PreStocks", 9, true],
+    ["tOpenAI", "Tessera", 9, false],
+  ]);
+  expect(issuerTokensForAsset("ANTHROPIC").map((t) => t.symbol)).toEqual(["ANTHROPIC"]);
   expect(issuerToken(MAINNET_REFERENCE_MINTS.NVDA)?.mint).toBe(NVDAX);
   expect(issuerToken(MAINNET_REFERENCE_MINTS.USDC)).toBeUndefined();
 });
@@ -99,12 +107,26 @@ test("per-share price divides the unscaled token price by the live multiplier", 
   expect(sharePriceUsd({ ...row, priceTimestamp: null }, 1, now)).toBeNull();
 });
 
-test("devnet mock issuer tokens alias their mainnet counterparts explicitly", () => {
-  for (const [symbol, source] of Object.entries(DEVNET_ISSUER_MOCK_SOURCES)) {
-    const token = issuerToken(source);
-    expect(token).toBeDefined();
-    expect(symbol.startsWith(token!.asset)).toBe(true);
-  }
+test("devnet issuer replicas alias exactly the mainnet token they replicate", () => {
+  for (const [symbol, source] of Object.entries(DEVNET_ISSUER_MOCK_SOURCES))
+    expect(issuerToken(source)?.symbol).toBe(symbol);
+  expect(Object.keys(DEVNET_ISSUER_MOCK_SOURCES)).toHaveLength(13);
+  // Registered replica mints price as their mainnet source; others stay unmapped.
+  const replica = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDW";
+  expect(spotMapping(SOLANA_DEVNET_GENESIS, replica).sourceMint).toBeNull();
+  configureDevnetIssuerReplicas({ tOpenAI: replica });
+  expect(spotMapping(SOLANA_DEVNET_GENESIS, replica)).toMatchObject({
+    sourceMint: "oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ",
+    referenceSymbol: "tOpenAI",
+    asset: "OPENAI",
+    issuer: "Tessera",
+    scaledUiAmount: false,
+    valuationCompatible: false,
+  });
+  // Mainnet never uses devnet aliases.
+  expect(spotMapping(SOLANA_MAINNET_GENESIS, replica).sourceMint).toBe(replica);
+  configureDevnetIssuerReplicas({});
+  expect(spotMapping(SOLANA_DEVNET_GENESIS, replica).sourceMint).toBeNull();
   const mock = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDV";
   expect(devnetIssuerAliases({ NVDAon: mock }).get(mock)).toBe(
     "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo",

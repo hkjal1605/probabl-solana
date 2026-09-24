@@ -33,6 +33,9 @@ export const ISSUER_CONTROL_EXTENSIONS = new Map<number, number>([
   [25, ISSUER_CONTROLS.scaledUiAmount],
   [14, ISSUER_CONTROLS.transferHook],
   [4, ISSUER_CONTROLS.confidentialTransfer],
+  // ConfidentialTransferFeeConfig: required by Token-2022 when confidential
+  // transfers meet a transfer fee; only affects confidential balances.
+  [16, ISSUER_CONTROLS.confidentialTransfer],
 ]);
 export const ALL_ISSUER_CONTROLS = 63;
 export function issuerControlNames(mask: number): string[] {

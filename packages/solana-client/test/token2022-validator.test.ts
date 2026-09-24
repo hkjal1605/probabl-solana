@@ -505,12 +505,13 @@ describe.skipIf(!rpc)("compiled Token-2022 collateral custody (multi-issuer layo
   }, 180_000);
 
   test("issuer admission tier: replicas need their exact control mask; generic tier and wrong masks reject", async () => {
-    for (const [profile, expected] of [
-      ["xstocks", 63],
-      ["ondo", 62],
-      ["remora", 47],
+    for (const [profile, ticker, expected] of [
+      ["xstocks", "NVDA", 63],
+      ["ondo", "NVDA", 62],
+      ["prestocks", "SPACEX", 63],
+      ["remora", "NVDA", 47],
     ] as const) {
-      const issuer = await h.issuerMint(profile);
+      const issuer = await h.issuerMint(profile, ticker);
       const info = await connection.getAccountInfo(issuer.mint, "confirmed");
       expect(() => decodeSupportedMint(issuer.mint, info, 0)).toThrow("Unsupported");
       expect(() => decodeSupportedMint(issuer.mint, info, expected & (expected - 1))).toThrow("Unsupported");
@@ -531,14 +532,37 @@ describe.skipIf(!rpc)("compiled Token-2022 collateral custody (multi-issuer layo
       await send([client().initializePool(issuer.mint, h.admin.publicKey, T22, expected)]);
       expect((await poolState(issuer.mint)).admitted).toBe(expected);
       // A pool admits exactly once; its vault holds real issuer tokens.
+      // PreStocks replicas carry the mainnet 1% transfer fee: the pool
+      // credits what arrives and withdrawals pay the fee again.
       await h.fund(issuer.mint, alice.publicKey, 1_000_000n);
-      await send([client().depositPool(alice.publicKey, issuer.mint, 1_000n, T22)], alice);
-      expect(await h.credit(issuer.mint, alice.publicKey)).toBe(1_000n);
-      await send(client().withdrawPool(alice.publicKey, issuer.mint, 1_000n, alice.publicKey, T22), alice);
+      const credited = 1_000n - fee(1_000n, issuer.transferFee);
+      await send([client().depositPool(alice.publicKey, issuer.mint, 1_000n, T22, credited)], alice);
+      expect(await h.credit(issuer.mint, alice.publicKey)).toBe(credited);
+      const received = credited - fee(credited, issuer.transferFee);
+      await send(client().withdrawPool(alice.publicKey, issuer.mint, credited, alice.publicKey, T22, received), alice);
+      expect(await h.tokenBalance(issuer.mint, alice.publicKey)).toBe(1_000_000n - 1_000n + received);
     }
-    // Issuer profiles with ConfidentialTransferMint cannot carry a transfer fee
-    // (Token-2022 would need the unadmitted confidential fee extension).
-    await expect(h.issuerMint("xstocks", "TSLA", { transferFee: BASE_FEE })).rejects.toThrow("ConfidentialTransferMint");
+    // A fee-bearing confidential-transfer mint needs ConfidentialTransferFeeConfig,
+    // which is part of the confidential transfer control, not a new one.
+    const confidentialFee = await h.issuerMint("xstocks", "TSLA", { transferFee: BASE_FEE });
+    expect((await mintAdmission(client(), confidentialFee.mint)).admitted).toBe(63);
+    // Tessera mints carry no issuer controls: generic-tier fee tokens.
+    const tessera = await h.issuerMint("tessera", "OPENAI");
+    expect(tessera.transferFee).toEqual({ bps: 20, maximum: (1n << 64n) - 1n });
+    expect((await mintAdmission(client(), tessera.mint)).admitted).toBe(0);
+    await h.rejects(
+      send([client().initializePool(tessera.mint, h.admin.publicKey, T22, 2)]),
+      "UnsupportedTokenExtension",
+      [pool(tessera.mint)],
+      [null],
+    );
+    await h.fund(tessera.mint, alice.publicKey, 1_000_000n);
+    const tesseraMarket = await listed([tessera.mint]);
+    expect((await poolState(tessera.mint)).admitted).toBe(0);
+    const tesseraDeposit = await client().depositForCredit(tesseraMarket, alice.publicKey, tessera.mint, 3, 5_000n);
+    expect(tesseraDeposit.fee).toBe(fee(tesseraDeposit.gross, tessera.transferFee));
+    await send([tesseraDeposit.instruction], alice);
+    expect(await h.credit(tessera.mint, alice.publicKey)).toBe(5_000n);
     // A generic fee extension beside issuer controls does not change the mask.
     const feeIssuer = await extendedMint(
       [ExtensionType.TransferFeeConfig, ExtensionType.PausableConfig, ExtensionType.ScaledUiAmountConfig],

@@ -18,9 +18,9 @@ import { fixtureMarkets } from "./fixtures/protocol";
 
 // Public addresses from the completed Devnet deployment; no private fixture/env imports.
 const deployed = [
-  ["iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDD", "USDC", "USD Coin", undefined],
-  ["DhC4rpPyVJRHJmNqhMXchqET2o87b6JV6ebfkqA5Ufv4", "BTC", "Bitcoin", undefined],
-  ["H2RuZ1p2KBtKesz6kcnLvXhtVK74LAbTrWbH5phyeMkY", "ETH", "Ethereum", undefined],
+  ["827noEu9yuV2HXiqFJhESUREcfkvA8RKXMxNKdVqxuvb", "USDC", "USD Coin", undefined],
+  ["9Lq6s3X22MTefov2hi9VtTRUbMaCahNpaQXmxtcu6H1S", "BTC", "Bitcoin", undefined],
+  ["AxkdvS81zeZB62C6uWSUm2K5BUKeKvhR6upt1FnU6Hmi", "ETH", "Ethereum", undefined],
   ["So11111111111111111111111111111111111111112", "SOL", "Wrapped SOL", undefined],
   ["DdVCyyE4uWbG69K1SCXhauM9hRoMZrs7xG81DUCqebTC", "TSLA", "Tesla", "TSLA"],
   ["8GmgkFJYZShkt9ixssZmSQb4GPc7JcPK2EQKqAQCgb6u", "NVDA", "NVIDIA", "NVDA"],
@@ -218,4 +218,54 @@ test("unknown legs get distinct synthetic labels and group by their exact mint s
   expect(a.legs.map((leg) => leg.symbol)).toEqual(["NVDA·1", "NVDA·2"]);
   expect(a.assetKey).toBe(b.assetKey);
   expect(a.assetKey).not.toBe(marketTokenDisplay(["m3"], quote, "", "NVDA").assetKey);
+});
+
+test("mainnet issuer tokens and their devnet replicas show the issuer's exact identity and logo", async () => {
+  const { ISSUER_TOKEN_CATALOG } = await import("@conditional-stocks/shared/token-catalog");
+  const { replicaTokenMetadata } = await import("../src/lib/tokens/devnet");
+  for (const token of ISSUER_TOKEN_CATALOG) {
+    const metadata = tokenMetadata(token.mint, "");
+    expect(metadata).toMatchObject({
+      symbol: token.symbol,
+      name: token.name,
+      issuer: token.issuer,
+      asset: token.asset,
+      image: token.logo,
+      devnet: false,
+    });
+    // Bundled copies of the issuers' own logos, never hotlinked.
+    expect(token.logo).toMatch(/^\/tokens\/issuers\/[a-z]+\.(png|svg)$/);
+    const bytes = await readFile(new URL(`../public${token.logo}`, import.meta.url));
+    expect(bytes.length).toBeGreaterThan(0);
+    if (token.logo.endsWith(".svg")) expect(bytes.toString("utf8")).not.toMatch(/<script|\bonload=/i);
+  }
+  // Devnet replicas (as exported by the deployment scripts) display exactly as mainnet.
+  const replicaOpenAi = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+    replicaTOpenAi = "iTUCuHTUHKqWe3XhUc5J3dSjmDdNuQKYtQh8KDYZdDE";
+  const replicas = replicaTokenMetadata(`OPENAI=${replicaOpenAi},tOpenAI=${replicaTOpenAi}`);
+  expect(tokenMetadata(replicaOpenAi, SOLANA_DEVNET_GENESIS, replicas)).toEqual(
+    tokenMetadata("PreweJYECqtQwBtpxHL171nL2K6umo692gTm7Q3rpgF", ""),
+  );
+  const market = marketTokenDisplay([replicaOpenAi, replicaTOpenAi], quote, SOLANA_DEVNET_GENESIS, "X", replicas);
+  expect(market.ticker).toBe("OPENAI");
+  expect(market.assetMetadata).toMatchObject({ name: "OpenAI", image: "/tokens/issuers/openai.png" });
+  expect(market.legs.map((leg) => [leg.symbol, leg.issuer, leg.metadata?.name])).toEqual([
+    ["OPENAI", "PreStocks", "OpenAI PreStocks"],
+    ["tOpenAI", "Tessera", "T-OpenAI"],
+  ]);
+  // Without that deployment configuration (or with a malformed one) nothing is guessed.
+  expect(tokenMetadata(replicaOpenAi, SOLANA_DEVNET_GENESIS)).toBeUndefined();
+  expect(replicaTokenMetadata("OPENAI=bad")).toEqual({});
+  expect(replicaTokenMetadata(`NVDAr=${replicaOpenAi}`)).toEqual({});
+  // Stock markets keep the stock icon; issuers come from the catalog or conventions.
+  expect(marketTokenDisplay(["Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh"], quote, "", "X").assetMetadata?.image).toBe(
+    "/tokens/devnet/nvda.svg",
+  );
+  expect(issuerFromSymbol("OPENAI")).toBe("PreStocks");
+  expect(issuerFromSymbol("tKalshi")).toBe("Tessera");
+  expect(issuerFromSymbol("tUnknownCo")).toBe("Tessera");
+  const tooltip = renderToStaticMarkup(
+    createElement(TokenIdentity, { symbol: "tSpaceX", metadata: tokenMetadata("TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v", "") }),
+  );
+  expect(tooltip).toContain("T-SpaceX (tSpaceX) · Tessera");
 });

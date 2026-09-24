@@ -44,15 +44,15 @@ Each leg's claims are backed only by that issuer's pool.
 | DefaultAccountState | issuer, bit `4` | Admitted only with bit 4. A pool vault that starts (or is later) frozen cannot be listed (`add_base`) or traded (`LegHalted`) until the issuer thaws it. Securitize/Superstate-style default-frozen mints need issuer allowlisting and a thaw first |
 | ScaledUiAmount | issuer, bit `8` | Admitted only with bit 8. The book trades share units; every fill converts to raw issuer units at the live multiplier (`new_multiplier` once its timestamp passes). New exposure requires `4/5 <= live / listing <= 5/4` (dividend band); a split or reverse split leaves the band and halts the leg (`LegHalted`) |
 | TransferHook | issuer, bit `16` | Admitted only with bit 16 **and** while the hook `program_id` is unset. No hook CPI is ever performed. Setting a hook program makes every custody and exposure path fail with `TransferHookEnabled` |
-| ConfidentialTransferMint | issuer, bit `32` | Admitted only with bit 32, as mint-level configuration. Protocol vaults never enable confidential balances, so custody stays public and exact |
+| ConfidentialTransferMint, ConfidentialTransferFeeConfig | issuer, bit `32` | Admitted only with bit 32, as mint-level configuration. Token-2022 requires the confidential fee config beside a transfer fee on a confidential mint (PreStocks), so it is part of the same control. Protocol vaults never enable confidential balances or harvest confidential withheld fees, so custody stays public and exact |
 | NonTransferable | — | Rejected; incompatible with freely transferable trading claims |
-| ConfidentialTransferFeeConfig, ConfidentialMintBurn | — | Rejected; this public order book has no confidential custody/proof integration |
+| ConfidentialMintBurn | — | Rejected; this public order book has no confidential custody/proof integration |
 | InterestBearingConfig | — | Rejected until display, pricing, quantity and redemption semantics are explicitly integrated |
 | MintCloseAuthority | — | Rejected; avoid a close/reinitialize identity lifecycle for admitted collateral |
 | Unknown, future or account-only extension used on a mint | — | Rejected; new extensions require an explicit reviewed policy change |
 
-Mainnet issuer configurations the tier was built against (read 2026-09-23; raw
-account bytes in `packages/solana-client/test/fixtures/`):
+Mainnet issuer configurations the tier was built against (read 2026-09-23, PreStocks
+and Tessera 2026-09-25; raw account bytes in `packages/solana-client/test/fixtures/`):
 
 | Issuer | Example | Decimals | Extensions | `admitted` |
 | --- | --- | --- | --- | --- |
@@ -60,11 +60,15 @@ account bytes in `packages/solana-client/test/fixtures/`):
 | Ondo Global Markets | NVDAon | 9 | as xStocks without PermanentDelegate | 62 |
 | Remora | NVDAr | 9 | as xStocks without TransferHook | 47 |
 | Backpack Securities | SPCX | 6 | all six issuer controls | 63 |
+| PreStocks | OPENAI, SPACEX, KALSHI, ANTHROPIC | 9 | PermanentDelegate, DefaultAccountState, TransferFeeConfig (1–3%, no maximum), ConfidentialTransferMint, ConfidentialTransferFeeConfig, TransferHook (unset), ScaledUiAmount (SPACEX 5.0, OPENAI ≈1.486), MetadataPointer, Pausable, TokenMetadata | 63 |
+| Tessera | tOpenAI, tSpaceX, tKalshi | 9 | TransferFeeConfig (0.2%, no maximum), MetadataPointer, TokenMetadata | 0 (generic) |
 
 Local and Devnet fixtures (`scripts/solana/mock-issuers.ts`) replicate these
 configurations with the real Token-2022 instructions, in the mainnet extension order,
 with a local mock authority standing in for the issuer (pause, multiplier update,
-freeze). They are test doubles, never real issuer tokens.
+freeze). Devnet replicas also carry the mainnet token's name, symbol, metadata URI,
+multiplier and transfer fee (`packages/shared/src/token-catalog.ts`). They are test
+doubles, never real issuer tokens.
 
 The Rust program enforces this policy at configuration initialization, pool creation
 (`initialize_pool`), market creation (quote), leg listing (`add_base`), every pool
@@ -171,9 +175,9 @@ skipped; fee math and the other Token-2022 cases still run. The application runn
 creates a fresh disposable database and mock token deployment, then removes only
 that test database after stopping its test services. The bootstrap always lists
 issuer replicas as base legs; `SOLANA_TEST_TOKEN_2022=1` additionally makes the quote
-a fee-bearing Token-2022 mint and lists a plain fee-bearing Token-2022 base leg
-(Token-2022 rejects a transfer fee next to the issuers' ConfidentialTransferMint, so
-the replicas themselves never carry one).
+a fee-bearing Token-2022 mint and lists a plain fee-bearing Token-2022 base leg.
+The PreStocks and Tessera replicas carry their mainnet transfer fees; a fee on a
+confidential-transfer replica adds ConfidentialTransferFeeConfig, as on PreStocks.
 
 Tests exercise real Token-2022 CPIs on SBF: exact pool admission (and rejection of a
 wrong mask), deposits/withdrawals of issuer tokens with every issuer extension,

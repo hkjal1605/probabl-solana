@@ -2,6 +2,14 @@
 // plus the issuer-published mainnet stock tokens a multi-issuer market can list.
 // Never derive trading precision, issuer support, prices, or balances from this map.
 import { DEVNET_ASSET_MINTS, SOLANA_DEVNET_GENESIS } from "@conditional-stocks/shared/spot-prices";
+import {
+  assetDisplayName,
+  type CatalogToken,
+  catalogToken,
+  catalogTokensForAsset,
+  ISSUER_TOKEN_CATALOG,
+  parseReplicaMints,
+} from "@conditional-stocks/shared/token-catalog";
 
 export { SOLANA_DEVNET_GENESIS };
 
@@ -13,8 +21,10 @@ export interface TokenDisplayMetadata {
   readonly devnet: boolean;
   /** Underlying asset ticker shared by every issuer token of one stock (e.g. NVDA). */
   readonly asset?: string;
-  /** Token issuer (e.g. xStocks, Ondo Global Markets, Remora). */
+  /** Token issuer (e.g. xStocks, Ondo Global Markets, PreStocks, Tessera). */
   readonly issuer?: string;
+  /** The issuer's own description (its metadata JSON). */
+  readonly description?: string;
 }
 
 const token = (symbol: string, name: string, asset?: string): TokenDisplayMetadata =>
@@ -40,6 +50,8 @@ export const DEVNET_TOKEN_METADATA: Readonly<Record<string, TokenDisplayMetadata
 export const TOKEN_ISSUERS = Object.freeze({
   xStocks: "xStocks",
   ondo: "Ondo Global Markets",
+  prestocks: "PreStocks",
+  tessera: "Tessera",
   remora: "Remora",
   backpack: "Backpack Securities",
 });
@@ -59,20 +71,22 @@ const issuerToken = (
     issuer,
   });
 
-/** Issuer-published mainnet stock tokens (docs/multi-issuer-markets.md). Keyed by exact mint. */
+/** Display identity of a mainnet issuer token: its own on-chain name and
+ * symbol, the issuer's description and a bundled copy of the issuer's logo. */
+const catalogDisplay = (token: CatalogToken): TokenDisplayMetadata =>
+  Object.freeze({
+    symbol: token.symbol,
+    name: token.name,
+    image: token.logo,
+    devnet: false as const,
+    asset: token.asset,
+    issuer: token.issuer,
+    description: token.description,
+  });
+
+/** Issuer-published mainnet tokens (packages/shared/src/token-catalog.ts), keyed by exact mint. */
 export const ISSUER_TOKEN_METADATA: Readonly<Record<string, TokenDisplayMetadata>> = Object.freeze({
-  Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh: issuerToken(
-    "NVDAx",
-    "NVIDIA xStock",
-    "NVDA",
-    TOKEN_ISSUERS.xStocks,
-  ),
-  gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo: issuerToken(
-    "NVDAon",
-    "NVIDIA (Ondo Tokenized)",
-    "NVDA",
-    TOKEN_ISSUERS.ondo,
-  ),
+  ...Object.fromEntries(ISSUER_TOKEN_CATALOG.map((token) => [token.mint, catalogDisplay(token)])),
   ALTP6gug9wv5mFtx2tSU1YYZ1NrEc2chDdMPoJA8f8pu: issuerToken(
     "NVDAr",
     "NVIDIA (Remora)",
@@ -81,6 +95,29 @@ export const ISSUER_TOKEN_METADATA: Readonly<Record<string, TokenDisplayMetadata
   ),
 });
 
+/**
+ * Devnet replicas of mainnet issuer tokens (scripts/solana/mock-issuers.ts), keyed by
+ * their deployment mint. The deployment scripts export `SYMBOL=mint` pairs as
+ * NEXT_PUBLIC_SOLANA_ISSUER_REPLICA_MINTS; each replica displays exactly as the mainnet
+ * token it replicates. An invalid list shows the plain fallback rather than a guess.
+ */
+export function replicaTokenMetadata(value: string | undefined): Readonly<Record<string, TokenDisplayMetadata>> {
+  let mints: Record<string, string>;
+  try {
+    mints = parseReplicaMints(value);
+  } catch {
+    mints = {};
+  }
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(mints).map(([symbol, mint]) => [mint, catalogDisplay(catalogToken(symbol)!)]),
+    ),
+  );
+}
+export const REPLICA_TOKEN_METADATA = replicaTokenMetadata(
+  process.env.NEXT_PUBLIC_SOLANA_ISSUER_REPLICA_MINTS,
+);
+
 export function devnetTokenMetadata(mint: string, genesisHash: string) {
   // chainId=1 is a compatibility key shared by all Solana environments, not a network check.
   if (genesisHash !== SOLANA_DEVNET_GENESIS || !Object.hasOwn(DEVNET_TOKEN_METADATA, mint))
@@ -88,14 +125,24 @@ export function devnetTokenMetadata(mint: string, genesisHash: string) {
   return DEVNET_TOKEN_METADATA[mint];
 }
 
-/** Display metadata of an issuer or devnet token. Issuer mints are unique addresses on any cluster. */
-export function tokenMetadata(mint: string, genesisHash: string): TokenDisplayMetadata | undefined {
+/** Display metadata of an issuer, replica or devnet token. Issuer mints are unique
+ * addresses on any cluster; replica mints come from this deployment's configuration. */
+export function tokenMetadata(
+  mint: string,
+  genesisHash: string,
+  replicas: Readonly<Record<string, TokenDisplayMetadata>> = REPLICA_TOKEN_METADATA,
+): TokenDisplayMetadata | undefined {
   if (Object.hasOwn(ISSUER_TOKEN_METADATA, mint)) return ISSUER_TOKEN_METADATA[mint];
+  if (Object.hasOwn(replicas, mint)) return replicas[mint];
   return devnetTokenMetadata(mint, genesisHash);
 }
 
-/** Display issuer inferred from a token symbol suffix (NVDAx, NVDAon, NVDAr). Display only. */
+/** Display issuer of a token symbol: the catalog's, else the suffix/prefix
+ * conventions (NVDAx, NVDAon, NVDAr, tOpenAI). Display only. */
 export function issuerFromSymbol(symbol: string): string | null {
+  const known = catalogToken(symbol);
+  if (known) return known.issuer;
+  if (/^t[A-Z][A-Za-z]*$/.test(symbol)) return TOKEN_ISSUERS.tessera;
   if (/^[A-Z.]+x$/.test(symbol)) return TOKEN_ISSUERS.xStocks;
   if (/^[A-Z.]+on$/.test(symbol)) return TOKEN_ISSUERS.ondo;
   if (/^[A-Z.]+r$/.test(symbol)) return TOKEN_ISSUERS.remora;
@@ -113,6 +160,12 @@ const ASSET_NAMES: Readonly<Record<string, string>> = Object.freeze({
   TSLA: "Tesla",
   SPY: "SPDR S&P 500 ETF Trust",
 });
+/** Icon of an economic asset: the bundled stock icon, else the company logo of
+ * its first catalog token (pre-IPO companies, e.g. the PreStocks OpenAI logo). */
+const assetImage = (asset: string) =>
+  asset in ASSET_NAMES
+    ? `/tokens/devnet/${asset.toLowerCase()}.svg`
+    : (catalogTokensForAsset(asset)[0]?.logo ?? `/tokens/devnet/${asset.toLowerCase()}.svg`);
 
 /**
  * Market display identity from its ordered base-leg mints. The asset ticker is the
@@ -125,8 +178,9 @@ export function marketTokenDisplay(
   quoteMint: string,
   genesisHash: string,
   fallbackTicker: string,
+  replicas: Readonly<Record<string, TokenDisplayMetadata>> = REPLICA_TOKEN_METADATA,
 ) {
-  const known = baseMints.map((mint) => tokenMetadata(mint, genesisHash));
+  const known = baseMints.map((mint) => tokenMetadata(mint, genesisHash, replicas));
   const assets = new Set(
     known.flatMap((metadata) => (metadata ? [metadata.asset ?? metadata.symbol] : [])),
   );
@@ -140,8 +194,8 @@ export function marketTokenDisplay(
     : (devnetAsset ??
       Object.freeze({
         symbol: shared,
-        name: ASSET_NAMES[shared] ?? shared,
-        image: `/tokens/devnet/${shared.toLowerCase()}.svg`,
+        name: ASSET_NAMES[shared] ?? assetDisplayName(shared) ?? shared,
+        image: assetImage(shared),
         devnet: false,
         asset: shared,
       }));

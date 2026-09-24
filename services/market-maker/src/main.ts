@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { SolanaClient, key, address } from "@conditional-stocks/solana-client";
+import { configureDevnetIssuerReplicas } from "@conditional-stocks/shared/spot-prices";
+import { parseReplicaMints } from "@conditional-stocks/shared/token-catalog";
 import { Keypair } from "@solana/web3.js";
 import { settings } from "./config.ts";
 import { apiOrigin } from "./feeds.ts";
@@ -11,6 +13,8 @@ async function main() {
   const env = process.env,
     mode = env.MM_MODE ?? "dry-run";
   if (!["dry-run", "live"].includes(mode)) throw new Error("Invalid mode");
+  // Devnet replicas of mainnet issuer tokens quote from those tokens' prices.
+  configureDevnetIssuerReplicas(parseReplicaMints(env.SOLANA_ISSUER_REPLICA_MINTS));
   const live = mode === "live";
   if (live && !process.argv.includes("--execute"))
     throw new Error("Live signing requires --execute as well as MM_MODE=live");

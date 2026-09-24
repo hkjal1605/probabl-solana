@@ -21,7 +21,6 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import { settings } from "../../services/market-maker/src/config.ts";
-import { signer } from "../../services/market-maker/src/execution.ts";
 import {
   ASSETS,
   assertDevnet,
@@ -35,12 +34,13 @@ import { DEVNET_MARKET_SEED } from "./seed-markets-policy.ts";
 
 const ROOT = resolve(import.meta.dir, "../..");
 const CONFIG_PATH = resolve(ROOT, ".local/devnet/market-maker-all.json");
-const PROGRAM = "8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg";
-const CONFIG = "6buYkVtSJjaoozCDsPFYrPhp5g1q1oLg2eLp7FpsZ1tF";
+const PROGRAM = "53gtyz9nYzS7vwSbx2v7GeGLrMTas7vCATkjiKvAG1ra";
+const CONFIG = "EfXom6mQxuw5gsHG4AujCgo1dQ3qWg5pN85RvY1ysn23";
 const ADMIN = "4o2JYy6ktdZEfaUVHGwdCbvMyypZ1NRCDpyS1rfY9q8z";
 const EXPECTED_MARKET_MAKER = "9wYFs5Qt7dXAnU5ewPAvG21ncYjbAeDzawvTtVFmdj5Z";
 const API = "https://api-solana.probabl.trade";
-const TARGET_SOL = 8_000_000_000n;
+// Wallet rent is ~0.0022 SOL per market (84 markets ≈ 0.19 SOL); the rest pays fees.
+const TARGET_SOL = 2_000_000_000n;
 /** Wallet top-ups in whole tokens: quote plus every issuer leg of every asset. */
 const TARGETS: Readonly<Record<string, string>> = Object.freeze({
   USDC: "5000",
@@ -64,7 +64,8 @@ const connection = new Connection(rpc, "confirmed");
 await assertDevnet(connection);
 const admin = parseDeployer(process.env.DEVNET_DEPLOYER_PRIVATE_KEY);
 if (admin.publicKey.toBase58() !== ADMIN) throw new Error("Unexpected Devnet administrator");
-const marketMaker = signer(process.env.MM_PRIVATE_KEY ?? "", process.env.MM_WALLET_ADDRESS ?? "");
+// Funding only sends to the bot's public address; its key stays on the bot host.
+const marketMaker = { publicKey: key(process.env.MM_WALLET_ADDRESS ?? EXPECTED_MARKET_MAKER) };
 if (
   marketMaker.publicKey.toBase58() !== EXPECTED_MARKET_MAKER ||
   marketMaker.publicKey.equals(admin.publicKey)

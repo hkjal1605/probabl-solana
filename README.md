@@ -41,7 +41,7 @@ solana-test-validator --ledger .local/validator \
   --bind-address 127.0.0.1 --rpc-port 8899 \
   --limit-ledger-size 1000000 \
   --geyser-plugin-config .local/yellowstone/geyser-10000.json \
-  --bpf-program 8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg target/deploy/conditional_stocks.so
+  --bpf-program 53gtyz9nYzS7vwSbx2v7GeGLrMTas7vCATkjiKvAG1ra target/deploy/conditional_stocks.so
 ```
 
 `YELLOWSTONE_GRPC_URL` (default `http://127.0.0.1:10000`) points the indexer at

@@ -35,7 +35,10 @@ pub const SCALED_UI_AMOUNT: u16 = 1 << 3;
 /// Accepted only while the hook program is unset. No hook CPI is performed.
 pub const TRANSFER_HOOK: u16 = 1 << 4;
 /// Mint-level confidential configuration only. Protocol vaults never enable
-/// confidential balances, so custody remains public and exact.
+/// confidential balances, so custody remains public and exact. Covers
+/// `ConfidentialTransferFeeConfig` too, which Token-2022 requires on a mint
+/// combining confidential transfers with a transfer fee (PreStocks): it governs
+/// only fees withheld from confidential balances, which vaults never hold.
 pub const CONFIDENTIAL_TRANSFER: u16 = 1 << 5;
 pub const ISSUER_CONTROLS: u16 = PERMANENT_DELEGATE
     | PAUSABLE
@@ -66,7 +69,9 @@ pub fn issuer_control(extension: ExtensionType) -> Option<u16> {
         ExtensionType::DefaultAccountState => Some(DEFAULT_ACCOUNT_STATE),
         ExtensionType::ScaledUiAmount => Some(SCALED_UI_AMOUNT),
         ExtensionType::TransferHook => Some(TRANSFER_HOOK),
-        ExtensionType::ConfidentialTransferMint => Some(CONFIDENTIAL_TRANSFER),
+        ExtensionType::ConfidentialTransferMint | ExtensionType::ConfidentialTransferFeeConfig => {
+            Some(CONFIDENTIAL_TRANSFER)
+        }
         _ => None,
     }
 }

@@ -87,7 +87,7 @@ jobs:
           bun install --frozen-lockfile
           # Checksum-pinned Yellowstone gRPC plugin: the indexer and API stream from it.
           bun scripts/solana/yellowstone.ts --port 10911 --out "$RUNNER_TEMP/yellowstone"
-          solana-test-validator --ledger "$RUNNER_TEMP/pool-ledger" --limit-ledger-size 2000000 --rpc-port 8911 --faucet-port 9911 --gossip-port 8921 --dynamic-port-range 12000-12100 --slots-per-epoch 64 --geyser-plugin-config "$RUNNER_TEMP/yellowstone/geyser-10911.json" --bpf-program 8S7LwM6yRszZaAoEQqgE1AYcZJLpyVVC5MRr7vqCxLtg target/deploy/conditional_stocks.so > "$RUNNER_TEMP/pool-validator.log" 2>&1 &
+          solana-test-validator --ledger "$RUNNER_TEMP/pool-ledger" --limit-ledger-size 2000000 --rpc-port 8911 --faucet-port 9911 --gossip-port 8921 --dynamic-port-range 12000-12100 --slots-per-epoch 64 --geyser-plugin-config "$RUNNER_TEMP/yellowstone/geyser-10911.json" --bpf-program 53gtyz9nYzS7vwSbx2v7GeGLrMTas7vCATkjiKvAG1ra target/deploy/conditional_stocks.so > "$RUNNER_TEMP/pool-validator.log" 2>&1 &
           validator_pid=$!
           trap 'kill "$validator_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 60); do
