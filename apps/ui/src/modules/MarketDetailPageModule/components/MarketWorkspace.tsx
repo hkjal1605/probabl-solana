@@ -162,12 +162,12 @@ export function MarketWorkspace({
       </div>
       <div className="market-workspace-grid grid min-h-0 flex-1 items-stretch gap-0.5 bg-secondary p-0.5 xl:overflow-hidden">
         <div className="market-workspace-stats overflow-hidden rounded-[4px] bg-background">
-          <div className="flex flex-wrap items-start gap-x-6 gap-y-3 border-y px-3 py-3">
+          <div className="@container/prices flex flex-wrap items-center gap-x-6 gap-y-3 border-y px-3 py-3">
             <OutcomeStat market={market} branch="YES" />
             <SpotReference price={market.spotReference} variant="market" />
             <OutcomeStat market={market} branch="NO" />
+            <ListedIssuers market={market} />
           </div>
-          <ListedIssuers market={market} />
           {market.bookQuality === "truncated" && (
             <DataError
               message={
@@ -385,14 +385,19 @@ function BranchDepth({
   );
 }
 
-/** Listed issuer tokens with live multiplier and paused/delisted/halted state. */
+/** Listed issuer tokens with live multiplier and paused/delisted/halted state:
+ * at the right end of the prices row when it is wide enough, else on their
+ * own line below the prices (left-aligned). */
 function ListedIssuers({ market }: { market: MarketView }) {
   return (
-    <ul aria-label="Listed issuer tokens" className="flex flex-wrap gap-2 px-3 pb-3">
+    <ul
+      aria-label="Listed issuer tokens"
+      className="flex min-w-0 basis-full flex-wrap items-center justify-start gap-2 @2xl/prices:min-w-64 @2xl/prices:flex-1 @2xl/prices:basis-0 @2xl/prices:justify-end"
+    >
       {legStatuses(market).map((status) => (
         <li
           key={status.collateral}
-          className="flex min-w-0 items-center gap-2 rounded-md bg-secondary px-2 py-1 text-xs"
+          className="flex shrink-0 items-center gap-2 rounded-md bg-secondary px-2 py-1 text-xs"
         >
           <TokenIdentity
             symbol={status.leg.symbol}
@@ -401,7 +406,11 @@ function ListedIssuers({ market }: { market: MarketView }) {
             iconSize="sm"
           />
           {status.leg.issuer && (
-            <span className="truncate text-muted-foreground">{status.leg.issuer}</span>
+            // Beside the prices on medium widths the chip stays compact (the
+            // issuer remains in the token tooltip).
+            <span className="truncate text-muted-foreground @2xl/prices:hidden @5xl/prices:inline">
+              {status.leg.issuer}
+            </span>
           )}
           <span
             className="tabular-nums text-muted-foreground"
