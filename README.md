@@ -17,6 +17,83 @@ confidential-transfer mint config) admitted explicitly per custody pool. This do
 **not** mean every issuer or extension is supported. Read the [compatibility matrix and
 issuer integration gates](docs/TOKEN_COMPATIBILITY.md) before listing any asset.
 
+## How it works
+
+### System design
+
+Web2 (blue) runs the site, API and data. Web3 (green) holds the money and the rules.
+Users always sign with their own wallet; the servers never hold user funds.
+
+```mermaid
+flowchart LR
+  subgraph Users
+    U["Trader<br/>browser + Solana wallet"]
+    A["Operator<br/>Admin UI"]
+  end
+
+  subgraph Web2["Web2 · off-chain"]
+    UI["Website<br/>Next.js on Cloudflare"]
+    API["API server<br/>quotes, orders, sign-in, faucet"]
+    IDX["Indexer<br/>live copy of chain state"]
+    DB[("Postgres<br/>AWS RDS")]
+    PM["Polymarket ingestor<br/>event odds + evidence"]
+    MM["Market maker bot<br/>keeps books full"]
+    JUP["Jupiter<br/>stock spot prices"]
+  end
+
+  subgraph Web3["Web3 · Solana"]
+    PROG["probabl program<br/>markets, order books,<br/>vaults, settlement"]
+    TOK["Tokens<br/>USDC + stock tokens<br/>(xStocks, Ondo, ...)"]
+  end
+
+  U -->|browse, trade| UI
+  UI -->|REST + live stream| API
+  U -->|sign transactions| PROG
+  A -->|create, freeze, resolve| API
+  API -->|build + send transactions| PROG
+  PROG <-->|hold + pay out| TOK
+  PROG -->|every account change| IDX
+  IDX -->|relay| API
+  IDX --> DB
+  API --> DB
+  PM -->|odds, outcomes| DB
+  API -->|prices| JUP
+  MM -->|place orders| PROG
+
+  classDef web2 fill:#e8f0fe,stroke:#4a78c2,color:#111
+  classDef web3 fill:#e6f6ec,stroke:#2e8b57,color:#111
+  class UI,API,IDX,DB,PM,MM,JUP web2
+  class PROG,TOK web3
+```
+
+| Piece | Job in one line |
+| --- | --- |
+| **Program** | The rulebook on Solana. Holds deposits, matches orders, pays winners. |
+| **Website** | What traders see. Reads from the API, sends signed transactions to Solana. |
+| **API** | Prepares orders and transactions, signs users in, serves prices and data. |
+| **Indexer** | Watches the program live (Yellowstone gRPC) so pages load fast. |
+| **Postgres** | Stores history, events and evidence. Never holds money. |
+| **Polymarket ingestor** | Pulls event odds and outcomes used to list and resolve markets. |
+| **Market maker** | A bot that keeps buy and sell orders on every book. |
+| **Admin UI** | Operators list markets, freeze them at the deadline and post the result. |
+
+### User flow
+
+```mermaid
+flowchart TD
+  S([Connect wallet + sign in<br/>one message, no fee]) --> C[Claim devnet assets<br/>banner, once per wallet]
+  C --> D[Deposit USDC or stock tokens<br/>into your trading vault]
+  D --> O[Pick a market, buy or sell YES / NO<br/>e.g. NVDA if Fed cuts rates]
+  O --> K{Trading permission on?}
+  K -->|yes| T[API places it for you<br/>within limits you approved]
+  K -->|no| W[Approve it in your wallet]
+  T & W --> M[Matched on Solana<br/>hold, sell early or cancel]
+  M --> R[Event ends: market freezes,<br/>operator posts the Polymarket result]
+  R --> X([Winners redeem, then withdraw to wallet])
+```
+
+In short: **connect → fund → deposit → trade YES/NO → event resolves → redeem → withdraw.**
+
 ## Local development
 
 Prerequisites: Bun 1.3.14, Rust 1.97.1 (pinned), Anchor CLI 1.1.2, Agave/Solana CLI 3.1.10 and PostgreSQL tools (`initdb`, `pg_ctl`) on PATH.
