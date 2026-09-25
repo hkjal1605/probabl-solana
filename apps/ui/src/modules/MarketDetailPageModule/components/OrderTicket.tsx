@@ -300,7 +300,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                       </Avatar>
                       {market.ticker}
                     </Label>
-                    <div className="flex min-w-0 items-center gap-1 whitespace-nowrap text-xs text-muted-foreground">
+                    <div className="flex min-w-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-muted-foreground">
                       <WalletIcon className="size-3.5" aria-hidden="true" />
                       <InfoTooltip
                         content={
@@ -390,7 +390,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                           <p
                             role="status"
                             aria-label="Token reservation"
-                            className="text-xs leading-4 text-muted-foreground"
+                            className="text-xs leading-4 font-medium text-muted-foreground"
                           >
                             Reserves{" "}
                             <span className="tabular-nums text-foreground">
@@ -463,7 +463,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                         </p>
                       )}
                       {!t.readiness.ready && (
-                        <p role="status" className="text-xs leading-4 text-muted-foreground">
+                        <p role="status" className="text-xs leading-4 font-medium text-muted-foreground">
                           {t.readiness.reason}
                         </p>
                       )}
@@ -511,7 +511,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                       {t.reviewError && (
                         <div
                           role="status"
-                          className="flex flex-col gap-1 text-xs text-muted-foreground"
+                          className="flex flex-col gap-1 text-xs font-medium text-muted-foreground"
                         >
                           <span>{t.reviewError}</span>
                           <Button variant="link" size="sm" disabled={t.busy} onClick={t.prepare}>
@@ -691,7 +691,7 @@ function IssuerSelector({
     >
       <FieldLegend
         variant="label"
-        className="flex w-full items-center justify-between text-xs data-[variant=label]:text-xs text-muted-foreground"
+        className="flex w-full items-center justify-between text-xs data-[variant=label]:text-xs font-medium text-muted-foreground"
       >
         <span>{buying ? "Accept issuer tokens" : "Deliver issuer token"}</span>
         <span className="tabular-nums">
@@ -743,7 +743,7 @@ function IssuerSelector({
               className="h-auto min-w-0 flex-col items-start gap-0.5 px-2 py-1.5"
             >
               <span className="truncate text-xs font-medium">{status.leg.symbol}</span>
-              <span className="truncate text-[11px] tabular-nums text-muted-foreground">
+              <span className="truncate text-[11px] tabular-nums font-medium text-muted-foreground">
                 {status.tradable
                   ? `${formatCompactNumber(
                       Number(
@@ -769,11 +769,11 @@ function LegName({ status }: { status: Ticket["legs"][number] }) {
       <span className="min-w-0 truncate">
         <span className="font-medium text-foreground">{status.leg.symbol}</span>
         {status.leg.issuer && (
-          <span className="ml-1 text-muted-foreground">{status.leg.issuer}</span>
+          <span className="ml-1 font-medium text-muted-foreground">{status.leg.issuer}</span>
         )}
       </span>
       {status.tradable ? (
-        <span className="shrink-0 tabular-nums text-muted-foreground">
+        <span className="shrink-0 tabular-nums font-medium text-muted-foreground">
           ×{formatMultiplier(status.multiplierValue)}
         </span>
       ) : (
@@ -786,7 +786,7 @@ function LegName({ status }: { status: Ticket["legs"][number] }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-3 text-xs font-medium">
-      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium text-muted-foreground">{label}</span>
       <span className="text-right tabular-nums">{value}</span>
     </div>
   );
