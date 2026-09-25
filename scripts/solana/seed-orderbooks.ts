@@ -118,7 +118,9 @@ async function send(label: string, instructions: TransactionInstruction[]) {
       await rpc(() => client.connection.sendRawTransaction(built.transaction.serialize(), { maxRetries: 3 }));
     } catch (error) {
       // Simulation rejected it: nothing landed.
-      if (attempt >= 3) throw new Error(`${label}: ${error instanceof Error ? error.message.slice(0, 200) : error}`);
+      const logs = ((error as { logs?: string[] }).logs ?? []).filter((line) => !line.includes("ComputeBudget"));
+      if (attempt >= 3)
+        throw new Error(`${label}: ${error instanceof Error ? error.message.split("\n")[1] ?? error.message : error} | ${logs.slice(-6).join(" | ")}`);
       await sleep(2_000 * attempt);
       continue;
     }
@@ -340,7 +342,7 @@ await Promise.all(
         await seedMarket(id);
       } catch (error) {
         failures++;
-        log("failed", { market: id, error: error instanceof Error ? error.message.slice(0, 300) : String(error) });
+        log("failed", { market: id, error: error instanceof Error ? error.message.slice(0, 1500) : String(error) });
       }
   }),
 );
