@@ -96,7 +96,7 @@ export function DevnetFaucetBanner() {
           result.unavailable.length
             ? ` ${result.unavailable.join(", ")} ran out and were skipped.`
             : ""
-        }`,
+        } Use Deposit to start trading.`,
       });
       void refreshStores(["positions"]);
     } catch (error) {
