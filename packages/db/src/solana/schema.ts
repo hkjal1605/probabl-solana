@@ -83,6 +83,12 @@ export async function initializeStorage(db: Pool) {
     await tx.query(
       "CREATE INDEX IF NOT EXISTS solana_evidence_actions_packet ON solana_evidence_actions(domain,packet_hash,created_at)",
     );
+    // Devnet asset faucet: one claim per wallet; `delivered` lists the asset
+    // symbols already transferred so a failed claim resumes without doubling.
+    await tx.query(`CREATE TABLE IF NOT EXISTS solana_faucet_claims (
+      domain text NOT NULL, owner text NOT NULL, delivered jsonb NOT NULL DEFAULT '[]'::jsonb,
+      signatures jsonb NOT NULL DEFAULT '[]'::jsonb, created_at timestamptz NOT NULL DEFAULT now(),
+      completed_at timestamptz, PRIMARY KEY(domain,owner))`);
     await tx.query(`CREATE TABLE IF NOT EXISTS solana_attachments (
       domain text NOT NULL, hash text NOT NULL, content bytea NOT NULL, PRIMARY KEY(domain,hash))`);
     await tx.query("COMMIT");

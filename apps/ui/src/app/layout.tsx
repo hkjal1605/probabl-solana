@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
 import "@/styles/global.css";
+import { DevnetFaucetBanner } from "@/components/faucet/DevnetFaucetBanner";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 import { AppProviders } from "@/components/providers/AppProviders";
@@ -50,6 +51,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       <body className="flex min-h-dvh flex-col text-sm">
         <AppProviders>
           <SiteHeader />
+          <DevnetFaucetBanner />
           {protocolConfig.chainName === "Solana Mainnet" && (
             <div role="note" className="bg-warning-soft px-5 py-2 text-center text-sm text-warning">
               Internal mainnet testing · Real assets at risk · Not approved for public production

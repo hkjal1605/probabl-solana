@@ -14,6 +14,7 @@
     "@types/pg": "8.23.1",
     "@conditional-stocks/solana-client": "workspace:*",
     "@conditional-stocks/solana-indexer": "workspace:*",
+    "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "1.98.4",
     "pg": "8.23.0",
     "bs58": "6.0.0",

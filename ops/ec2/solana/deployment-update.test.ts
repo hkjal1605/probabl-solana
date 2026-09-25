@@ -9,6 +9,7 @@ test("a deployment update sets the reviewed identity and requested settings only
   const next = nextEnvironment("api", before, {
     INDEXER_RELAY_URL: "http://127.0.0.1:42070",
     SOLANA_ISSUER_REPLICA_MINTS: "NVDAx=So11111111111111111111111111111111111111112",
+    FAUCET_KEYPAIR: "/home/ubuntu/probabl-solana/.local/ec2/faucet-keypair.json",
   });
   expect(parseEnv(next)).toEqual({
     ...parseEnv(before),
@@ -16,6 +17,7 @@ test("a deployment update sets the reviewed identity and requested settings only
     SOLANA_CONFIG: "EfXom6mQxuw5gsHG4AujCgo1dQ3qWg5pN85RvY1ysn23",
     INDEXER_RELAY_URL: "http://127.0.0.1:42070",
     SOLANA_ISSUER_REPLICA_MINTS: "NVDAx=So11111111111111111111111111111111111111112",
+    FAUCET_KEYPAIR: "/home/ubuntu/probabl-solana/.local/ec2/faucet-keypair.json",
   });
   expect(next).toContain("# operator comment");
   // The market maker uses its own identity names.

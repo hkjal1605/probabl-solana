@@ -139,6 +139,45 @@ export function solanaQueries(db: Pick<Pool | PoolClient, "query">) {
         [domain, owner, JSON.stringify(image), image.observedAt],
       );
     },
+    async faucetClaim(domain: string, owner: string) {
+      const row = (
+        await db.query<{ delivered: string[]; signatures: string[]; completed_at: Date | null }>(
+          "SELECT delivered,signatures,completed_at FROM solana_faucet_claims WHERE domain=$1 AND owner=$2",
+          [domain, owner],
+        )
+      ).rows[0];
+      return row
+        ? { delivered: row.delivered, signatures: row.signatures, completedAt: row.completed_at }
+        : undefined;
+    },
+    /** Records delivered assets (appending) and, once everything arrived, completion. */
+    async recordFaucetDelivery(
+      domain: string,
+      owner: string,
+      delivered: string[],
+      signature: string | null,
+      complete: boolean,
+    ) {
+      await db.query(
+        `INSERT INTO solana_faucet_claims (domain,owner,delivered,signatures,completed_at)
+        VALUES($1,$2,$3::jsonb,$4::jsonb,CASE WHEN $5 THEN now() END)
+        ON CONFLICT(domain,owner) DO UPDATE SET
+          delivered=solana_faucet_claims.delivered || EXCLUDED.delivered,
+          signatures=solana_faucet_claims.signatures || EXCLUDED.signatures,
+          completed_at=COALESCE(solana_faucet_claims.completed_at, EXCLUDED.completed_at)`,
+        [domain, owner, JSON.stringify(delivered), JSON.stringify(signature ? [signature] : []), complete],
+      );
+    },
+    async faucetClaimsSince(domain: string, seconds: number) {
+      return Number(
+        (
+          await db.query<{ count: string }>(
+            "SELECT count(*)::text AS count FROM solana_faucet_claims WHERE domain=$1 AND created_at>now()-make_interval(secs=>$2)",
+            [domain, seconds],
+          )
+        ).rows[0]!.count,
+      );
+    },
     async delegatedSubmission(domain: string, orderHash: string) {
       return (
         await db.query<{

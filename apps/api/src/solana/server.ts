@@ -1,9 +1,10 @@
 import { createSolanaDatabase } from "@conditional-stocks/db/solana";
 import { requestLogging } from "@conditional-stocks/shared/http";
-import { configureDevnetIssuerReplicas } from "@conditional-stocks/shared/spot-prices";
+import { configureDevnetIssuerReplicas, SOLANA_DEVNET_GENESIS } from "@conditional-stocks/shared/spot-prices";
 import { parseReplicaMints } from "@conditional-stocks/shared/token-catalog";
 import { SolanaClient, underlyingAsset } from "@conditional-stocks/solana-client";
 import { LiveIndex, relayClientFactory, type GeyserClient } from "@conditional-stocks/solana-indexer/live";
+import { Keypair } from "@solana/web3.js";
 import YellowstoneClient from "@triton-one/yellowstone-grpc";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -14,6 +15,8 @@ import { JupiterSpotPrices, jupiterEnvironment } from "../integrations/jupiter/p
 import { mountSolanaAdmin } from "./admin/routes.ts";
 import { mountAuthentication } from "./auth/routes.ts";
 import { mountCustody } from "./custody/routes.ts";
+import { Faucet, faucetAssets } from "./faucet/faucet.ts";
+import { mountFaucet } from "./faucet/routes.ts";
 import { mountTradingReadiness } from "./health/readiness-routes.ts";
 import { mountHealth } from "./health/routes.ts";
 import { mountMarketSpotPrices, mountSpotPrices } from "./market-data/spot-routes.ts";
@@ -161,6 +164,20 @@ const prepare = createOrderPlan(client, readIndex);
 mountTrading(app, { client, db, domain, authenticate, readIndex, prepare, delegateSigner });
 mountCustody(app, client, authenticate, readIndex);
 const closeAdmin = await mountSolanaAdmin(app, db, client, domain, authenticate);
+// Devnet only: a dedicated faucet wallet (FAUCET_KEYPAIR, a keypair file) funds testers.
+const faucetKeypair = process.env.FAUCET_KEYPAIR?.trim();
+const faucet =
+  faucetKeypair && client.deployment.genesisHash === SOLANA_DEVNET_GENESIS
+    ? new Faucet(
+        client,
+        Keypair.fromSecretKey(Uint8Array.from((await Bun.file(faucetKeypair).json()) as number[])),
+        db,
+        domain,
+        faucetAssets(replicaMints),
+      )
+    : null;
+mountFaucet(app, faucet, authenticate);
+if (faucet) logger.info("faucet.enabled", { faucet: faucet.address });
 
 const server = Bun.serve({
   idleTimeout: 60,

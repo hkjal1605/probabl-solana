@@ -25,7 +25,12 @@ const config = "EfXom6mQxuw5gsHG4AujCgo1dQ3qWg5pN85RvY1ysn23";
 export const SERVICES = {
   api: {
     identity: ["SOLANA_GENESIS_HASH", "SOLANA_PROGRAM_ID", "SOLANA_CONFIG"],
-    settings: ["SOLANA_ADDRESS_LOOKUP_TABLES", "SOLANA_ISSUER_REPLICA_MINTS", "INDEXER_RELAY_URL"],
+    settings: [
+      "SOLANA_ADDRESS_LOOKUP_TABLES",
+      "SOLANA_ISSUER_REPLICA_MINTS",
+      "INDEXER_RELAY_URL",
+      "FAUCET_KEYPAIR",
+    ],
   },
   indexer: {
     identity: ["SOLANA_GENESIS_HASH", "SOLANA_PROGRAM_ID", "SOLANA_CONFIG"],

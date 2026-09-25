@@ -62,6 +62,7 @@
         "@conditional-stocks/shared": "workspace:*",
         "@conditional-stocks/solana-client": "workspace:*",
         "@conditional-stocks/solana-indexer": "workspace:*",
+        "@solana/spl-token": "0.4.14",
         "@solana/web3.js": "1.98.4",
         "@triton-one/yellowstone-grpc": "5.0.9",
         "@types/pg": "8.23.1",

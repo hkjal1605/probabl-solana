@@ -1,5 +1,5 @@
-import { apiUrl } from "./constants";
 import { assertRequestSession, SESSION_EXPIRED_EVENT } from "../lib/wallet/session";
+import { apiUrl } from "./constants";
 import { retryAfterMs } from "./read-policy";
 
 export class ApiError extends Error {
@@ -17,7 +17,7 @@ export class ApiError extends Error {
 /** Direct, origin-bound transport. Never retry mutations or log signed payloads. */
 export async function requestJson<T>(
   path: string,
-  options: { signal?: AbortSignal; token?: string; body?: unknown } = {},
+  options: { signal?: AbortSignal; token?: string; body?: unknown; timeoutMs?: number } = {},
 ): Promise<T> {
   if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\"))
     throw new Error("Invalid API path");
@@ -33,7 +33,7 @@ export async function requestJson<T>(
       );
     }
   }
-  const timeout = AbortSignal.timeout(10_000);
+  const timeout = AbortSignal.timeout(options.timeoutMs ?? 10_000);
   const response = await fetch(apiUrl(path), {
     credentials: "omit",
     method: options.body === undefined ? "GET" : "POST",
