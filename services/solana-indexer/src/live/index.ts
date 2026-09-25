@@ -303,7 +303,13 @@ export class LiveIndex {
         else if (view.kindOf(address)) programChanges.push([address, undefined]); // closed
       }
       if (!programChanges.length && !trackedChanged && !transactions.length) {
-        this.snapshots[commitment] = { ...previous, slot: Math.max(previous.slot, result.slot) };
+        // No projection changed, but the index is current at this slot now:
+        // readers judge freshness by observedAt, not by the last account change.
+        this.snapshots[commitment] = {
+          ...previous,
+          slot: Math.max(previous.slot, result.slot),
+          observedAt: Date.now(),
+        };
         return;
       }
       const applied = programChanges.length

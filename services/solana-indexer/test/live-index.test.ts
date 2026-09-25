@@ -155,6 +155,13 @@ describe("live chain index", () => {
     // Quiet slots advance the view without notifying.
     expect(h.live.confirmed().slot).toBe(103);
     expect(h.live.health().confirmedSlot).toBe(103);
+    // ...and refresh its observation time: wallet and book readers judge
+    // freshness by observedAt, which must not freeze at the last account change.
+    const observed = h.live.confirmed().observedAt;
+    await Bun.sleep(5);
+    h.slot(104, CONFIRMED);
+    expect(h.live.confirmed().slot).toBe(104);
+    expect(h.live.confirmed().observedAt).toBeGreaterThan(observed);
     h.live.stop();
   });
 
