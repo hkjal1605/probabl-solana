@@ -422,9 +422,7 @@ function ListedIssuers({ market }: { market: MarketView }) {
           >
             ×{status.multiplierValue.toFixed(4)}
           </span>
-          {status.tradable ? (
-            <Badge variant="positive">Tradable</Badge>
-          ) : (
+          {!status.tradable && (
             <Badge
               variant={status.halt === "delisted" ? "secondary" : "warning"}
               title={status.reason ?? undefined}
