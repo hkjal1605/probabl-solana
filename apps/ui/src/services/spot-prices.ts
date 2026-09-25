@@ -8,6 +8,7 @@ import {
   type SpotPricesResponse,
   spotMapping,
 } from "@conditional-stocks/shared/spot-prices";
+import { multiplierValue } from "@conditional-stocks/solana-client";
 import type { MarketLegView, MarketView } from "../types/api";
 
 export function spotPricesUrl(mints: string[], base = SOLANA_API_ORIGIN): string {
@@ -142,6 +143,22 @@ export async function fetchSpotPrices(
   return parseSpotPricesResponse(await response.json(), genesisHash, mints);
 }
 
+/** A leg's token price expressed per share of the underlying asset. */
+function perShare(leg: MarketLegView): SpotPrice | undefined {
+  const price = leg.spotReference;
+  if (!price || price.priceUsd === null) return price;
+  let multiplier = leg.live?.multiplierValue;
+  if (multiplier === undefined)
+    try {
+      multiplier = multiplierValue(BigInt(leg.listingMultiplier));
+    } catch {
+      multiplier = undefined;
+    }
+  return multiplier && Number.isFinite(multiplier) && multiplier > 0
+    ? { ...price, priceUsd: price.priceUsd / multiplier }
+    : price;
+}
+
 export function withMarketSpotPrices(
   markets: MarketView[],
   response: SpotPricesResponse | undefined,
@@ -161,12 +178,13 @@ export function withMarketSpotPrices(
       const { spotReference: _leg, ...rest } = leg;
       return spot ? { ...rest, spotReference: spot } : rest;
     });
-    // The asset reference is the first leg with an available price (legs of one
-    // asset track one share price), else the first leg's status.
-    const spotReference = prices
-      ? (bases.find((leg) => leg.spotReference?.status === "available")?.spotReference ??
-        bases.find((leg) => leg.spotReference)?.spotReference)
-      : current(market.spotReference);
+    // The asset reference is the first listed leg with a price (the book's and
+    // the market maker's reference leg), per share: the book trades shares, and a
+    // leg token is `multiplier` shares (e.g. 5 for a split-adjusted pre-IPO token).
+    const reference = [...bases]
+      .sort((a, b) => a.collateral - b.collateral)
+      .find((leg) => leg.spotReference && leg.spotReference.priceUsd !== null);
+    const spotReference = prices ? reference && perShare(reference) : current(market.spotReference);
     const quoteSpotReference = current(
       prices ? prices.get(market.quoteToken) : market.quoteSpotReference,
     );

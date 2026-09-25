@@ -184,8 +184,12 @@ describe("UI and trading separation", () => {
       response([price(), price(D.USDC, { priceUsd: 0.998 })]),
       NOW,
     );
-    expect(updated!.ordinaryReference).toBe(123.45);
+    // The asset reference is per share: the leg token's price over its live multiplier.
+    expect(updated!.ordinaryReference).toBe(123.45 / 1.0017);
+    expect(updated!.bases[0]!.spotReference!.priceUsd).toBe(123.45);
     expect(updated!.quoteSpotReference!.priceUsd).toBe(0.998);
+    const split = { ...market, bases: [{ ...market.bases[0]!, live: { ...market.bases[0]!.live!, multiplierValue: 5 } }] };
+    expect(withMarketSpotPrices([split], response([price(), price(D.USDC)]), NOW)[0]!.ordinaryReference).toBe(123.45 / 5);
     expect(updated!.yes).toBe(market.yes);
     expect(updated!.no).toBe(market.no);
     expect(previewOrder("1", "123.45", updated!)).toEqual(before);
