@@ -101,7 +101,7 @@ export function TradingPermissionCard() {
         <CardTitle>Trading permission</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {!loaded && <p className="text-sm text-muted-foreground">Checking permission…</p>}
+        {!loaded && <p className="text-sm font-medium text-muted-foreground">Checking permission…</p>}
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -109,7 +109,7 @@ export function TradingPermissionCard() {
         )}
         {loaded && !error && (
           <>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm font-medium text-muted-foreground">
               {permission?.active
                 ? "Orders can use deposited funds without another wallet approval."
                 : unavailable
@@ -119,7 +119,7 @@ export function TradingPermissionCard() {
                     : "Approve a dedicated trading key once to place orders from your deposited balances."}
             </p>
             {permission?.delegate && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs font-medium text-muted-foreground">
                 Trading key:{" "}
                 <span className="font-mono text-foreground">
                   {shortAddress(permission.delegate)}
@@ -130,21 +130,21 @@ export function TradingPermissionCard() {
               <>
                 <dl className="grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <dt className="text-muted-foreground">Remaining lifetime limit</dt>
+                    <dt className="font-medium text-muted-foreground">Remaining lifetime limit</dt>
                     <dd className="tabular-nums">
                       {formatTokenAmount(BigInt(grant.remainingQuote), permission.quoteDecimals)}{" "}
                       USDC
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Per order</dt>
+                    <dt className="font-medium text-muted-foreground">Per order</dt>
                     <dd className="tabular-nums">
                       {formatTokenAmount(BigInt(grant.maxOrderQuote), permission.quoteDecimals)}{" "}
                       USDC
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-muted-foreground">Expires</dt>
+                    <dt className="font-medium text-muted-foreground">Expires</dt>
                     <dd>{new Date(Number(grant.expiresAt) * 1000).toLocaleDateString()}</dd>
                   </div>
                 </dl>
@@ -161,7 +161,7 @@ export function TradingPermissionCard() {
               </Button>
             )}
             {exhausted && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs font-medium text-muted-foreground">
                 This on-chain approval cannot be renewed for the same key. A new protocol trading
                 key is required. Open orders must be cancelled separately.
               </p>

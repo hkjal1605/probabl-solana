@@ -57,18 +57,19 @@ export function PortfolioVault({
   });
   const chosen = selected && balances.find((row) => row.token === selected.asset.token);
   return (
-    <Card className="rounded-xl bg-card">
+    <Card className="flex h-[28rem] flex-col rounded-xl bg-card">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Trading vault</CardTitle>
-        <span className="text-sm text-muted-foreground">
+        <span className="text-sm font-medium text-muted-foreground">
           Deposited funds are available across markets
         </span>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2">
+      {/* Fixed-height vault: the asset list scrolls inside the card. */}
+      <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain">
         {!fresh && balances.length === 0 ? (
           <Skeleton className="h-20 w-full" aria-label="Loading vault balances" />
         ) : assets.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm font-medium text-muted-foreground">
             Assets appear here when a market is available.
           </p>
         ) : (
@@ -80,15 +81,15 @@ export function PortfolioVault({
                 <div className="min-w-20 font-medium">{asset.symbol}</div>
                 <div className="grid flex-1 grid-cols-3 gap-3 tabular-nums">
                   <div>
-                    <p className="text-xs text-muted-foreground">Available</p>
+                    <p className="text-xs font-medium text-muted-foreground">Available</p>
                     <p>{b ? formatTokenAmount(BigInt(b.vaultAvailable), asset.decimals) : "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">In orders</p>
+                    <p className="text-xs font-medium text-muted-foreground">In orders</p>
                     <p>{b ? formatTokenAmount(BigInt(b.reserved), asset.decimals) : "—"}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Wallet</p>
+                    <p className="text-xs font-medium text-muted-foreground">Wallet</p>
                     <p>
                       {b
                         ? formatTokenAmount(

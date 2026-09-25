@@ -376,7 +376,7 @@ export function PositionActions({
                 {symbol} cannot be split: {status.reason}.
               </p>
             )}
-            <p className="text-sm font-medium leading-6 text-muted-foreground">
+            <p className="text-sm font-semibold leading-6 text-muted-foreground">
               {kind === "Deposit"
                 ? `Move external ${symbol}-${branch} claims into this market vault before trading or redeeming them. Available in wallet: ${formatTokenAmount(available, decimals)} ${symbol}.`
                 : kind === "Split"

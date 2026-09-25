@@ -82,10 +82,10 @@ export function PortfolioTradeHistory({
                     {side} <span className="tabular-nums">{formatNumber(quantity, 4)}</span>{" "}
                     {leg?.symbol ?? market.ticker}-{trade.branch === 0 ? "YES" : "NO"}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                  <p className="mt-1 text-xs font-medium text-muted-foreground tabular-nums">
                     @ {formatNumber(price)} · {formatNumber(quote, 2)} USDC
                   </p>
-                  <p className="mt-2 text-xs text-muted-foreground">
+                  <p className="mt-2 text-xs font-medium text-muted-foreground">
                     {formatTime(new Date(Number(trade.blockTimestamp) * 1000).toISOString())}
                     {order.status === "open" ? " · Partial fill" : ""}
                   </p>

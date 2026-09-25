@@ -79,7 +79,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
             </span>
             <div>
               <h1 className="text-xl font-medium">Your portfolio</h1>
-              <p className="mt-2 text-sm text-muted-foreground">
+              <p className="mt-2 text-sm font-medium text-muted-foreground">
                 Connect your wallet to view balances, event positions, claims, and fills.
               </p>
             </div>
@@ -96,7 +96,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
               {ordersQuery.isPending || positionsQuery.isPending ? (
                 <Skeleton className="mt-2 h-5 w-56" aria-label="Loading portfolio summary" />
               ) : (
-                <p className="mt-2 text-sm text-muted-foreground">
+                <p className="mt-2 text-sm font-medium text-muted-foreground">
                   {claimEvents} {claimEvents === 1 ? "event" : "events"} with claims ·{" "}
                   {activeOrders.length} open {activeOrders.length === 1 ? "order" : "orders"}
                 </p>
@@ -139,7 +139,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
           <Card variant="panel" className="rounded-xl bg-card">
             <CardContent className="grid gap-7 px-0 py-7 lg:min-h-[150px] lg:grid-cols-[220px_minmax(0,1fr)] lg:items-center">
               <div>
-                <p className="eyebrow uppercase tracking-[0.12em] text-muted-foreground">
+                <p className="eyebrow uppercase tracking-[0.12em] font-semibold text-muted-foreground">
                   Total balance
                 </p>
                 {assetQuery.isPending && balances.length === 0 ? (
@@ -149,7 +149,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                     {total === null ? "—" : `$${formatNumber(total, 2)}`}
                   </p>
                 )}
-                <p className="mt-2 text-xs text-muted-foreground">
+                <p className="mt-2 text-xs font-medium text-muted-foreground">
                   Available in vault · estimated value
                 </p>
               </div>
@@ -172,14 +172,14 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                   ))}
                 </div>
               ) : balances.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Deposit tokens to start trading.</p>
+                <p className="text-sm font-medium text-muted-foreground">Deposit tokens to start trading.</p>
               ) : (
                 <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-4 lg:grid-cols-7">
                   {balances
                     .filter((asset) => asset.available > 0n)
                     .map((asset) => (
                       <div key={asset.token} className="min-w-0">
-                        <dt className="text-sm font-medium text-muted-foreground">
+                        <dt className="text-sm font-semibold text-muted-foreground">
                           {asset.symbol}
                         </dt>
                         <dd className="mt-2 truncate text-lg font-medium tabular-nums">
