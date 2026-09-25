@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { WalletLoginProvider } from "@/components/wallet/WalletLoginProvider";
 import { IndexStreamProvider } from "./IndexStreamProvider";
 import { ThemeProvider } from "./ThemeProvider";
 import { UiStateProvider } from "./UiStateProvider";
@@ -13,9 +14,11 @@ export function AppProviders({ children }: { children: ReactNode }) {
     <ThemeProvider>
       <WalletProvider>
         <TooltipProvider delay={250}>
-          <IndexStreamProvider>
-            <UiStateProvider>{children}</UiStateProvider>
-          </IndexStreamProvider>
+          <WalletLoginProvider>
+            <IndexStreamProvider>
+              <UiStateProvider>{children}</UiStateProvider>
+            </IndexStreamProvider>
+          </WalletLoginProvider>
           <Toaster />
         </TooltipProvider>
       </WalletProvider>

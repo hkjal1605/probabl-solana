@@ -41,14 +41,12 @@ import { toast } from "@/components/ui/toast";
 import { protocolConfig } from "@/config/protocol";
 import { shortAddress } from "@/lib/format/display";
 import { cn } from "@/lib/utils";
-import { availableWallets } from "@/lib/wallet/injected";
-import type { WalletKind } from "@/lib/wallet/session";
 import { AccountAvatar } from "./AccountAvatar";
+import { useWalletLogin } from "./WalletLoginProvider";
 
 export function WalletButton({ compact = false }: { compact?: boolean }) {
   const wallet = useWallet();
-  const [choosingWallet, setChoosingWallet] = useState(false);
-  const [walletChoices, setWalletChoices] = useState<WalletKind[]>([]);
+  const login = useWalletLogin();
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [walletDetailsOpen, setWalletDetailsOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -72,24 +70,6 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
     toast.add({ type: "info", title: `${label} is coming soon` });
   };
   const connecting = wallet.restoring || wallet.status === "connecting";
-  const connect = (kind?: WalletKind) => {
-    setChoosingWallet(false);
-    void wallet.connect(kind).catch((cause) =>
-      toast.add({
-        type: "error",
-        title: cause instanceof Error ? cause.message : "Wallet connection failed",
-      }),
-    );
-  };
-  const login = () => {
-    const choices = availableWallets(window).map(({ kind }) => kind);
-    if (choices.length <= 1) {
-      connect(choices[0]);
-      return;
-    }
-    setWalletChoices(choices);
-    setChoosingWallet(true);
-  };
   if (wallet.account) {
     const wrongNetwork = wallet.chainId !== protocolConfig.chainId;
     return (
@@ -316,46 +296,16 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
     );
   }
   return (
-    <>
-      <Button
-        variant="default"
-        size={compact ? "icon" : "default"}
-        className={compact ? undefined : "px-2 sm:px-4"}
-        disabled={connecting}
-        onClick={login}
-        aria-label="Login"
-      >
-        {connecting ? (
-          <Spinner data-icon="inline-start" />
-        ) : (
-          <WalletCards data-icon="inline-start" />
-        )}
-        {!compact && <span className="hidden sm:inline">Login</span>}
-      </Button>
-      <Dialog open={choosingWallet} onOpenChange={setChoosingWallet}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Login</DialogTitle>
-            <DialogDescription>Choose a Solana wallet to connect.</DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-2">
-            {walletChoices.map((kind) => (
-              <Button
-                key={kind}
-                variant="outline"
-                className="justify-start"
-                onClick={() => connect(kind)}
-              >
-                {kind === "phantom"
-                  ? "Phantom"
-                  : kind === "solflare"
-                    ? "Solflare"
-                    : "Other Solana wallet"}
-              </Button>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
+    <Button
+      variant="default"
+      size={compact ? "icon" : "default"}
+      className={compact ? undefined : "px-2 sm:px-4"}
+      disabled={connecting}
+      onClick={login}
+      aria-label="Login"
+    >
+      {connecting ? <Spinner data-icon="inline-start" /> : <WalletCards data-icon="inline-start" />}
+      {!compact && <span className="hidden sm:inline">Login</span>}
+    </Button>
   );
 }

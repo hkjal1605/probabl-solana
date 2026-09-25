@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataError, EmptyState, Page } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useWalletLogin } from "@/components/wallet/WalletLoginProvider";
 import { useMarkets, useOrders, usePositions, useTrades } from "@/hooks/useProtocolData";
 import { useWalletAssets } from "@/hooks/useWalletAssets";
 import { formatCompactNumber, formatNumber, tokenAmount } from "@/lib/format/display";
@@ -24,6 +25,7 @@ const hasClaims = positionHasClaims;
 
 export function PortfolioClient({ markets: initial }: { markets: MarketView[] }) {
   const wallet = useWallet();
+  const login = useWalletLogin();
   const marketQuery = useMarkets(initial);
   const { markets } = marketQuery;
   const ordersQuery = useOrders();
@@ -83,7 +85,7 @@ export function PortfolioClient({ markets: initial }: { markets: MarketView[] })
                 Connect your wallet to view balances, event positions, claims, and fills.
               </p>
             </div>
-            <Button onClick={() => wallet.connect().catch(() => undefined)}>Connect wallet</Button>
+            <Button onClick={login}>Connect wallet</Button>
           </div>
         </div>
       ) : (

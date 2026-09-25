@@ -49,6 +49,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useWalletLogin } from "@/components/wallet/WalletLoginProvider";
 import { useOrderTicket } from "@/hooks/useOrderTicket";
 import { usePositions } from "@/hooks/useProtocolData";
 import { useWalletAssets } from "@/hooks/useWalletAssets";
@@ -60,6 +61,7 @@ import type { MarketView } from "@/types/api";
 export function OrderTicket({ market }: { market: MarketView }) {
   const router = useRouter();
   const t = useOrderTicket({ market });
+  const login = useWalletLogin();
   const quantityLabel = formatShareAmount(BigInt(t.preview.quantityRaw), market);
   const prefill = useUiStore((s) => s.prefill);
   const setPrefill = useUiStore((s) => s.setPrefill);
@@ -386,22 +388,6 @@ export function OrderTicket({ market }: { market: MarketView }) {
                           {t.preview.valid ? formatUsd(t.preview.cost) : "—"}
                           <span>Order value</span>
                         </div>
-                        {t.side === "sell" && t.reservation && (
-                          <p
-                            role="status"
-                            aria-label="Token reservation"
-                            className="text-xs leading-4 font-medium text-muted-foreground"
-                          >
-                            Reserves{" "}
-                            <span className="tabular-nums text-foreground">
-                              {t.reservation.formatted} {t.reservation.symbol}
-                            </span>{" "}
-                            ({t.reservation.raw.toString()} raw) at ×
-                            {formatMultiplier(t.reservation.multiplierValue)}
-                            {t.reservation.liveKnown ? " live" : " listing"} multiplier, rounded up.
-                            Unused units return when the order completes.
-                          </p>
-                        )}
                       </Field>
                       <Field className="trade-entry-field">
                         <div className="trade-entry-heading">
@@ -488,7 +474,7 @@ export function OrderTicket({ market }: { market: MarketView }) {
                         }
                         onClick={() =>
                           !t.wallet.account
-                            ? t.wallet.connect().catch(() => undefined)
+                            ? login()
                             : !t.permission?.active
                               ? t.enableTrading()
                               : prepared && !prepared.funding.balanceSufficient
