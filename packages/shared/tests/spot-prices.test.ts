@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import {
+  SPOT_ISSUER_MAX_AGE_SECONDS,
+  expireSpotPrice,
   issuerToken,
   issuerTokensForAsset,
   MAINNET_ISSUER_TOKENS,
@@ -132,4 +134,31 @@ test("devnet issuer replicas alias exactly the mainnet token they replicate", ()
     "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo",
   );
   expect(devnetIssuerAliases({}).size).toBe(0);
+});
+
+test("thinly traded issuer tokens keep a day-old price fresh; crypto needs two minutes", () => {
+  const now = 1_790_000_000;
+  const price = (issuer: string | null, age: number) =>
+    ({
+      mint: "So11111111111111111111111111111111111111112",
+      sourceMint: "So11111111111111111111111111111111111111112",
+      referenceSymbol: "X",
+      testAsset: false,
+      valuationCompatible: true,
+      asset: null,
+      issuer,
+      scaledUiAmount: false,
+      status: "available",
+      priceUsd: 1,
+      sourceDecimals: 9,
+      blockId: 1,
+      priceTimestamp: now - age,
+      fetchedAt: now,
+    }) as SpotPrice;
+  const at = (p: SpotPrice) => expireSpotPrice(p, now * 1000).status;
+  expect(at(price(null, 119))).toBe("available");
+  expect(at(price(null, 121))).toBe("stale");
+  expect(at(price("PreStocks", 23 * 60))).toBe("available");
+  expect(at(price("Ondo Global Markets", 23 * 3600))).toBe("available");
+  expect(at(price("Tessera", SPOT_ISSUER_MAX_AGE_SECONDS + 1))).toBe("stale");
 });

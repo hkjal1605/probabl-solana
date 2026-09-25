@@ -7,6 +7,12 @@ export const SOLANA_DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZ
 export const SOLANA_MAINNET_GENESIS = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 export const SPOT_MAX_AGE_SECONDS = 120;
 export const SPOT_MAX_CACHE_AGE_SECONDS = 60;
+/** Issuer stock and pre-IPO tokens trade thinly (and barely outside market
+ * hours), so their last Jupiter price stays a valid display reference for a
+ * day; continuously traded crypto references must be two minutes fresh. */
+export const SPOT_ISSUER_MAX_AGE_SECONDS = 24 * 60 * 60;
+export const spotMaxAgeSeconds = (price: { issuer?: string | null }) =>
+  price.issuer ? SPOT_ISSUER_MAX_AGE_SECONDS : SPOT_MAX_AGE_SECONDS;
 export const SPOT_POLL_MS = 15_000;
 export const SPOT_BATCH_SIZE = 50;
 
@@ -208,7 +214,7 @@ export function expireSpotPrice(price: SpotPrice, nowMs = Date.now()): SpotPrice
     price.fetchedAt > now + 5 ||
     now - price.fetchedAt > SPOT_MAX_CACHE_AGE_SECONDS ||
     (price.priceTimestamp !== null &&
-      (price.priceTimestamp > now + 5 || now - price.priceTimestamp > SPOT_MAX_AGE_SECONDS))
+      (price.priceTimestamp > now + 5 || now - price.priceTimestamp > spotMaxAgeSeconds(price)))
   )
     return { ...price, status: "stale" };
   return price.priceTimestamp === null ? { ...price, status: "age-unverified" } : price;
