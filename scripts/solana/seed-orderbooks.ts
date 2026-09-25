@@ -102,7 +102,9 @@ async function rpc<T>(read: () => Promise<T>): Promise<T> {
 }
 async function landed(signature: string, lastValidBlockHeight: number) {
   while (true) {
-    const status = (await rpc(() => client.connection.getSignatureStatuses([signature]))).value[0];
+    const status = (
+      await rpc(() => client.connection.getSignatureStatuses([signature], { searchTransactionHistory: true }))
+    ).value[0];
     if (status?.err) throw new Error(`Transaction failed on chain: ${JSON.stringify(status.err)}`);
     if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") return true;
     if ((await rpc(() => client.connection.getBlockHeight("confirmed"))) > lastValidBlockHeight) return false;
@@ -110,6 +112,7 @@ async function landed(signature: string, lastValidBlockHeight: number) {
   }
 }
 async function send(label: string, instructions: TransactionInstruction[]) {
+  let previous: string | undefined;
   for (let attempt = 1; ; attempt++) {
     const built = await rpc(() => client.prepareTransaction(owner, envelope(instructions, client.program)));
     built.transaction.sign([wallet]);
@@ -117,14 +120,18 @@ async function send(label: string, instructions: TransactionInstruction[]) {
     try {
       await rpc(() => client.connection.sendRawTransaction(built.transaction.serialize(), { maxRetries: 3 }));
     } catch (error) {
-      // Simulation rejected it: nothing landed.
       const logs = ((error as { logs?: string[] }).logs ?? []).filter((line) => !line.includes("ComputeBudget"));
+      // A resend of the identical instructions finding its accounts already
+      // created means an earlier attempt landed after all.
+      if (previous && logs.some((line) => line.includes("already in use"))) return previous;
+      // Simulation rejected it: nothing landed.
       if (attempt >= 3)
         throw new Error(`${label}: ${error instanceof Error ? error.message.split("\n")[1] ?? error.message : error} | ${logs.slice(-6).join(" | ")}`);
       await sleep(2_000 * attempt);
       continue;
     }
     // A landed transaction is never resent; only an expired blockhash retries.
+    previous = signature;
     if (await landed(signature, built.lastValidBlockHeight)) {
       await sleep(250);
       return signature;
