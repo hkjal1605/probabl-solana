@@ -266,3 +266,23 @@ The destructive schema reset is performed separately with the guarded
 `packages/db/scripts/reset-devnet.ts --execute` command and an administrator
 connection. It refuses every host, database, user, and TLS mode except the
 reviewed Devnet RDS target.
+
+### Devnet asset faucet
+
+The site's "Claim devnet assets" banner calls `POST /v1/faucet/claim`, which
+sends each signed-in wallet a fixed amount of SOL, USDC, BTC, ETH and every
+issuer replica once (`apps/api/src/solana/faucet/faucet.ts`). It signs with a
+dedicated faucet wallet, never the deployer: `FAUCET_KEYPAIR` in the API env
+points at `.local/ec2/faucet-keypair.json` (0600, server only).
+
+```text
+faucet: CWRiTTrD4jVhn5aFg3UcVMz4Wxfi5LDZeeGG5mtu21hG
+```
+
+A claim costs the faucet about 0.045 SOL (gift plus token-account rent). Top it
+up from the administrator; re-running only sends what is missing:
+
+```bash
+FAUCET_ADDRESS=CWRiTTrD4jVhn5aFg3UcVMz4Wxfi5LDZeeGG5mtu21hG FAUCET_SOL=5 \
+  bun --env-file=.env.devnet scripts/solana/fund-faucet.ts --execute
+```
