@@ -91,9 +91,12 @@ export function DevnetFaucetBanner() {
       toast.add({
         type: "success",
         title: "Devnet assets transferred to your wallet",
-        description: result.unavailable.length
-          ? `Received ${result.sent.length} assets. ${result.unavailable.join(", ")} ran out and were skipped.`
-          : `Received ${result.sent.map((asset) => `${asset.amount} ${asset.symbol}`).join(", ")}.`,
+        // Symbols only: wallets show scaled replica amounts (multipliers), not raw units.
+        description: `Received ${result.sent.map((asset) => asset.symbol).join(", ")}.${
+          result.unavailable.length
+            ? ` ${result.unavailable.join(", ")} ran out and were skipped.`
+            : ""
+        }`,
       });
       void refreshStores(["positions"]);
     } catch (error) {
