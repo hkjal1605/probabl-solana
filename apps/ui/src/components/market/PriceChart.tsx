@@ -34,7 +34,7 @@ export function PriceChart({
   initialTrades?: TradeView[];
 }) {
   const query = useTrades(market?.id ?? "");
-  const [range, setRange] = useState<keyof typeof durations>("1D");
+  const [range, setRange] = useState<keyof typeof durations>("ALL");
   const [mode, setMode] = useState("YES vs NO");
   const trades = query.data ? query.trades : query.trades.length ? query.trades : initialTrades;
   const since = Math.floor(Date.now() / 60000) * 60 - durations[range];
